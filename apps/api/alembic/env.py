@@ -21,6 +21,18 @@ if database_url:
 
 target_metadata = Base.metadata
 
+# Columns maintained purely in SQL (generated tsvector) and not mirrored on the ORM models.
+_SQL_ONLY_COLUMNS = {("notes", "search_vector")}
+_SQL_ONLY_INDEXES = {"ix_notes_search_vector", "ix_notes_user_updated"}
+
+
+def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
+    if type_ == "column" and (obj.table.name, name) in _SQL_ONLY_COLUMNS:
+        return False
+    if type_ == "index" and name in _SQL_ONLY_INDEXES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -29,13 +41,19 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def _run_sync(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

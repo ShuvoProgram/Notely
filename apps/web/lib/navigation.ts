@@ -1,4 +1,4 @@
-import { Home, type LucideIcon, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Home, type LucideIcon, NotebookPen, Search, Settings, ShieldCheck, UserRound } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -14,6 +14,8 @@ export interface NavItem {
  */
 export const primaryNav: NavItem[] = [
   { href: "/app", label: "Home", icon: Home },
+  { href: "/app/notes", label: "Notes", icon: NotebookPen, prefix: true },
+  { href: "/app/search", label: "Search", icon: Search },
   { href: "/app/settings", label: "Settings", icon: Settings, prefix: true },
 ];
 

@@ -9,6 +9,7 @@ import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { FolderSidebar } from "@/features/folders/components/folder-sidebar";
 import type { User } from "@/lib/api/types";
 
 /**
@@ -33,16 +34,23 @@ export function AppShell({ user, children }: { user: User; children: React.React
             <Logo />
           </Link>
         </div>
-        <nav aria-label="Primary" className="flex-1 overflow-y-auto px-3 py-2">
-          <SidebarNav nav="primary" />
-        </nav>
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          <nav aria-label="Primary">
+            <SidebarNav nav="primary" />
+          </nav>
+          <div className="mt-6">
+            <React.Suspense>
+              <FolderSidebar />
+            </React.Suspense>
+          </div>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="hidden md:inline-flex lg:hidden" aria-label="Open navigation">
+              <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open navigation">
                 <Menu aria-hidden />
               </Button>
             </SheetTrigger>
@@ -52,9 +60,16 @@ export function AppShell({ user, children }: { user: User; children: React.React
                   <Logo />
                 </SheetTitle>
               </SheetHeader>
-              <nav aria-label="Primary" className="px-3 py-2">
-                <SidebarNav nav="primary" onNavigate={() => setOpen(false)} />
-              </nav>
+              <div className="overflow-y-auto px-3 py-2">
+                <nav aria-label="Primary">
+                  <SidebarNav nav="primary" onNavigate={() => setOpen(false)} />
+                </nav>
+                <div className="mt-6">
+                  <React.Suspense>
+                    <FolderSidebar onNavigate={() => setOpen(false)} />
+                  </React.Suspense>
+                </div>
+              </div>
             </SheetContent>
           </Sheet>
           <Link href="/app" className="rounded-md lg:hidden">

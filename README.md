@@ -5,8 +5,9 @@ Capture thoughts. Connect your work. Let AI move things forward.
 Notely is an AI-first notes workspace: a calm note-taking app with a powerful AI layer that can
 read and act across your productivity tools — always with review before anything changes.
 
-**Status:** Phase 1 (Foundation) complete — monorepo, PostgreSQL + Alembic, authentication and
-sessions, API conventions, Next.js shell and design system, Docker, health checks, tests.
+**Status:** Phases 1–2 complete — foundation (monorepo, PostgreSQL + Alembic, auth/sessions, API
+conventions, shell, design system, Docker, health checks) and Notes (TipTap editor, version-checked
+autosave with local draft recovery, folders, tags, favorites/archive/trash, full-text search).
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -35,6 +36,9 @@ docker compose up --build
 
 > If a PostgreSQL already listens on `5432` on your machine, set `POSTGRES_PORT=55432` in `.env`;
 > containers talk to each other on the internal network regardless.
+>
+> Running the Playwright suite signs up many accounts from one IP; set
+> `RATE_LIMIT_AUTH_PER_MINUTE=200` for the API while running it locally (CI does this).
 
 ## Local development (without containers for app code)
 

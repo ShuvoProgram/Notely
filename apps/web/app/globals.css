@@ -137,3 +137,133 @@
     }
   }
 }
+
+/* --- Rich text editor (TipTap) ------------------------------------------------------------- */
+.notely-editor {
+  min-height: 40vh;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+.notely-editor > * + * {
+  margin-top: 0.75em;
+}
+.notely-editor h1 {
+  font-size: 1.75rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 1.5em;
+}
+.notely-editor h2 {
+  font-size: 1.375rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-top: 1.4em;
+}
+.notely-editor h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-top: 1.2em;
+}
+.notely-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.notely-editor ul,
+.notely-editor ol {
+  padding-left: 1.5rem;
+}
+.notely-editor ul {
+  list-style: disc;
+}
+.notely-editor ol {
+  list-style: decimal;
+}
+.notely-editor li + li {
+  margin-top: 0.25em;
+}
+.notely-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.notely-editor ul[data-type="taskList"] li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.notely-editor ul[data-type="taskList"] li > label {
+  flex: 0 0 auto;
+  margin-top: 0.35em;
+}
+.notely-editor ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+}
+.notely-editor ul[data-type="taskList"] input[type="checkbox"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--card);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.notely-editor ul[data-type="taskList"] input[type="checkbox"]:checked {
+  background: var(--ai);
+  border-color: var(--ai);
+}
+.notely-editor ul[data-type="taskList"] input[type="checkbox"]:checked::after {
+  content: "";
+  width: 0.55rem;
+  height: 0.3rem;
+  border-left: 2px solid var(--primary-foreground);
+  border-bottom: 2px solid var(--primary-foreground);
+  transform: translateY(-1px) rotate(-45deg);
+}
+.notely-editor li[data-checked="true"] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+.notely-editor blockquote {
+  border-left: 3px solid var(--ai);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+}
+.notely-editor code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--muted);
+  padding: 0.15em 0.4em;
+  border-radius: 0.3rem;
+}
+.notely-editor pre {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+}
+.notely-editor pre code {
+  background: transparent;
+  padding: 0;
+}
+.notely-editor a {
+  color: var(--ai);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.notely-editor hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+.notely-editor ::selection {
+  background: var(--ai-soft);
+}

@@ -33,7 +33,7 @@ from app.services.sign_in_providers import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-auth_limit = rate_limit("auth", 10)
+auth_limit = rate_limit("auth", lambda s: s.rate_limit_auth_per_minute)
 
 
 def user_out(user: Any) -> UserOut:

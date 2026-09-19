@@ -48,7 +48,10 @@ async def test_csrf_rejects_foreign_origin(client: AsyncClient) -> None:
     assert (await client.get("/api/v1/users/me")).status_code == 200
 
 
-async def test_auth_rate_limit(client: AsyncClient) -> None:
+async def test_auth_rate_limit(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)  # pin the window
     statuses = []
     for _ in range(12):
         resp = await client.post(

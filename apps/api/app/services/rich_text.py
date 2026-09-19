@@ -1,0 +1,64 @@
+"""TipTap/ProseMirror JSON helpers. The API stores TipTap JSON as canonical rich text and
+derives plain text from it for search, AI context and indexing."""
+
+from __future__ import annotations
+
+from typing import Any
+
+BLOCK_NODES = {
+    "paragraph",
+    "heading",
+    "blockquote",
+    "codeBlock",
+    "listItem",
+    "taskItem",
+    "bulletList",
+    "orderedList",
+    "taskList",
+    "horizontalRule",
+    "table",
+    "tableRow",
+}
+
+EMPTY_DOC: dict[str, Any] = {"type": "doc", "content": [{"type": "paragraph"}]}
+
+MAX_PLAIN_TEXT = 500_000
+
+
+def is_valid_doc(doc: Any) -> bool:
+    return (
+        isinstance(doc, dict)
+        and doc.get("type") == "doc"
+        and isinstance(doc.get("content", []), list)
+    )
+
+
+def to_plain_text(doc: dict[str, Any] | None) -> str:
+    """Flatten a TipTap document to newline-separated plain text."""
+    if not doc:
+        return ""
+    parts: list[str] = []
+
+    def walk(node: dict[str, Any]) -> None:
+        node_type = node.get("type")
+        if node_type == "text":
+            parts.append(str(node.get("text", "")))
+            return
+        if node_type == "hardBreak":
+            parts.append("\n")
+            return
+        for child in node.get("content", []) or []:
+            if isinstance(child, dict):
+                walk(child)
+        if node_type in BLOCK_NODES:
+            parts.append("\n")
+
+    walk(doc)
+    text = "".join(parts)
+    lines = (line.strip() for line in text.split("\n"))
+    return "\n".join(line for line in lines if line)[:MAX_PLAIN_TEXT]
+
+
+def excerpt(text: str, length: int = 160) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= length else text[: length - 1].rstrip() + "…"

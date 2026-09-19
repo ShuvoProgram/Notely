@@ -9,7 +9,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
-from app.api.v1 import auth, users
+from app.api.v1 import auth, notes, users
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
@@ -66,6 +66,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1 = APIRouter(prefix=settings.api_prefix)
     v1.include_router(auth.router)
     v1.include_router(users.router)
+    v1.include_router(notes.notes_router)
+    v1.include_router(notes.folders_router)
+    v1.include_router(notes.tags_router)
+    v1.include_router(notes.search_router)
     app.include_router(v1)
     app.include_router(health.router)
     return app

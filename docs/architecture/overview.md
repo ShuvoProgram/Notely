@@ -70,9 +70,25 @@ inside an HTTP request.
 - Design tokens in `app/globals.css` (dark-first, green AI accent). shadcn/ui components in
   `components/ui`.
 
-## What Phase 2+ adds
+## Notes (Phase 2)
 
-Notes (TipTap editor, autosave, folders, tags, search), AI (LiteLLM client, LangGraph runs,
-approval system), integration framework (provider contract, connection storage using
+- Tables: `folders` (self-referential, cycle-checked in the service), `tags`, `notes`,
+  `note_tags`. `notes.content_json` is canonical TipTap JSON; `plain_text` is derived server-side
+  (`services/rich_text.py`) for search/AI. `notes.search_vector` is a generated `tsvector`
+  (title weight A, body weight B) with a GIN index; the ORM never writes it.
+- Lifecycle: `archived_at` and `deleted_at` (trash) are independent; purge requires trash first;
+  the worker purges trash after 30 days.
+- Autosave: `PATCH /notes/{id}` with `expected_version` → `409 NOTE_VERSION_CONFLICT` carrying
+  `current_version`. Metadata edits (favorite, folder, tags, archive) don't bump the version.
+  The web hook (`features/notes/use-autosave.ts`) debounces 900 ms, mirrors every change to
+  `localStorage` first, clears the mirror on confirmed save, and restores a draft on load when it
+  was based on the current server version. Conflicts show "Load latest / Keep mine".
+- Lists use keyset pagination (`meta.next_cursor` over `(updated_at, id)`) with `view`,
+  `folder_id`, `tag_id`, `q` filters. `/search` is the unified search endpoint; hits always carry
+  a `source` so provider results can join later without UI changes.
+
+## What Phase 3+ adds
+
+AI (LiteLLM client, LangGraph runs, approval system), integration framework (provider contract, connection storage using
 `app/core/crypto.py`, capability registry, MCP client, tool policy engine), providers, cross-app
 AI, hardening. Each phase reuses the foundations above rather than adding parallel mechanisms.

@@ -30,3 +30,16 @@ async def cleanup_expired_sessions(_: dict[str, Any]) -> int:
     deleted = int(getattr(result, "rowcount", 0) or 0)
     log.info("cleanup_expired_sessions", extra={"deleted": deleted})
     return deleted
+
+
+async def purge_trashed_notes(_: dict[str, Any]) -> int:
+    """Permanently delete notes that have sat in the trash longer than the retention window."""
+    from app.repositories.note_repository import NoteRepository
+    from app.services.note_service import TRASH_RETENTION
+
+    cutoff = utcnow() - TRASH_RETENTION
+    async with get_session_factory()() as db:
+        deleted = await NoteRepository(db).purge_trash_older_than(cutoff)
+        await db.commit()
+    log.info("purge_trashed_notes", extra={"deleted": deleted})
+    return deleted

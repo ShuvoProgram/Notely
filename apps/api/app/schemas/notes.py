@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import re
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.rich_text import is_valid_doc
+
+HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+# --- folders ------------------------------------------------------------------------------------
+
+
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: uuid.UUID | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Folder name is required")
+        return v
+
+
+class FolderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    parent_id: uuid.UUID | None = None
+    position: int | None = Field(default=None, ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("Folder name is required")
+        return v
+
+
+class FolderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    parent_id: uuid.UUID | None
+    position: int
+    note_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+# --- tags ---------------------------------------------------------------------------------------
+
+
+class TagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    color: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _norm(cls, v: str) -> str:
+        v = " ".join(v.strip().split())
+        if not v:
+            raise ValueError("Tag name is required")
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str | None) -> str | None:
+        if v is not None and not HEX_COLOR.match(v):
+            raise ValueError("Color must be #RRGGBB")
+        return v.lower() if v else v
+
+
+class TagUpdate(TagCreate):
+    name: str | None = Field(default=None, min_length=1, max_length=60)  # type: ignore[assignment]
+
+    @field_validator("name")
+    @classmethod
+    def _norm(cls, v: str | None) -> str | None:  # type: ignore[override]
+        if v is None:
+            return v
+        v = " ".join(v.strip().split())
+        if not v:
+            raise ValueError("Tag name is required")
+        return v
+
+
+class TagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    color: str | None
+    note_count: int = 0
+
+
+# --- notes --------------------------------------------------------------------------------------
+
+
+def _validate_doc(v: dict[str, Any] | None) -> dict[str, Any] | None:
+    if v is not None and not is_valid_doc(v):
+        raise ValueError("content_json must be a TipTap document")
+    return v
+
+
+class NoteCreate(BaseModel):
+    title: str = Field(default="", max_length=300)
+    content_json: dict[str, Any] | None = None
+    folder_id: uuid.UUID | None = None
+    tag_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+
+    @field_validator("content_json")
+    @classmethod
+    def _doc(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _validate_doc(v)
+
+
+class NoteUpdate(BaseModel):
+    """Partial update. `expected_version` enables optimistic concurrency for autosave."""
+
+    title: str | None = Field(default=None, max_length=300)
+    content_json: dict[str, Any] | None = None
+    folder_id: uuid.UUID | None = None
+    clear_folder: bool = False
+    tag_ids: list[uuid.UUID] | None = Field(default=None, max_length=50)
+    is_favorite: bool | None = None
+    archived: bool | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+    @field_validator("content_json")
+    @classmethod
+    def _doc(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _validate_doc(v)
+
+
+class NoteSummary(BaseModel):
+    """List representation: no body, just enough for a row."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    excerpt: str
+    folder_id: uuid.UUID | None
+    tags: list[TagOut]
+    is_favorite: bool
+    archived_at: datetime | None
+    deleted_at: datetime | None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class NoteOut(NoteSummary):
+    content_json: dict[str, Any]
+    plain_text: str
+    summary: str | None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+NoteView = Literal["active", "favorites", "archived", "trash", "all"]
+
+
+class NoteListQuery(BaseModel):
+    view: NoteView = "active"
+    folder_id: uuid.UUID | None = None
+    tag_id: uuid.UUID | None = None
+    q: str | None = Field(default=None, max_length=200)
+    cursor: str | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class SearchHit(BaseModel):
+    source: Literal["notely"]
+    kind: Literal["note"]
+    id: uuid.UUID
+    title: str
+    snippet: str
+    url: str
+    score: float
+    updated_at: datetime
+
+
+class SearchResponse(BaseModel):
+    query: str
+    hits: list[SearchHit]
+    sources: list[str]

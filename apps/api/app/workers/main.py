@@ -10,7 +10,7 @@ from arq.cron import cron
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine
-from app.workers.jobs.cleanup import cleanup_expired_sessions
+from app.workers.jobs.cleanup import cleanup_expired_sessions, purge_trashed_notes
 
 
 async def startup(_: dict[str, Any]) -> None:
@@ -24,7 +24,8 @@ async def shutdown(_: dict[str, Any]) -> None:
 class WorkerSettings:
     functions: list[Any] = []
     cron_jobs = [
-        cron(cleanup_expired_sessions, hour=None, minute=17, run_at_startup=True)  # type: ignore[arg-type]
+        cron(cleanup_expired_sessions, hour=None, minute=17, run_at_startup=True),  # type: ignore[arg-type]
+        cron(purge_trashed_notes, hour=3, minute=30),  # type: ignore[arg-type]
     ]
     on_startup = startup
     on_shutdown = shutdown

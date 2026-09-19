@@ -47,7 +47,11 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
 
 const DEFAULT_BASE = "/api/v1";
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/** Like `apiRequest` but returns the whole `{data, meta}` envelope (for paginated lists). */
+export async function apiEnvelope<T, M extends Record<string, unknown> = Record<string, unknown>>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; meta: M }> {
   const { body, headers = {}, baseUrl, ...init } = options;
   const url = `${baseUrl ?? DEFAULT_BASE}${path}`;
   const response = await fetch(url, {
@@ -63,7 +67,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   });
 
   if (response.status === 204) {
-    return undefined as T;
+    return { data: undefined as T, meta: {} as M };
   }
 
   let json: unknown = null;
@@ -82,7 +86,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     throw new ApiError(response.status, errorBody);
   }
 
-  return (json as ApiSuccess<T>).data;
+  const envelope = json as ApiSuccess<T>;
+  return { data: envelope.data, meta: (envelope.meta ?? {}) as M };
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return (await apiEnvelope<T>(path, options)).data;
 }
 
 export const api = {

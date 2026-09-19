@@ -15,6 +15,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # intentionally unreachable
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-0123456789")
 os.environ.setdefault("FRONTEND_ORIGIN", "http://localhost:3000")
+os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "10"  # tests assert the production default
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.kv import kv  # noqa: E402
@@ -34,6 +35,13 @@ async def _database() -> AsyncIterator[None]:
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+    # SQLite only enforces ON DELETE CASCADE / SET NULL with this pragma.
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _fk_on(dbapi_conn, _record):  # type: ignore[no-untyped-def]
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     configure_database(engine)

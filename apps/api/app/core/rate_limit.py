@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.exceptions import RateLimited
 from app.core.kv import kv
 
@@ -19,14 +19,25 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit(scope: str, per_minute: int | None = None) -> Callable[[Request], Awaitable[None]]:
-    """FastAPI dependency factory. Usage: `dependencies=[Depends(rate_limit("auth", 10))]`."""
+LimitSpec = int | Callable[[Settings], int] | None
+
+
+def rate_limit(scope: str, per_minute: LimitSpec = None) -> Callable[[Request], Awaitable[None]]:
+    """FastAPI dependency factory.
+
+    `per_minute` may be a number, a function of Settings (so limits stay configurable), or None
+    for the default limit.
+    Usage: `Depends(rate_limit("auth", lambda s: s.rate_limit_auth_per_minute))`.
+    """
 
     async def _dependency(request: Request) -> None:
         settings = get_settings()
         if not settings.rate_limit_enabled:
             return
-        limit = per_minute or settings.rate_limit_default_per_minute
+        if callable(per_minute):
+            limit = per_minute(settings)
+        else:
+            limit = per_minute or settings.rate_limit_default_per_minute
         window = 60
         now = time.time()
         bucket = int(now // window)
