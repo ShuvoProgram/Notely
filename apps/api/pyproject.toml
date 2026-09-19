@@ -21,6 +21,12 @@ dependencies = [
   "email-validator>=2.2",
   "python-json-logger>=2.0",
   "pgvector>=0.3",
+  "openai>=1.50",
+  "langgraph>=0.4",
+  "langgraph-checkpoint-postgres>=2.0",
+  "langchain-core>=0.3",
+  "langchain-openai>=0.3",
+  "psycopg-pool>=3.2",
 ]
 
 [dependency-groups]
@@ -45,6 +51,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
 
 [tool.mypy]
 python_version = "3.12"

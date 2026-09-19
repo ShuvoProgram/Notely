@@ -1,4 +1,4 @@
-import { Home, type LucideIcon, NotebookPen, Search, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Activity, CheckSquare, Home, type LucideIcon, NotebookPen, Search, Settings, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -16,12 +16,16 @@ export const primaryNav: NavItem[] = [
   { href: "/app", label: "Home", icon: Home },
   { href: "/app/notes", label: "Notes", icon: NotebookPen, prefix: true },
   { href: "/app/search", label: "Search", icon: Search },
+  { href: "/app/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/app/ai", label: "AI Assistant", icon: Sparkles },
   { href: "/app/settings", label: "Settings", icon: Settings, prefix: true },
 ];
 
 export const settingsNav: NavItem[] = [
   { href: "/app/settings/profile", label: "Profile", icon: UserRound },
   { href: "/app/settings/security", label: "Security", icon: ShieldCheck },
+  { href: "/app/settings/ai", label: "AI", icon: Sparkles },
+  { href: "/app/settings/activity", label: "Activity", icon: Activity },
 ];
 
 export function isActive(pathname: string, item: NavItem): boolean {

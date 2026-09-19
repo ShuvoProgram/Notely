@@ -145,3 +145,162 @@ export interface SearchResponse {
   hits: SearchHit[];
   sources: string[];
 }
+
+// --- tasks & AI (mirrors apps/api/app/schemas/{tasks,ai}.py) -----------------------------------
+
+export type TaskPriority = "none" | "low" | "medium" | "high";
+export type TaskStatus = "open" | "done";
+
+export interface Task {
+  id: string;
+  note_id: string | null;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  priority: TaskPriority;
+  status: TaskStatus;
+  source: "manual" | "ai";
+  external_provider: string | null;
+  external_task_id: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskCreateInput {
+  title: string;
+  description?: string | null;
+  due_date?: string | null;
+  priority?: TaskPriority;
+  note_id?: string | null;
+  source?: "manual" | "ai";
+}
+
+export type RiskLevel = "read" | "write" | "external_communication" | "destructive";
+export type RunStatus = "queued" | "running" | "waiting_for_approval" | "completed" | "failed" | "cancelled";
+
+export interface AISource {
+  provider: string;
+  object_id: string;
+  title: string;
+  url: string;
+}
+
+export interface AIThread {
+  id: string;
+  title: string;
+  note_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIMessage {
+  id: string;
+  role: "user" | "assistant" | "tool" | "system";
+  content: string;
+  sources: AISource[] | null;
+  run_id: string | null;
+  created_at: string;
+}
+
+export interface AIToolCall {
+  id: string;
+  call_id: string;
+  tool_name: string;
+  provider: string;
+  risk_level: RiskLevel;
+  arguments: Record<string, unknown>;
+  status: "proposed" | "approved" | "rejected" | "executed" | "failed";
+  error: string | null;
+  executed_at: string | null;
+}
+
+export interface AIApproval {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  tool_call_ids: string[];
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface AIRun {
+  id: string;
+  thread_id: string;
+  status: RunStatus;
+  model: string | null;
+  provider: string | null;
+  token_usage: Record<string, number>;
+  steps: { call_id?: string; tool?: string; label?: string; status?: string; type?: string }[];
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  tool_calls: AIToolCall[];
+  approvals: AIApproval[];
+}
+
+export interface AIThreadDetail {
+  thread: AIThread;
+  messages: AIMessage[];
+  active_run: AIRun | null;
+}
+
+export interface AIProposal {
+  call_id: string;
+  tool_name: string;
+  provider: string;
+  risk: RiskLevel;
+  summary: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Events streamed by POST /ai/chat and /ai/approve. */
+export type AIChatEvent =
+  | { type: "run"; run_id: string; thread_id: string; status: RunStatus }
+  | { type: "token"; text: string }
+  | { type: "step"; call_id: string; tool: string; label: string; status: "running" | "completed" | "failed"; result_preview?: string }
+  | { type: "approval_required"; approval_id: string; run_id: string; proposals: AIProposal[] }
+  | { type: "message"; message_id: string; content: string; sources: AISource[] }
+  | { type: "done"; run_id: string; status: RunStatus; usage: Record<string, number> }
+  | { type: "error"; code: string; message: string; details?: Record<string, unknown> };
+
+export type NoteAIAction = "summarize" | "improve" | "key_points" | "extract_tasks" | "custom";
+
+export interface ExtractedTask {
+  title: string;
+  due_date: string | null;
+  priority: TaskPriority;
+}
+
+/** Events streamed by POST /ai/actions. */
+export type NoteActionEvent =
+  | { type: "start"; action: NoteAIAction; note_id: string }
+  | { type: "token"; text: string }
+  | { type: "tasks"; tasks: ExtractedTask[] }
+  | { type: "done"; content: string; action: NoteAIAction }
+  | { type: "error"; code: string; message: string; details?: Record<string, unknown> };
+
+export interface AIPreferences {
+  model: string | null;
+  summary_length: "short" | "medium" | "long";
+  confirm_reads: boolean;
+}
+
+export interface AISettings {
+  provider: string;
+  models: { id: string; label: string }[];
+  preferences: AIPreferences;
+  tools: { name: string; risk: RiskLevel; provider: string; description: string }[];
+}
+
+export interface AuditEvent {
+  id: string;
+  provider: string;
+  action: string;
+  tool_name: string | null;
+  risk_level: RiskLevel;
+  status: string;
+  run_id: string | null;
+  request_metadata: Record<string, unknown>;
+  created_at: string;
+}

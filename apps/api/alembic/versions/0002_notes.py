@@ -22,15 +22,23 @@ depends_on: str | Sequence[str] | None = None
 def _scoped_columns() -> list[sa.Column]:
     return [
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        ),
+        sa.Column(
+            "user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
     ]
 
 
 def _timestamps() -> list[sa.Column]:
     return [
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     ]
 
 
@@ -39,7 +47,9 @@ def upgrade() -> None:
         "folders",
         *_scoped_columns(),
         sa.Column("name", sa.String(length=120), nullable=False),
-        sa.Column("parent_id", sa.Uuid(), sa.ForeignKey("folders.id", ondelete="CASCADE"), nullable=True),
+        sa.Column(
+            "parent_id", sa.Uuid(), sa.ForeignKey("folders.id", ondelete="CASCADE"), nullable=True
+        ),
         sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
         *_timestamps(),
         sa.UniqueConstraint("user_id", "parent_id", "name", name="uq_folders_user_parent_name"),
@@ -67,7 +77,9 @@ def upgrade() -> None:
         sa.Column("plain_text", sa.Text(), nullable=False, server_default=""),
         sa.Column("summary", sa.Text(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(), nullable=False, server_default="{}"),
-        sa.Column("folder_id", sa.Uuid(), sa.ForeignKey("folders.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "folder_id", sa.Uuid(), sa.ForeignKey("folders.id", ondelete="SET NULL"), nullable=True
+        ),
         sa.Column("is_favorite", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
@@ -94,9 +106,15 @@ def upgrade() -> None:
 
     op.create_table(
         "note_tags",
-        sa.Column("note_id", sa.Uuid(), sa.ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("tag_id", sa.Uuid(), sa.ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "note_id", sa.Uuid(), sa.ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True
+        ),
+        sa.Column(
+            "tag_id", sa.Uuid(), sa.ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+        ),
+        sa.Column(
+            "user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
     )
     op.create_index("ix_note_tags_user_id", "note_tags", ["user_id"])
 

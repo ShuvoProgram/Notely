@@ -73,6 +73,7 @@ jobs:
       - run: docker compose up -d --build --wait postgres redis migrate api web
         env:
           RATE_LIMIT_AUTH_PER_MINUTE: "500"
+          AI_PROVIDER: fake
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

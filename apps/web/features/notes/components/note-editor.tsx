@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NoteAIMenu, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { RichTextEditor } from "@/features/notes/components/rich-text-editor";
 import { SaveStatusIndicator } from "@/features/notes/components/save-status";
@@ -37,7 +38,7 @@ import { useAutosave } from "@/features/notes/use-autosave";
 import type { Editor } from "@tiptap/react";
 
 import { ApiError } from "@/lib/api/client";
-import type { Note, TipTapDoc } from "@/lib/api/types";
+import type { Note, NoteAIAction, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export function NoteEditor({ noteId }: { noteId: string }) {
@@ -82,6 +83,8 @@ function LoadedNoteEditor({ note }: { note: Note }) {
   });
   const [title, setTitle] = React.useState(initial.title);
   const editorRef = React.useRef<Editor | null>(null);
+  const [editorInstance, setEditorInstance] = React.useState<Editor | null>(null);
+  const [aiAction, setAiAction] = React.useState<NoteAIAction | null>(null);
   const restoredOnce = React.useRef(false);
   React.useEffect(() => {
     if (initial.restored && !restoredOnce.current) {
@@ -155,6 +158,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         />
         <div className="flex shrink-0 items-center gap-1">
           <SaveStatusIndicator status={autosave.status} message={autosave.errorMessage} />
+          <NoteAIMenu disabled={readOnly} onPick={(action) => setAiAction(action)} />
           <Button
             variant="ghost"
             size="icon"
@@ -253,6 +257,10 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         <span>Edited {new Date(note.updated_at).toLocaleString()}</span>
       </div>
 
+      {aiAction ? (
+        <NoteAIPanel key={aiAction} noteId={note.id} action={aiAction} editor={editorInstance} onClose={() => setAiAction(null)} />
+      ) : null}
+
       <RichTextEditor
         documentKey={note.id}
         content={initial.content}
@@ -260,6 +268,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         onChange={onBodyChange}
         onReady={(editor) => {
           editorRef.current = editor;
+          setEditorInstance(editor);
         }}
       />
 

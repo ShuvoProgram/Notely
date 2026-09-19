@@ -32,14 +32,20 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("kind", tenant_kind, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
 
     op.create_table(
         "users",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("password_hash", sa.String(length=255), nullable=True),
@@ -47,8 +53,12 @@ def upgrade() -> None:
         sa.Column("avatar_url", sa.String(length=2048), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index("ix_users_tenant_id", "users", ["tenant_id"])
     op.create_index("ix_users_email", "users", ["email"], unique=True)
@@ -56,14 +66,24 @@ def upgrade() -> None:
     op.create_table(
         "auth_identities",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        ),
+        sa.Column(
+            "user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("provider", sign_in_provider, nullable=False),
         sa.Column("provider_subject", sa.String(length=255), nullable=False),
         sa.Column("email", sa.String(length=320), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("provider", "provider_subject", name="uq_auth_identities_provider_subject"),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.UniqueConstraint(
+            "provider", "provider_subject", name="uq_auth_identities_provider_subject"
+        ),
     )
     op.create_index("ix_auth_identities_tenant_id", "auth_identities", ["tenant_id"])
     op.create_index("ix_auth_identities_user_id", "auth_identities", ["user_id"])
@@ -71,8 +91,12 @@ def upgrade() -> None:
     op.create_table(
         "user_sessions",
         sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "tenant_id", sa.Uuid(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        ),
+        sa.Column(
+            "user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("user_agent", sa.String(length=512), nullable=True),
         sa.Column("ip_address", sa.String(length=64), nullable=True),

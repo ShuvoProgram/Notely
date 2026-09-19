@@ -3,12 +3,12 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, TZDateTime, UUIDPrimaryKeyMixin, utcnow
+from app.db.base import Base, JSONType, TimestampMixin, TZDateTime, UUIDPrimaryKeyMixin, utcnow
 
 if TYPE_CHECKING:
     from app.models.tenant import Tenant
@@ -27,6 +27,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    # User-level preference memory (AI model, summary length, ...). Never derived from note content.
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False, default=dict)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     identities: Mapped[list[AuthIdentity]] = relationship(

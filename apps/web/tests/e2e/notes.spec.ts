@@ -29,7 +29,7 @@ test("create a note, autosave, reload, and find it via search", async ({ page })
   await body.pressSequentially("- Email the team about the launching timeline");
 
   // Autosave lands within the debounce window and reports back.
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/\d+ words/)).toContainText("13 words");
 
   // Reload: content came from the server, not the DOM.
@@ -71,7 +71,7 @@ test("tags, folders, favorites, archive and trash", async ({ page, isMobile }) =
   await page.getByRole("complementary", { name: "Notes list" }).getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/app\/notes\/[0-9a-f-]{36}/);
   await page.getByLabel("Note title").fill("Roadmap");
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("Projects", { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // Tag: create from the picker.
@@ -115,7 +115,7 @@ test("unsaved draft survives a crash-like reload", async ({ page }) => {
   await page.getByRole("button", { name: "Create your first note" }).click();
   await expect(page).toHaveURL(/\/app\/notes\/[0-9a-f-]{36}$/);
   await page.getByLabel("Note title").fill("Draft title");
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
 
   // Block the save endpoint, type more, then reload before the request can succeed.
   await page.route("**/api/v1/notes/*", (route) => (route.request().method() === "PATCH" ? route.abort() : route.continue()));
@@ -129,7 +129,7 @@ test("unsaved draft survives a crash-like reload", async ({ page }) => {
 
   await expect(page.getByText("Restored unsaved changes")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Note body" })).toContainText("Only in the browser so far");
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Note body" })).toContainText("Only in the browser so far");
 });

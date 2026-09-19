@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_auth_per_minute: int = 10
     rate_limit_default_per_minute: int = 120
+    rate_limit_ai_per_minute: int = 30
 
     # Sign-in providers (enabled only when both id and secret are set)
     oauth_google_client_id: str = ""
@@ -53,9 +54,15 @@ class Settings(BaseSettings):
     oauth_microsoft_client_secret: str = ""
     oauth_microsoft_tenant: str = "common"
 
-    # LLM gateway (used from Phase 3 onwards; validated in readiness when set)
-    litellm_api_base: str = ""
+    # AI. The application only ever talks to the LiteLLM gateway (OpenAI-compatible).
+    ai_provider: Literal["litellm", "fake"] = "litellm"  # "fake" = scripted, dev/test only
+    litellm_api_base: str = "http://localhost:4000"
     litellm_api_key: str = ""
+    ai_model_default: str = "notely-default"  # aliases defined in infra/litellm/config.yaml
+    ai_model_fast: str = "notely-fast"
+    ai_max_tool_iterations: int = 8
+    ai_request_timeout_seconds: int = 90
+    ai_checkpointer: Literal["postgres", "memory"] = "postgres"
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -82,6 +89,10 @@ class Settings(BaseSettings):
                 problems.append("ENCRYPTION_KEY is not set")
             if self.debug:
                 problems.append("DEBUG must be false in production")
+            if self.ai_provider == "fake":
+                problems.append("AI_PROVIDER=fake is not allowed in production")
+            if self.ai_checkpointer == "memory":
+                problems.append("AI_CHECKPOINTER=memory is not allowed in production")
         if self.encryption_key:
             from app.core.crypto import is_valid_key
 

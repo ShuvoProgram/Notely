@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.checkpoint import close_checkpointer, init_checkpointer
 from app.api import health
-from app.api.v1 import auth, notes, users
+from app.api.v1 import ai, auth, notes, tasks, users
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
@@ -35,7 +36,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             log.error("configuration_problem", extra={"problem": problem})
         if problems and settings.is_production:
             raise RuntimeError("Refusing to start with invalid production configuration")
+        await init_checkpointer()
         yield
+        await close_checkpointer()
         await close_redis()
         await dispose_engine()
 
@@ -70,6 +73,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(notes.folders_router)
     v1.include_router(notes.tags_router)
     v1.include_router(notes.search_router)
+    v1.include_router(tasks.router)
+    v1.include_router(ai.router)
+    v1.include_router(ai.audit_router)
+    if settings.ai_provider == "fake" and not settings.is_production:
+        from app.api.v1 import ai_dev
+
+        v1.include_router(ai_dev.router)
     app.include_router(v1)
     app.include_router(health.router)
     return app

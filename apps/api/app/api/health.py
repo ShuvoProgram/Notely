@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Response, status
 
+from app.ai.health import ai_gateway_healthy
 from app.core.config import get_settings
 from app.core.kv import redis_healthy
 from app.db.session import database_healthy
@@ -26,6 +27,7 @@ async def ready(response: Response) -> dict[str, Any]:
         "database": await database_healthy(),
         "redis": await redis_healthy(),
         "configuration": not settings.validate_for_runtime(),
+        "ai_gateway": await ai_gateway_healthy(),
     }
     healthy = all(checks.values())
     if not healthy:

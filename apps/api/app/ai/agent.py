@@ -1,0 +1,255 @@
+"""The Notely agent graph.
+
+    agent ──(tool calls?)──► tools ──► agent ──► ... ──► END
+                             │
+                             └─ interrupt() when any call needs human approval
+
+Nodes receive a `Runtime[AgentContext]`; the context carries the DB session, user and run id
+and is *not* checkpointed. State (messages, sources) is checkpointed per thread so a run can
+pause for approval and resume later.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
+from langgraph.graph import END, START, StateGraph, add_messages
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
+from langgraph.types import interrupt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai.policy import ToolPolicyEngine, ValidatedCall
+from app.ai.prompts import assistant_system_prompt
+from app.ai.tools.base import ToolContext, ToolRegistry
+from app.core.exceptions import APIError
+from app.core.logging import get_logger
+from app.db.base import utcnow
+from app.models.ai import RiskLevel
+from app.models.user import User
+from app.services.audit_service import AuditService
+
+log = get_logger(__name__)
+
+
+def _merge_sources(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = {(s.get("provider"), s.get("object_id")) for s in left}
+    merged = list(left)
+    for s in right:
+        key = (s.get("provider"), s.get("object_id"))
+        if key not in seen:
+            seen.add(key)
+            merged.append(s)
+    return merged
+
+
+class AgentState(TypedDict, total=False):
+    messages: Annotated[list[BaseMessage], add_messages]
+    sources: Annotated[list[dict[str, Any]], _merge_sources]
+    iterations: int
+
+
+@dataclass
+class AgentContext:
+    user: User
+    db: AsyncSession
+    run_id: uuid.UUID
+    model: BaseChatModel
+    registry: ToolRegistry
+    policy: ToolPolicyEngine
+    max_iterations: int = 8
+
+
+@dataclass(frozen=True)
+class Proposal:
+    """What the user is asked to approve. Serialisable; lives in the interrupt payload."""
+
+    call_id: str
+    tool_name: str
+    provider: str
+    risk: str
+    summary: str
+    arguments: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "tool_name": self.tool_name,
+            "provider": self.provider,
+            "risk": self.risk,
+            "summary": self.summary,
+            "arguments": self.arguments,
+        }
+
+
+async def agent_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
+    ctx = runtime.context
+    iterations = state.get("iterations", 0)
+    if iterations >= ctx.max_iterations:
+        return {
+            "messages": [
+                AIMessage(
+                    content="I've hit the step limit for this request. Try narrowing it down."
+                )
+            ],
+            "iterations": iterations,
+        }
+    model = ctx.model.bind_tools(ctx.registry.openai_schemas())
+    system = SystemMessage(content=assistant_system_prompt(ctx.user.display_name))
+    response = await model.ainvoke([system, *state.get("messages", [])])
+    return {"messages": [response], "iterations": iterations + 1}
+
+
+def route_after_agent(state: AgentState) -> str:
+    last = state["messages"][-1] if state.get("messages") else None
+    if isinstance(last, AIMessage) and last.tool_calls:
+        return "tools"
+    return END
+
+
+async def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
+    ctx = runtime.context
+    writer = get_stream_writer()
+    last = state["messages"][-1]
+    assert isinstance(last, AIMessage)
+
+    accepted, rejected = ctx.policy.validate_calls(ctx.user, [dict(tc) for tc in last.tool_calls])
+    outputs: list[BaseMessage] = [
+        ToolMessage(
+            content=json.dumps({"error": r.reason}), tool_call_id=r.call_id, name=r.tool_name
+        )
+        for r in rejected
+    ]
+
+    needs_approval = [c for c in accepted if c.decision.requires_confirmation]
+    approved_ids: set[str] = {c.call_id for c in accepted if not c.decision.requires_confirmation}
+    if needs_approval:
+        payload = {
+            "type": "approval_required",
+            "proposals": [
+                Proposal(
+                    call_id=c.call_id,
+                    tool_name=c.spec.name,
+                    provider=c.spec.provider,
+                    risk=c.spec.risk.value,
+                    summary=c.spec.summarize(c.args),
+                    arguments=c.args.model_dump(mode="json"),
+                ).to_dict()
+                for c in needs_approval
+            ],
+        }
+        # Pauses the graph; on resume `decision` is the runner's Command(resume=...) value.
+        decision = interrupt(payload)
+        approved_ids |= set(decision.get("approved", []))
+        for c in needs_approval:
+            if c.call_id not in approved_ids:
+                outputs.append(
+                    ToolMessage(
+                        content=json.dumps(
+                            {"declined": True, "message": "The user declined this action."}
+                        ),
+                        tool_call_id=c.call_id,
+                        name=c.spec.name,
+                    )
+                )
+
+    sources: list[dict[str, Any]] = []
+    for call in accepted:
+        if call.call_id not in approved_ids:
+            continue
+        result = await _execute(ctx, call, writer)
+        sources.extend(result.pop("sources", []) or [])
+        outputs.append(
+            ToolMessage(
+                content=json.dumps(result, default=str),
+                tool_call_id=call.call_id,
+                name=call.spec.name,
+            )
+        )
+    return {"messages": outputs, "sources": sources}
+
+
+async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[str, Any]:
+    spec = call.spec
+    label = spec.summarize(call.args)
+    writer(
+        {
+            "type": "step",
+            "call_id": call.call_id,
+            "tool": spec.name,
+            "label": label,
+            "status": "running",
+        }
+    )
+    audit = AuditService(ctx.db)
+    tool_ctx = ToolContext(user=ctx.user, db=ctx.db, run_id=ctx.run_id)
+    try:
+        result = await spec.handler(tool_ctx, call.args)
+        status = "completed"
+    except APIError as exc:
+        result = {"error": exc.message, "code": exc.code}
+        status = "failed"
+    except Exception:  # noqa: BLE001 — never leak internals to the model or the user
+        log.exception("tool_execution_failed", extra={"tool": spec.name, "run_id": str(ctx.run_id)})
+        result = {"error": "The tool failed unexpectedly."}
+        status = "failed"
+    await audit.record(
+        ctx.user,
+        provider=spec.provider,
+        action=spec.capability,
+        tool_name=spec.name,
+        risk_level=spec.risk,
+        status=status,
+        run_id=ctx.run_id,
+        request_metadata={"summary": label, "arg_keys": sorted(call.args.model_dump().keys())},
+        result_metadata={"ok": status == "completed", "keys": sorted(result.keys())[:10]},
+    )
+    await ctx.db.commit()
+    writer(
+        {
+            "type": "step",
+            "call_id": call.call_id,
+            "tool": spec.name,
+            "label": label,
+            "status": status,
+            "result_preview": _preview(result),
+            "executed_at": utcnow().isoformat(),
+        }
+    )
+    return result
+
+
+def _preview(result: dict[str, Any]) -> str:
+    if "error" in result:
+        return str(result["error"])
+    if "results" in result:
+        return f"{len(result['results'])} result(s)"
+    if "notes" in result:
+        return f"{len(result['notes'])} note(s)"
+    if "tasks" in result:
+        return f"{len(result['tasks'])} task(s)"
+    if "title" in result:
+        return str(result["title"])
+    return "done"
+
+
+def build_graph(
+    checkpointer: BaseCheckpointSaver[Any],
+) -> CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]:
+    graph = StateGraph(AgentState, context_schema=AgentContext)
+    graph.add_node("agent", agent_node)
+    graph.add_node("tools", tools_node)
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
+    graph.add_edge("tools", "agent")
+    return graph.compile(checkpointer=checkpointer)
+
+
+__all__ = ["AgentContext", "AgentState", "Proposal", "RiskLevel", "build_graph"]

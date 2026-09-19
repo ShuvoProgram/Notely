@@ -27,6 +27,9 @@ _SQL_ONLY_INDEXES = {"ix_notes_search_vector", "ix_notes_user_updated"}
 
 
 def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-untyped-def]
+    # LangGraph manages its own checkpoint tables (AsyncPostgresSaver.setup()).
+    if type_ == "table" and name.startswith("checkpoint"):
+        return False
     if type_ == "column" and (obj.table.name, name) in _SQL_ONLY_COLUMNS:
         return False
     if type_ == "index" and name in _SQL_ONLY_INDEXES:

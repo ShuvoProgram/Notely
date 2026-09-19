@@ -5,9 +5,9 @@ Capture thoughts. Connect your work. Let AI move things forward.
 Notely is an AI-first notes workspace: a calm note-taking app with a powerful AI layer that can
 read and act across your productivity tools — always with review before anything changes.
 
-**Status:** Phases 1–2 complete — foundation (monorepo, PostgreSQL + Alembic, auth/sessions, API
-conventions, shell, design system, Docker, health checks) and Notes (TipTap editor, version-checked
-autosave with local draft recovery, folders, tags, favorites/archive/trash, full-text search).
+**Status:** Phases 1–3 complete — foundation, Notes (TipTap editor, version-checked autosave with
+draft recovery, folders, tags, full-text search) and AI (LiteLLM gateway, LangGraph agent with
+tool policy + human approval, streaming chat, note actions, tasks, audit log).
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -83,6 +83,19 @@ pnpm --filter web typecheck && pnpm --filter web lint
 # Web: end-to-end (needs a running stack on :3000/:8000)
 pnpm --filter web test:e2e
 ```
+
+## AI
+
+Model calls go through the LiteLLM gateway (`infra/litellm/config.yaml` maps the `notely-*`
+aliases to providers). Put at least one provider key in `.env` (`ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`) and the assistant works end to end. Without a key, set `AI_PROVIDER=fake` for a
+scripted model — tests and the e2e suite use it; production refuses it.
+
+Write actions (create note/task, complete task) always pause for review; reads run automatically.
+Every tool execution is recorded at `/app/settings/activity` → `GET /api/v1/audit`.
+
+> Windows dev: the Postgres checkpointer needs a selector event loop — run uvicorn with
+> `--reload` (as `.claude/launch.json` does) or use Docker.
 
 ## Secrets
 

@@ -16,6 +16,8 @@ os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # intentionally unr
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-0123456789")
 os.environ.setdefault("FRONTEND_ORIGIN", "http://localhost:3000")
 os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "10"  # tests assert the production default
+os.environ["AI_PROVIDER"] = "fake"
+os.environ["AI_CHECKPOINTER"] = "memory"
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.kv import kv  # noqa: E402
@@ -53,10 +55,28 @@ async def _database() -> AsyncIterator[None]:
 
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
+    from app.ai import checkpoint
+
+    await checkpoint.close_checkpointer()
+    await checkpoint.init_checkpointer()
     app = create_app(get_settings())
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as c:
         yield c
+    await checkpoint.close_checkpointer()
+
+
+async def read_sse(response: Any) -> list[dict[str, Any]]:
+    """Collect SSE events from an httpx response body."""
+    import json
+
+    events: list[dict[str, Any]] = []
+    body = response.text if hasattr(response, "text") else (await response.aread()).decode()
+    for block in body.split("\n\n"):
+        for line in block.splitlines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+    return events
 
 
 async def signup(

@@ -87,8 +87,38 @@ inside an HTTP request.
   `folder_id`, `tag_id`, `q` filters. `/search` is the unified search endpoint; hits always carry
   a `source` so provider results can join later without UI changes.
 
-## What Phase 3+ adds
+## AI (Phase 3)
 
-AI (LiteLLM client, LangGraph runs, approval system), integration framework (provider contract, connection storage using
+```
+POST /ai/chat ──► AIRunner ──► LangGraph graph ──► agent (LLM via LiteLLM, tools bound)
+      SSE ◄──────── events ◄── │                       │ tool calls
+                               │              tools ◄──┘
+                               │   ToolPolicyEngine.validate_calls → read: execute
+                               │                                   → write: interrupt()
+                               │   → ai_approvals/ai_tool_calls rows, run = waiting_for_approval
+POST /ai/approve ──► Command(resume={approved}) ──► execute approved, ToolMessage for declined
+```
+
+- `app/ai/llm.py`: `ChatOpenAI` pointed at the gateway (aliases only), or `ScriptedChatModel`
+  when `AI_PROVIDER=fake` (dev/test; per-user scripts via `POST /ai/_dev/script`).
+- `app/ai/tools/`: `ToolSpec` (schema, risk, capability, handler, human summary) + registry.
+  Read tools wrap content in `<untrusted_content>`; the system prompt says it is data.
+- `app/ai/policy.py`: read → auto, write/external/destructive → confirmation (users can only
+  tighten). Invalid/unknown tool calls become error ToolMessages, never executions.
+- `app/ai/agent.py`: `agent ⇄ tools` graph, `Runtime[AgentContext]` carries db/user (not
+  checkpointed), `interrupt()` pauses for approval, `durability="sync"` so a paused run survives a
+  restart. Checkpoints live in Postgres (`AsyncPostgresSaver`, tables `checkpoint*`).
+- `app/ai/runner.py`: persists threads/messages/runs/tool calls/approvals, emits SSE events
+  (`run, token, step, approval_required, message, done, error`), honours cancel via KV flag.
+  Step events are buffered while a node runs (single DB session).
+- `app/ai/actions.py`: note actions stream a *suggestion*; the client applies Insert/Replace.
+- `audit_events`: one row per tool execution with metadata only.
+- Web: `lib/api/sse.ts` (POST-SSE reader), `features/ai/use-chat.ts` (event reducer),
+  `ApprovalCard` (per-item checkboxes; "Approve n of m"), `NoteAIPanel`, `/app/tasks`,
+  `/app/settings/ai`.
+
+## What Phase 4+ adds
+
+Integration framework (provider contract, connection storage using
 `app/core/crypto.py`, capability registry, MCP client, tool policy engine), providers, cross-app
 AI, hardening. Each phase reuses the foundations above rather than adding parallel mechanisms.
