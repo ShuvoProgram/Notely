@@ -14,6 +14,13 @@ from app.models.ai import (
     RunStatus,
     ToolCallStatus,
 )
+from app.models.integration import (
+    ConnectionStatus,
+    ExternalItem,
+    Integration,
+    UserConnection,
+    WebhookEvent,
+)
 from app.models.note import Folder, Note, NoteTag, Tag
 from app.models.task import Task, TaskPriority, TaskSource, TaskStatus
 from app.models.tenant import Tenant, TenantKind
@@ -29,7 +36,10 @@ __all__ = [
     "AuditEvent",
     "AuthIdentity",
     "Base",
+    "ConnectionStatus",
+    "ExternalItem",
     "Folder",
+    "Integration",
     "MessageRole",
     "Note",
     "NoteTag",
@@ -45,5 +55,7 @@ __all__ = [
     "TenantKind",
     "ToolCallStatus",
     "User",
+    "UserConnection",
     "UserSession",
+    "WebhookEvent",
 ]

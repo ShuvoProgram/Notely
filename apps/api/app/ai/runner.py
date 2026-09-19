@@ -26,7 +26,7 @@ from app.ai.agent import AgentContext, build_graph
 from app.ai.checkpoint import get_checkpointer
 from app.ai.llm import get_chat_model, provider_name, resolve_model_alias
 from app.ai.policy import ToolPolicyEngine
-from app.ai.tools import get_tool_registry
+from app.ai.tools import build_registry, get_tool_registry
 from app.core.config import Settings
 from app.core.exceptions import Conflict, NotFound
 from app.core.kv import kv
@@ -261,13 +261,18 @@ class AIRunner:
             "status": run.status.value,
         }
         model = get_chat_model(run.model, settings=self.settings, script_key=str(user.id))
+        # Tool discovery is dynamic: built-ins plus whatever the user's connections offer today.
+        from app.services.connection_service import ConnectionService
+
+        provider_tools = await ConnectionService(self.db, self.settings).tools_for_user(user)
+        registry = build_registry(provider_tools)
         ctx = AgentContext(
             user=user,
             db=self.db,
             run_id=run.id,
             model=model,
-            registry=self.registry,
-            policy=self.policy,
+            registry=registry,
+            policy=ToolPolicyEngine(registry),
             max_iterations=self.settings.ai_max_tool_iterations,
         )
         graph = build_graph(get_checkpointer())

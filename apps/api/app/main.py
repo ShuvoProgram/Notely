@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.checkpoint import close_checkpointer, init_checkpointer
 from app.api import health
-from app.api.v1 import ai, auth, notes, tasks, users
+from app.api.v1 import ai, auth, integrations, notes, tasks, users
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
@@ -20,9 +20,20 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.db.session import dispose_engine
+from app.db.session import dispose_engine, get_session_factory
+from app.workers.queue import close_queue
 
 log = get_logger(__name__)
+
+
+async def _sync_integration_catalog(settings: Settings) -> None:
+    from app.services.connection_service import ConnectionService
+
+    try:
+        async with get_session_factory()() as db:
+            await ConnectionService(db, settings).ensure_catalog()
+    except Exception:  # noqa: BLE001 — a missing table before migrations must not block startup
+        log.warning("integration_catalog_sync_skipped")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -37,7 +48,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if problems and settings.is_production:
             raise RuntimeError("Refusing to start with invalid production configuration")
         await init_checkpointer()
+        await _sync_integration_catalog(settings)
         yield
+        await close_queue()
         await close_checkpointer()
         await close_redis()
         await dispose_engine()
@@ -76,6 +89,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(tasks.router)
     v1.include_router(ai.router)
     v1.include_router(ai.audit_router)
+    v1.include_router(integrations.router)
+    v1.include_router(integrations.oauth_router)
+    v1.include_router(integrations.webhook_router)
     if settings.ai_provider == "fake" and not settings.is_production:
         from app.api.v1 import ai_dev
 

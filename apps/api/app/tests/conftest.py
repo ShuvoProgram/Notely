@@ -18,12 +18,16 @@ os.environ.setdefault("FRONTEND_ORIGIN", "http://localhost:3000")
 os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "10"  # tests assert the production default
 os.environ["AI_PROVIDER"] = "fake"
 os.environ["AI_CHECKPOINTER"] = "memory"
+# Deterministic Fernet key so encrypted-at-rest assertions are stable.
+os.environ["ENCRYPTION_KEY"] = "8bVJ7u2Q9mJmZcJ3b8lZ5G3Q0eVfG2Yg2b8nQx4bY9k="
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.kv import kv  # noqa: E402
 from app.db.session import configure_database, dispose_engine  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models import Base  # noqa: E402
+
+pytest_plugins = ["app.tests.integrations_fixtures"]
 
 ORIGIN = {"Origin": "http://localhost:3000"}
 
@@ -49,6 +53,10 @@ async def _database() -> AsyncIterator[None]:
     configure_database(engine)
     kv.reset()
     kv.force_memory()
+    from app.workers import queue
+
+    queue.reset()
+    queue.force_memory()
     yield
     await dispose_engine()
 

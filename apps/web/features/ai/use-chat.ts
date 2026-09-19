@@ -137,6 +137,7 @@ export function useChat(initialThreadId: string | null) {
               sources: event.sources.length ? event.sources : null,
               run_id: s.runId,
               created_at: new Date().toISOString(),
+              steps: s.live?.steps.length ? s.live.steps : undefined,
             };
             return { ...s, messages: [...s.messages, message], live: null };
           }

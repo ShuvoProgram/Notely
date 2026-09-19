@@ -33,6 +33,14 @@ log = get_logger(__name__)
 
 STATE_TTL_SECONDS = 600
 
+# Tests inject an httpx MockTransport here; production uses real HTTP.
+_http_transport: httpx.AsyncBaseTransport | None = None
+
+
+def set_http_transport(transport: httpx.AsyncBaseTransport | None) -> None:
+    global _http_transport
+    _http_transport = transport
+
 
 @dataclass(frozen=True)
 class OAuthEndpoints:
@@ -135,7 +143,7 @@ class OAuthClient:
         if verifier:
             data["code_verifier"] = verifier
         try:
-            async with httpx.AsyncClient(timeout=15) as http:
+            async with httpx.AsyncClient(timeout=15, transport=_http_transport) as http:
                 resp = await http.post(
                     self.config.endpoints.token_url,
                     data=data,
@@ -199,7 +207,7 @@ class OAuthClient:
         if not self.config.endpoints.userinfo_url:
             return {}
         try:
-            async with httpx.AsyncClient(timeout=15) as http:
+            async with httpx.AsyncClient(timeout=15, transport=_http_transport) as http:
                 resp = await http.get(
                     self.config.endpoints.userinfo_url,
                     headers={"Authorization": f"Bearer {access_token}"},

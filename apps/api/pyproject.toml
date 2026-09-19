@@ -27,6 +27,8 @@ dependencies = [
   "langchain-core>=0.3",
   "langchain-openai>=0.3",
   "psycopg-pool>=3.2",
+  "mcp>=1.10",
+  "jsonschema>=4.23",
 ]
 
 [dependency-groups]

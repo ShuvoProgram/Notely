@@ -9,9 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ValidationError
-
-from app.ai.tools.base import ToolRegistry, ToolSpec
+from app.ai.tools.base import ToolArgumentError, ToolRegistry, ToolSpec
 from app.models.ai import RiskLevel
 from app.models.user import User
 
@@ -77,11 +75,8 @@ class ToolPolicyEngine:
             raw_args = call.get("args") or {}
             try:
                 args = spec.parse_args(raw_args if isinstance(raw_args, dict) else {})
-            except ValidationError as exc:
-                problems = "; ".join(
-                    f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
-                )
-                rejected.append(RejectedCall(call_id, name, f"Invalid arguments: {problems}"))
+            except ToolArgumentError as exc:
+                rejected.append(RejectedCall(call_id, name, f"Invalid arguments: {exc}"))
                 continue
             decision = self.evaluate(user, spec)
             if not decision.allowed:

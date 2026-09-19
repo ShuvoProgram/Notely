@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.ai.actions import NoteActionRequest, NoteActionService
 from app.ai.llm import provider_name
 from app.ai.runner import AIRunner, AIThreadService
-from app.ai.tools import get_tool_registry
+from app.ai.tools import build_registry
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.api.sse import sse_response
 from app.core.rate_limit import rate_limit
@@ -127,7 +127,10 @@ async def cancel_run(
 
 
 @router.get("/settings", response_model=Envelope[AISettingsOut])
-async def get_ai_settings(ctx: CurrentAuth, settings: SettingsDep) -> dict[str, Any]:
+async def get_ai_settings(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) -> dict[str, Any]:
+    from app.services.connection_service import ConnectionService
+
+    registry = build_registry(await ConnectionService(db, settings).tools_for_user(ctx.user))
     prefs = (
         (ctx.user.preferences or {}).get("ai", {}) if isinstance(ctx.user.preferences, dict) else {}
     )
@@ -146,7 +149,7 @@ async def get_ai_settings(ctx: CurrentAuth, settings: SettingsDep) -> dict[str, 
                     "provider": t.provider,
                     "description": t.description,
                 }
-                for t in get_tool_registry().all()
+                for t in registry.all()
             ],
         )
     )

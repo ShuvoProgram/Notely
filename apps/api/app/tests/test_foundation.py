@@ -66,7 +66,7 @@ async def test_auth_rate_limit(client: AsyncClient, monkeypatch: pytest.MonkeyPa
     assert "Retry-After" in resp.headers
 
 
-def test_crypto_roundtrip_and_key_validation() -> None:
+def test_crypto_roundtrip_and_key_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     key = crypto.generate_key()
     assert crypto.is_valid_key(key)
     assert not crypto.is_valid_key("not-a-key")
@@ -75,8 +75,10 @@ def test_crypto_roundtrip_and_key_validation() -> None:
     assert crypto.decrypt(token, key=key) == "xoxb-secret"
     with pytest.raises(crypto.EncryptionError):
         crypto.decrypt(token, key=crypto.generate_key())
+    # With no key configured anywhere, encryption must refuse rather than silently degrade.
+    monkeypatch.setattr(crypto, "get_settings", lambda: type("S", (), {"encryption_key": ""})())
     with pytest.raises(crypto.EncryptionError):
-        crypto.encrypt("x", key="")
+        crypto.encrypt("x")
 
 
 def _client() -> OAuthClient:

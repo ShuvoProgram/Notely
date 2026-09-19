@@ -138,6 +138,7 @@ function MessageBubble({ message }: { message: AIMessage }) {
     <li className="flex gap-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1 space-y-2">
+        {message.steps?.length ? <Steps steps={message.steps} waiting={false} /> : null}
         <Markdown text={message.content} />
         {message.sources?.length ? <Sources sources={message.sources} /> : null}
       </div>

@@ -98,6 +98,9 @@ class Settings(BaseSettings):
 
             if not is_valid_key(self.encryption_key):
                 problems.append("ENCRYPTION_KEY is not a valid Fernet key")
+        elif not self.is_production and self.environment != "test":
+            # Integrations store credentials encrypted; connecting anything will fail without it.
+            problems.append("ENCRYPTION_KEY is not set (integrations disabled)")
         return problems
 
 

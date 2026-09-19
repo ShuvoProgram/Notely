@@ -5,9 +5,11 @@ Capture thoughts. Connect your work. Let AI move things forward.
 Notely is an AI-first notes workspace: a calm note-taking app with a powerful AI layer that can
 read and act across your productivity tools — always with review before anything changes.
 
-**Status:** Phases 1–3 complete — foundation, Notes (TipTap editor, version-checked autosave with
-draft recovery, folders, tags, full-text search) and AI (LiteLLM gateway, LangGraph agent with
-tool policy + human approval, streaming chat, note actions, tasks, audit log).
+**Status:** Phases 1–4 complete — foundation, Notes, AI (LiteLLM gateway, LangGraph agent with
+tool policy + human approval, streaming chat, note actions, tasks, audit log) and the integration
+framework (provider contract, OAuth/PKCE for providers, encrypted credentials, connection status,
+capability registry, MCP client, marketplace UI). Ships with a generic **MCP server** provider;
+vendor providers (Slack, Notion, Todoist, …) land in Phase 5 on the same contract.
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -96,6 +98,21 @@ Every tool execution is recorded at `/app/settings/activity` → `GET /api/v1/au
 
 > Windows dev: the Postgres checkpointer needs a selector event loop — run uvicorn with
 > `--reload` (as `.claude/launch.json` does) or use Docker.
+
+## Integrations
+
+Settings → Connections lists providers from the backend registry (`apps/api/app/integrations/registry.py`).
+Each provider implements `IntegrationProvider` (manifest, OAuth config, connect/test/refresh/revoke,
+tools, search, sync, webhooks). Credentials are Fernet-encrypted with `ENCRYPTION_KEY`.
+
+Try it locally with the bundled MCP server:
+
+```bash
+cd apps/api && uv run python scripts/demo_mcp_server.py --port 8765 --token demo-token
+```
+
+then connect `http://127.0.0.1:8765/mcp` with token `demo-token` under Connections → MCP server.
+Its tools show up in the assistant; reads run automatically, writes ask for approval.
 
 ## Secrets
 

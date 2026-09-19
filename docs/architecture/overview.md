@@ -117,8 +117,46 @@ POST /ai/approve ──► Command(resume={approved}) ──► execute approved
   `ApprovalCard` (per-item checkboxes; "Approve n of m"), `NoteAIPanel`, `/app/tasks`,
   `/app/settings/ai`.
 
-## What Phase 4+ adds
+## Integration framework (Phase 4)
 
-Integration framework (provider contract, connection storage using
+```
+Marketplace UI ──► /integrations/providers (manifests from registry + user's connection status)
+Connect (token) ──► ConnectionService.connect_with_config ──► vault.encrypt ──► provider.complete_connection
+Connect (OAuth) ──► /oauth/{p}/start (core OAuthClient: PKCE + server-side single-use state,
+                     context = {user_id}) ──► provider consent ──► /oauth/{p}/callback (same user
+                     check) ──► exchange ──► vault.encrypt ──► complete_connection ──► connected
+Agent run       ──► ConnectionService.tools_for_user ──► provider.tools(ctx) ──► ToolRegistry
+                     (built-ins + provider tools, namespaced) ──► same policy/approval/audit path
+Tool execute    ──► spec.connection_id → load user's connection → refresh_if_needed → decrypt →
+                     ToolContext.credential ──► handler; ProviderError → connection status update
+```
+
+- `integrations/base/provider.py`: `ProviderManifest` (auth type, capabilities, permissions =
+  minimum scopes, config fields), `IntegrationProvider` ABC, `ProviderContext` with just-in-time
+  decrypted credentials, `ConnectionTest` steps, `WebhookVerification`.
+- `integrations/base/capabilities.py`: unified capabilities → default risk (search/read = read;
+  create/update/draft/schedule/attach/sync = write; send/comment = external; delete = destructive).
+- `integrations/base/errors.py`: `ProviderErrorKind` taxonomy → user messages (PRD §34), retryable
+  set, status mapping (expired/auth → `expired`, permission → `needs_attention`, else `error`).
+- `integrations/base/http.py`: `ProviderHttpClient` with bearer auth and backoff+jitter retries on
+  429/502/503/504/timeouts only.
+- `services/credential_vault.py`: Fernet encrypt/decrypt with `ENCRYPTION_KEY`; refuses to run
+  without it. Tokens never appear in API responses, logs or the frontend.
+- `services/connection_service.py`: catalog upsert, marketplace, connect flows, refresh with
+  rotation, test, disconnect (revoke → clear → status) with *separate* local-data purge.
+- `mcp/client.py`: official SDK `Client` over Streamable HTTP (in-memory server in tests);
+  `integrations/mcp_server/`: generic provider — tools discovered from the server, risk from MCP
+  annotations (`readOnlyHint`/`destructiveHint`), JSON-schema-validated arguments.
+- Tables: `integrations`, `user_connections` (encrypted tokens, scopes, config, status, errors),
+  `external_items` (indexed representation, purge target), `webhook_events` (unique per
+  provider+event id → idempotent; processed by the worker).
+- Jobs: `check_connections` (hourly health), `refresh_oauth_tokens`, `sync_integration`,
+  `process_webhook`.
+
+## What Phase 5+ adds
+
+Vendor providers (Slack, Notion, Todoist, Asana, Jira, Teams, Outlook, Dropbox) as adapters on
+this contract, selective indexing into `external_items`, unified search across providers, and
+cross-app AI workflows (provider contract, connection storage using
 `app/core/crypto.py`, capability registry, MCP client, tool policy engine), providers, cross-app
 AI, hardening. Each phase reuses the foundations above rather than adding parallel mechanisms.

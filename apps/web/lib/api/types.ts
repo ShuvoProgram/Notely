@@ -201,6 +201,8 @@ export interface AIMessage {
   sources: AISource[] | null;
   run_id: string | null;
   created_at: string;
+  /** Execution steps of the run that produced this message (client-side only). */
+  steps?: { call_id: string; tool: string; label: string; status: "running" | "completed" | "failed"; result_preview?: string }[];
 }
 
 export interface AIToolCall {
@@ -303,4 +305,81 @@ export interface AuditEvent {
   run_id: string | null;
   request_metadata: Record<string, unknown>;
   created_at: string;
+}
+
+// --- integrations (mirrors apps/api/app/schemas/integrations.py) --------------------------------
+
+export type ConnectionStatus =
+  | "pending"
+  | "connecting"
+  | "connected"
+  | "syncing"
+  | "needs_attention"
+  | "expired"
+  | "error"
+  | "disconnected";
+
+export interface Connection {
+  id: string;
+  provider: string;
+  auth_type: "oauth2" | "token" | "none";
+  status: ConnectionStatus;
+  external_account_id: string | null;
+  external_account_name: string | null;
+  scopes: string[];
+  config: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  token_expires_at: string | null;
+  last_sync_at: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+  last_error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PermissionSpec {
+  scope: string;
+  label: string;
+  description: string;
+  required: boolean;
+  capability: string | null;
+}
+
+export interface ConfigField {
+  key: string;
+  label: string;
+  kind: "text" | "url" | "secret" | "select";
+  required: boolean;
+  placeholder: string;
+  help: string;
+  options: { value: string; label: string }[];
+}
+
+export interface Provider {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  logo_url: string | null;
+  docs_url: string | null;
+  auth: "oauth2" | "token" | "none";
+  capabilities: string[];
+  permissions: PermissionSpec[];
+  config_fields: ConfigField[];
+  supports_webhooks: boolean;
+  supports_sync: boolean;
+  configured: boolean;
+  connection: Connection | null;
+}
+
+export interface ProviderDetail extends Provider {
+  local_item_count: number;
+  tools: { name: string; description: string; read_only: boolean; destructive: boolean }[];
+}
+
+export interface ConnectionTestResult {
+  healthy: boolean;
+  steps: { name: string; ok: boolean; detail: string }[];
+  connection: Connection;
 }

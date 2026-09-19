@@ -25,7 +25,7 @@ export function SidebarNav({ nav, orientation = "vertical", onNavigate, classNam
       )}
     >
       {items.map((item) => {
-        const active = isActive(pathname, item);
+        const active = isActive(pathname, item, items);
         const Icon = item.icon;
         return (
           <li key={item.href}>

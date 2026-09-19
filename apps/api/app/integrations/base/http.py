@@ -1,0 +1,98 @@
+"""HTTP client for provider adapters: bearer auth, timeouts, categorised errors and retries
+with exponential backoff + jitter for retryable failures only (PRD section 35)."""
+
+from __future__ import annotations
+
+import asyncio
+import random
+from typing import Any
+
+import httpx
+
+from app.core.logging import get_logger
+from app.integrations.base.errors import ProviderError, ProviderErrorKind, classify_http_status
+
+log = get_logger(__name__)
+
+DEFAULT_TIMEOUT = 20.0
+MAX_ATTEMPTS = 3
+BASE_DELAY = 0.5
+
+
+class ProviderHttpClient:
+    def __init__(
+        self,
+        *,
+        provider: str,
+        base_url: str = "",
+        bearer_token: str | None = None,
+        headers: dict[str, str] | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        max_attempts: int = MAX_ATTEMPTS,
+    ) -> None:
+        self.provider = provider
+        self.max_attempts = max_attempts
+        merged = {"Accept": "application/json", **(headers or {})}
+        if bearer_token:
+            merged["Authorization"] = f"Bearer {bearer_token}"
+        self._client = httpx.AsyncClient(
+            base_url=base_url, headers=merged, timeout=timeout, transport=transport
+        )
+
+    async def __aenter__(self) -> ProviderHttpClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self._client.aclose()
+
+    async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = await self._client.request(method, url, **kwargs)
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                error = ProviderError(
+                    ProviderErrorKind.unavailable, type(exc).__name__, provider=self.provider
+                )
+                if attempt >= self.max_attempts:
+                    raise error from exc
+                await self._backoff(attempt, None)
+                continue
+            if response.status_code < 400:
+                return response
+            error = classify_http_status(
+                response.status_code, provider=self.provider, body_hint=response.text[:500]
+            )
+            retry_after = _retry_after_seconds(response)
+            error.retry_after = retry_after
+            if error.retryable and attempt < self.max_attempts:
+                await self._backoff(attempt, retry_after)
+                continue
+            raise error
+
+    async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self.request("POST", url, **kwargs)
+
+    async def _backoff(self, attempt: int, retry_after: float | None) -> None:
+        delay = retry_after if retry_after is not None else BASE_DELAY * (2 ** (attempt - 1))
+        delay = min(delay, 10.0) + random.uniform(0, 0.25)  # noqa: S311 — jitter, not security
+        log.info(
+            "provider_retry",
+            extra={"provider": self.provider, "attempt": attempt, "delay": round(delay, 2)},
+        )
+        await asyncio.sleep(delay)
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None

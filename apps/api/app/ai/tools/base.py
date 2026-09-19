@@ -3,6 +3,10 @@
 A tool is declared once with its argument schema, risk level and handler. The registry exposes
 OpenAI-format schemas to the model and the agent's *execute* node runs handlers — the model never
 calls a handler directly. Risk levels feed the ToolPolicyEngine; every execution is audited.
+
+Arguments are described either by a pydantic model (internal tools) or by a raw JSON schema
+(tools discovered at runtime from MCP servers). Handlers receive the parsed model or the
+validated dict respectively.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import jsonschema
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,33 +30,76 @@ class ToolContext:
     user: User
     db: AsyncSession
     run_id: uuid.UUID | None = None
+    # For provider tools: the decrypted access token, resolved by the framework just-in-time.
+    credential: str | None = None
 
 
 ToolHandler = Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]
 ToolSummarizer = Callable[[Any], str]
 
 
+class ToolArgumentError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
     description: str
-    args_schema: type[BaseModel]
     risk: RiskLevel
     handler: ToolHandler
     summarize: ToolSummarizer
+    args_schema: type[BaseModel] | None = None
+    json_schema: dict[str, Any] | None = None
     provider: str = "notely"
-    # Capability label from the PRD's unified model (SEARCH/READ/CREATE/UPDATE/DELETE/...).
+    # Capability label from the PRD's unified model (search/read/create/update/delete/...).
     capability: str = "read"
+    # Set for provider tools so execution can load the right credentials.
+    connection_id: uuid.UUID | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
 
-    def openai_schema(self) -> dict[str, Any]:
-        schema = convert_to_openai_tool(self.args_schema)
-        schema["function"]["name"] = self.name
-        schema["function"]["description"] = self.description
-        return schema
+    def __post_init__(self) -> None:
+        if (self.args_schema is None) == (self.json_schema is None):
+            raise ValueError("ToolSpec needs exactly one of args_schema or json_schema")
 
-    def parse_args(self, raw: dict[str, Any]) -> BaseModel:
-        return self.args_schema.model_validate(raw)
+    def openai_schema(self) -> dict[str, Any]:
+        if self.args_schema is not None:
+            schema = convert_to_openai_tool(self.args_schema)
+            schema["function"]["name"] = self.name
+            schema["function"]["description"] = self.description
+            return schema
+        params = dict(self.json_schema or {"type": "object", "properties": {}})
+        params.setdefault("type", "object")
+        params.setdefault("properties", {})
+        return {
+            "type": "function",
+            "function": {"name": self.name, "description": self.description, "parameters": params},
+        }
+
+    def parse_args(self, raw: dict[str, Any]) -> Any:
+        """Validate model-provided arguments. Raises ToolArgumentError with a readable message."""
+        if self.args_schema is not None:
+            from pydantic import ValidationError
+
+            try:
+                return self.args_schema.model_validate(raw)
+            except ValidationError as exc:
+                problems = "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
+                )
+                raise ToolArgumentError(problems) from exc
+        try:
+            jsonschema.validate(raw, self.json_schema or {"type": "object"})
+        except jsonschema.ValidationError as exc:
+            path = ".".join(str(p) for p in exc.absolute_path) or "_"
+            raise ToolArgumentError(f"{path}: {exc.message}") from exc
+        return raw
+
+
+def args_to_dict(args: Any) -> dict[str, Any]:
+    if isinstance(args, BaseModel):
+        return args.model_dump(mode="json")
+    return dict(args) if isinstance(args, dict) else {}
 
 
 class ToolRegistry:
@@ -63,6 +111,10 @@ class ToolRegistry:
             raise ValueError(f"tool already registered: {spec.name}")
         self._tools[spec.name] = spec
         return spec
+
+    def extend(self, specs: list[ToolSpec]) -> None:
+        for spec in specs:
+            self.register(spec)
 
     def get(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)

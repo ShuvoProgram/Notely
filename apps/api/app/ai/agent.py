@@ -28,10 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.policy import ToolPolicyEngine, ValidatedCall
 from app.ai.prompts import assistant_system_prompt
-from app.ai.tools.base import ToolContext, ToolRegistry
+from app.ai.tools.base import ToolContext, ToolRegistry, args_to_dict
+from app.core.config import get_settings
 from app.core.exceptions import APIError
 from app.core.logging import get_logger
 from app.db.base import utcnow
+from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.models.ai import RiskLevel
 from app.models.user import User
 from app.services.audit_service import AuditService
@@ -140,7 +142,7 @@ async def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict[
                     provider=c.spec.provider,
                     risk=c.spec.risk.value,
                     summary=c.spec.summarize(c.args),
-                    arguments=c.args.model_dump(mode="json"),
+                    arguments=args_to_dict(c.args),
                 ).to_dict()
                 for c in needs_approval
             ],
@@ -190,9 +192,30 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
     )
     audit = AuditService(ctx.db)
     tool_ctx = ToolContext(user=ctx.user, db=ctx.db, run_id=ctx.run_id)
+    connection = None
     try:
+        if spec.connection_id is not None:
+            # Provider tool: the connection must be the user's and usable; decrypt just-in-time.
+            from app.services.connection_service import ConnectionService
+
+            connections = ConnectionService(ctx.db, get_settings())
+            connection = await connections.get_connection(ctx.user, spec.connection_id)
+            if not connection.is_usable:
+                raise ProviderError(
+                    ProviderErrorKind.expired, "connection not usable", provider=spec.provider
+                )
+            await connections.refresh_if_needed(ctx.user, connection)
+            tool_ctx.credential = connections.vault.load(connection).access_token
         result = await spec.handler(tool_ctx, call.args)
         status = "completed"
+    except ProviderError as exc:
+        title, body = exc.user_message()
+        result = {"error": body, "code": f"PROVIDER_{exc.kind.value.upper()}", "title": title}
+        status = "failed"
+        if connection is not None:
+            from app.services.connection_service import ConnectionService
+
+            await ConnectionService(ctx.db, get_settings()).record_tool_failure(connection, exc)
     except APIError as exc:
         result = {"error": exc.message, "code": exc.code}
         status = "failed"
@@ -208,7 +231,8 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
         risk_level=spec.risk,
         status=status,
         run_id=ctx.run_id,
-        request_metadata={"summary": label, "arg_keys": sorted(call.args.model_dump().keys())},
+        connection_id=spec.connection_id,
+        request_metadata={"summary": label, "arg_keys": sorted(args_to_dict(call.args).keys())},
         result_metadata={"ok": status == "completed", "keys": sorted(result.keys())[:10]},
     )
     await ctx.db.commit()
