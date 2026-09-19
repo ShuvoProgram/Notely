@@ -130,20 +130,27 @@ export interface NoteUpdateInput {
 }
 
 export interface SearchHit {
-  source: "notely";
-  kind: "note";
+  source: string; // "notely" or a provider id
+  kind: string;
   id: string;
   title: string;
   snippet: string;
-  url: string;
+  url: string | null;
   score: number;
-  updated_at: string;
+  updated_at: string | null;
+}
+
+export interface SearchSource {
+  source: string;
+  ok: boolean;
+  count: number;
+  error: string | null;
 }
 
 export interface SearchResponse {
   query: string;
   hits: SearchHit[];
-  sources: string[];
+  sources: SearchSource[];
 }
 
 // --- tasks & AI (mirrors apps/api/app/schemas/{tasks,ai}.py) -----------------------------------

@@ -273,7 +273,7 @@ async def test_search_and_list_filter(client: AsyncClient) -> None:
     body = resp.json()["data"]
     ids = {h["id"] for h in body["hits"]}
     assert ids == {a["id"], b["id"]}
-    assert body["sources"] == ["notely"]
+    assert body["sources"] == [{"source": "notely", "ok": True, "count": 2, "error": None}]
     assert all(h["source"] == "notely" and h["url"].startswith("/app/notes/") for h in body["hits"])
     assert (await client.get("/api/v1/search", params={"q": ""})).status_code == 422
 

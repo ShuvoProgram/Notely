@@ -179,17 +179,24 @@ class NoteListQuery(BaseModel):
 
 
 class SearchHit(BaseModel):
-    source: Literal["notely"]
-    kind: Literal["note"]
-    id: uuid.UUID
+    source: str  # "notely" or a provider id
+    kind: str
+    id: str
     title: str
     snippet: str
-    url: str
+    url: str | None
     score: float
-    updated_at: datetime
+    updated_at: str | None
+
+
+class SearchSource(BaseModel):
+    source: str
+    ok: bool
+    count: int
+    error: str | None = None
 
 
 class SearchResponse(BaseModel):
     query: str
     hits: list[SearchHit]
-    sources: list[str]
+    sources: list[SearchSource]

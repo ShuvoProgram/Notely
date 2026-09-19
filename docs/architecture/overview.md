@@ -153,10 +153,50 @@ Tool execute    ──► spec.connection_id → load user's connection → refr
 - Jobs: `check_connections` (hourly health), `refresh_oauth_tokens`, `sync_integration`,
   `process_webhook`.
 
-## What Phase 5+ adds
+## Vendor providers (Phase 5)
 
-Vendor providers (Slack, Notion, Todoist, Asana, Jira, Teams, Outlook, Dropbox) as adapters on
-this contract, selective indexing into `external_items`, unified search across providers, and
-cross-app AI workflows (provider contract, connection storage using
-`app/core/crypto.py`, capability registry, MCP client, tool policy engine), providers, cross-app
-AI, hardening. Each phase reuses the foundations above rather than adding parallel mechanisms.
+Eight adapters live under `app/integrations/<provider>/` and share `RestOAuthProvider`
+(`app/integrations/base/rest.py`): the subclass declares `settings_prefix`, `endpoints`, `use_pkce`,
+`api_base`/`api_headers`, an optional `token_parser`, and implements `identity`, `probe`, `search`
+and `build_tools()`. The base turns tool tuples into `ToolSpec`s named `<provider>__<tool>` with
+risk derived from the declared `Capability`, rebuilds a `ProviderContext` from the framework's
+`ToolContext` (decrypted credential, resolved connection), refreshes tokens through
+`OAuthClient.refresh`, and runs the standard four-step health test (Authentication, Permissions,
+API availability, Tool access). Adapters contain only vendor specifics.
+
+Vendor token-endpoint styles are expressed as `OAuthEndpoints` options rather than per-adapter
+code: `token_auth` (`body` | `basic` — Notion), `token_format` (`form` | `json` — Notion, Jira),
+`scope_param`/`scope_separator` (Slack uses `user_scope` with commas), and `token_parser` (Slack
+returns the user token under `authed_user`). PKCE is on for Asana, Microsoft and Dropbox.
+
+| Provider | API | Read tools | Write tools (approval) |
+|---|---|---|---|
+| Slack | Web API (form POST) | search_messages, list_channels, read_channel | post_message (external) |
+| Notion | REST v1 | search_pages, read_page | create_page |
+| Todoist | REST v2 | list_tasks, list_projects | create_task, complete_task |
+| Asana | REST 1.0 | my_tasks, search_tasks | create_task, complete_task |
+| Jira | Cloud REST v3 via `api.atlassian.com/ex/jira/{cloud_id}` | search_issues, read_issue | create_issue, add_comment (external) |
+| Microsoft Teams | Graph | list_teams, read_channel | send_channel_message (external) |
+| Outlook | Graph | search_mail, read_mail, list_events | draft_mail, send_mail (external), create_event |
+| Dropbox | RPC + content API | search_files, list_folder, read_text_file | upload_text_file |
+
+All vendor content returned to the model goes through `untrusted()`; list-style outputs wrap names
+too. Auth failures (401 / `invalid_auth`) mark the connection `expired`, hide its tools, and are
+surfaced per source in search.
+
+**Unified search** (`app/services/search_service.py`): `/api/v1/search` queries notes first, then
+every usable connection concurrently with a 6 s per-provider timeout. Results carry `source`,
+`kind`, `id`, `url`; the response also lists `sources` with `ok`/`count`/`error` so the UI can show
+"Slack unavailable" instead of silently dropping it. Provider errors are recorded on the connection
+via `record_tool_failure`.
+
+**Tests**: `app/tests/vendor_mocks.py` mocks each vendor's API (including asserting the vendor's
+token-endpoint shape and PKCE verifier), and `app/tests/test_providers.py` runs one parametrized
+end-to-end scenario per provider: OAuth → identity → health test → search → auto read tool →
+approval-gated write tool (nothing reaches the vendor before approval) → audit entries.
+
+## What Phase 6+ adds
+
+Cross-app AI workflows (planning across sources, multi-step execution with a single approval
+surface, verification of results), selective indexing into `external_items`, and hardening.
+Each phase reuses the foundations above rather than adding parallel mechanisms.

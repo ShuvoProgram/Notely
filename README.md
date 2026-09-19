@@ -5,11 +5,12 @@ Capture thoughts. Connect your work. Let AI move things forward.
 Notely is an AI-first notes workspace: a calm note-taking app with a powerful AI layer that can
 read and act across your productivity tools — always with review before anything changes.
 
-**Status:** Phases 1–4 complete — foundation, Notes, AI (LiteLLM gateway, LangGraph agent with
-tool policy + human approval, streaming chat, note actions, tasks, audit log) and the integration
-framework (provider contract, OAuth/PKCE for providers, encrypted credentials, connection status,
-capability registry, MCP client, marketplace UI). Ships with a generic **MCP server** provider;
-vendor providers (Slack, Notion, Todoist, …) land in Phase 5 on the same contract.
+**Status:** Phases 1–5 complete — foundation, Notes, AI (LiteLLM gateway, LangGraph agent with
+tool policy + human approval, streaming chat, note actions, tasks, audit log), the integration
+framework (provider contract, OAuth/PKCE, encrypted credentials, connection status, capability
+registry, MCP client, marketplace UI) and the MVP providers: **Slack, Notion, Todoist, Asana, Jira,
+Microsoft Teams, Outlook, Dropbox** plus a generic **MCP server**. Search spans notes and every
+connected app. Phase 6 (cross-app AI workflows) is next.
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -113,6 +114,24 @@ cd apps/api && uv run python scripts/demo_mcp_server.py --port 8765 --token demo
 
 then connect `http://127.0.0.1:8765/mcp` with token `demo-token` under Connections → MCP server.
 Its tools show up in the assistant; reads run automatically, writes ask for approval.
+
+### Vendor providers
+
+Slack, Notion, Todoist, Asana, Jira, Microsoft Teams, Outlook and Dropbox are adapters on the same
+contract (`apps/api/app/integrations/<provider>/`). Each one is listed in the marketplace but shown
+as *not available on this deployment* until you register an OAuth app with the vendor and set
+`OAUTH_<PROVIDER>_CLIENT_ID` / `OAUTH_<PROVIDER>_CLIENT_SECRET` (Teams and Outlook share
+`OAUTH_MICROSOFT_*`). Register this redirect URI with every vendor:
+
+```
+{API_PUBLIC_URL}/api/v1/oauth/{provider}/callback   # e.g. http://localhost:8000/api/v1/oauth/slack/callback
+```
+
+Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`, `dropbox`.
+Tokens are stored encrypted, refreshed by the worker and never reach the browser. Every adapter
+passes the same end-to-end test (`apps/api/app/tests/test_providers.py`) against a mocked vendor
+API: OAuth exchange in the vendor's own token style, identity, health test, unified search, one
+auto-run read tool and one approval-gated write tool, all audited.
 
 ## Secrets
 

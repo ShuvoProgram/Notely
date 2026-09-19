@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import CurrentAuth, DbDep
+from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.core.responses import Envelope, ok
 from app.models.note import Folder, Note, Tag
 from app.schemas.notes import (
@@ -19,6 +19,7 @@ from app.schemas.notes import (
     NoteUpdate,
     SearchHit,
     SearchResponse,
+    SearchSource,
     TagCreate,
     TagOut,
     TagUpdate,
@@ -200,24 +201,19 @@ async def delete_tag(tag_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -
 @search_router.get("", response_model=Envelope[SearchResponse])
 async def search(
     ctx: CurrentAuth,
-    service: ServiceDep,
+    db: DbDep,
+    settings: SettingsDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> dict[str, Any]:
-    """Unified search. Today: Notely notes. Connected providers add their own hits in Phase 5;
-    every hit already names its `source` so the UI never has to guess where a result came from."""
-    rows = await service.search(ctx.user, q, limit)
-    hits = [
-        SearchHit(
-            source="notely",
-            kind="note",
-            id=row.note.id,
-            title=row.note.title or "Untitled",
-            snippet=excerpt(row.note.plain_text, 200),
-            url=f"/app/notes/{row.note.id}",
-            score=row.score,
-            updated_at=row.note.updated_at,
+    """Unified search across Notely and every connected provider. Every hit names its source."""
+    from app.services.search_service import UnifiedSearchService
+
+    result = await UnifiedSearchService(db, settings).search(ctx.user, q, limit)
+    return ok(
+        SearchResponse(
+            query=result.query,
+            hits=[SearchHit(**h.__dict__) for h in result.hits],
+            sources=[SearchSource(**s.__dict__) for s in result.sources],
         )
-        for row in rows
-    ]
-    return ok(SearchResponse(query=q, hits=hits, sources=["notely"] if hits else []))
+    )

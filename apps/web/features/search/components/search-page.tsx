@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Search as SearchIcon } from "lucide-react";
+import { AlertTriangle, Bug, CheckSquare, ExternalLink, File, FileText, Folder, Mail, MessageSquare, Search as SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -11,7 +11,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { useSearch } from "@/features/notes/hooks";
 
-const SOURCE_LABELS: Record<string, string> = { notely: "Notely" };
+export const SOURCE_LABELS: Record<string, string> = {
+  notely: "Notely",
+  slack: "Slack",
+  notion: "Notion",
+  todoist: "Todoist",
+  asana: "Asana",
+  jira: "Jira",
+  microsoft_teams: "Teams",
+  outlook: "Outlook",
+  dropbox: "Dropbox",
+  mcp_server: "MCP server",
+};
+
+const KIND_ICON: Record<string, typeof FileText> = {
+  note: FileText,
+  page: FileText,
+  message: MessageSquare,
+  email: Mail,
+  task: CheckSquare,
+  issue: Bug,
+  file: File,
+  folder: Folder,
+};
 
 export function SearchPage() {
   const router = useRouter();
@@ -41,7 +63,7 @@ export function SearchPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Search across your notes. Connected apps appear here once linked.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Search your notes and every app you have connected. Results always say where they came from.</p>
       </div>
       <div className="relative">
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -68,31 +90,53 @@ export function SearchPage() {
         <p className="text-sm text-muted-foreground">No results for “{query}”.</p>
       ) : hits.length ? (
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground" aria-live="polite">
-            {hits.length} result{hits.length === 1 ? "" : "s"} · Sources:{" "}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+            <span>
+              {hits.length} result{hits.length === 1 ? "" : "s"} · Sources:
+            </span>
             {(search.data?.sources ?? []).map((s) => (
-              <Badge key={s} variant="outline" className="ml-1 font-normal">
-                {SOURCE_LABELS[s] ?? s}
+              <Badge key={s.source} variant={s.ok ? "outline" : "destructive"} className="gap-1 font-normal" title={s.error ?? undefined}>
+                {!s.ok ? <AlertTriangle className="size-3" aria-hidden /> : null}
+                {SOURCE_LABELS[s.source] ?? s.source} {s.ok ? s.count : "unavailable"}
               </Badge>
             ))}
-          </p>
+          </div>
           <ul className="divide-y rounded-xl border bg-card">
-            {hits.map((hit) => (
-              <li key={`${hit.source}:${hit.id}`}>
-                <Link href={hit.url} className="flex gap-3 px-4 py-3 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring">
-                  <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+            {hits.map((hit) => {
+              const Icon = KIND_ICON[hit.kind] ?? FileText;
+              const external = hit.source !== "notely";
+              const inner = (
+                <>
+                  <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="truncate text-sm font-medium">{hit.title}</p>
                       <Badge variant="secondary" className="font-normal">
                         {SOURCE_LABELS[hit.source] ?? hit.source}
                       </Badge>
+                      {external && hit.url ? <ExternalLink className="size-3 text-muted-foreground" aria-hidden /> : null}
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{hit.snippet || "No preview"}</p>
                   </div>
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+              const cls = "flex gap-3 px-4 py-3 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring";
+              return (
+                <li key={`${hit.source}:${hit.id}`}>
+                  {!hit.url ? (
+                    <div className={cls}>{inner}</div>
+                  ) : external ? (
+                    <a href={hit.url} target="_blank" rel="noopener noreferrer" className={cls}>
+                      {inner}
+                    </a>
+                  ) : (
+                    <Link href={hit.url} className={cls}>
+                      {inner}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

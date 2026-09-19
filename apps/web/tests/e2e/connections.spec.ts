@@ -118,3 +118,20 @@ test("a wrong token yields a categorised error and an error status", async ({ pa
   await page.keyboard.press("Escape");
   await expect(page.getByText("Connection error")).toBeVisible();
 });
+
+test("marketplace shows the MVP providers grouped by category, unavailable until configured", async ({ page }) => {
+  await signup(page);
+  await page.goto("/app/settings/connections");
+  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "MCP server"]) {
+    await expect(page.getByRole("link", { name: new RegExp(`^${name}\\b`) })).toBeVisible();
+  }
+  for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Developer"]) {
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  const slack = page.getByRole("link", { name: /^Slack\b/ });
+  await expect(slack.getByText("Not available on this deployment")).toBeVisible();
+  await slack.click();
+  await expect(page.getByText(/isn't configured on this Notely deployment yet/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Search messages")).toBeVisible(); // permissions are still explained
+});

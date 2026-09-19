@@ -17,8 +17,9 @@ import base64
 import hashlib
 import json
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -50,6 +51,12 @@ class OAuthEndpoints:
     userinfo_url: str | None = None
     issuer: str | None = None
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
+    # How the token endpoint wants client credentials and the body encoded.
+    token_auth: Literal["body", "basic"] = "body"
+    token_format: Literal["form", "json"] = "form"
+    # Some providers (Slack) require the scope list under a different query parameter.
+    scope_param: str = "scope"
+    scope_separator: str = " "
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,8 @@ class OAuthClientConfig:
     scopes: tuple[str, ...]
     endpoints: OAuthEndpoints
     use_pkce: bool = True
+    # Optional override for non-standard token responses (e.g. Slack's `authed_user`).
+    token_parser: Callable[[dict[str, Any]], OAuthTokens] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,14 +111,16 @@ class OAuthClient:
             ),
             STATE_TTL_SECONDS,
         )
+        ep = self.config.endpoints
         params: dict[str, str] = {
             "response_type": "code",
             "client_id": self.config.client_id,
             "redirect_uri": self.redirect_uri,
-            "scope": " ".join(self.config.scopes),
             "state": state,
-            **self.config.endpoints.extra_authorize_params,
+            **ep.extra_authorize_params,
         }
+        if self.config.scopes:
+            params[ep.scope_param] = ep.scope_separator.join(self.config.scopes)
         if "openid" in self.config.scopes:
             params["nonce"] = nonce
         if verifier:
@@ -137,18 +148,37 @@ class OAuthClient:
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": self.redirect_uri,
-            "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
         }
         if verifier:
             data["code_verifier"] = verifier
+        resp = await self._post_token(data)
+        return self._parse_tokens(resp)
+
+    async def refresh(self, refresh_token: str) -> OAuthTokens:
+        """Standard refresh_token grant; providers with custom flows do their own."""
+        resp = await self._post_token(
+            {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        )
+        return self._parse_tokens(resp)
+
+    async def _post_token(self, data: dict[str, str]) -> httpx.Response:
+        ep = self.config.endpoints
+        headers = {"Accept": "application/json"}
+        auth: httpx.BasicAuth | httpx._client.UseClientDefault = httpx.USE_CLIENT_DEFAULT
+        if ep.token_auth == "basic":
+            auth = httpx.BasicAuth(self.config.client_id, self.config.client_secret)
+        else:
+            data = {
+                **data,
+                "client_id": self.config.client_id,
+                "client_secret": self.config.client_secret,
+            }
         try:
             async with httpx.AsyncClient(timeout=15, transport=_http_transport) as http:
-                resp = await http.post(
-                    self.config.endpoints.token_url,
-                    data=data,
-                    headers={"Accept": "application/json"},
-                )
+                if ep.token_format == "json":
+                    resp = await http.post(ep.token_url, json=data, headers=headers, auth=auth)
+                else:
+                    resp = await http.post(ep.token_url, data=data, headers=headers, auth=auth)
         except httpx.HTTPError as exc:
             log.warning(
                 "oauth_token_exchange_network_error",
@@ -161,8 +191,13 @@ class OAuthClient:
                 extra={"provider": self.config.provider_id, "status": resp.status_code},
             )
             raise OAuthExchangeFailed()
+        return resp
+
+    def _parse_tokens(self, resp: httpx.Response) -> OAuthTokens:
         payload = resp.json()
-        if "access_token" not in payload:
+        if self.config.token_parser is not None:
+            return self.config.token_parser(payload)
+        if "access_token" not in payload or payload.get("ok") is False:
             raise OAuthExchangeFailed()
         return OAuthTokens(
             access_token=payload["access_token"],

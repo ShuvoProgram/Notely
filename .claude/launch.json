@@ -5,7 +5,7 @@
       "name": "api",
       "cwd": "apps/api",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "uvicorn", "app.main:app", "--reload", "--reload-dir", "app", "--port", "8000"],
+      "runtimeArgs": ["run", "uvicorn", "app.main:app", "--reload", "--reload-dir", "app", "--timeout-graceful-shutdown", "5", "--port", "8000"],
       "port": 8000
     },
     {

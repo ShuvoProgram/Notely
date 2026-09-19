@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -17,6 +18,19 @@ log = get_logger(__name__)
 DEFAULT_TIMEOUT = 20.0
 MAX_ATTEMPTS = 3
 BASE_DELAY = 0.5
+
+# Tests install a factory returning an httpx MockTransport per provider id.
+TransportFactory = Callable[[str], httpx.AsyncBaseTransport | None]
+_transport_override: TransportFactory | None = None
+
+
+def set_transport_override(factory: TransportFactory | None) -> None:
+    global _transport_override
+    _transport_override = factory
+
+
+def transport_for(provider: str) -> httpx.AsyncBaseTransport | None:
+    return _transport_override(provider) if _transport_override else None
 
 
 class ProviderHttpClient:
@@ -37,7 +51,10 @@ class ProviderHttpClient:
         if bearer_token:
             merged["Authorization"] = f"Bearer {bearer_token}"
         self._client = httpx.AsyncClient(
-            base_url=base_url, headers=merged, timeout=timeout, transport=transport
+            base_url=base_url,
+            headers=merged,
+            timeout=timeout,
+            transport=transport or transport_for(provider),
         )
 
     async def __aenter__(self) -> ProviderHttpClient:

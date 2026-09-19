@@ -5,10 +5,26 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from app.integrations.asana.provider import AsanaProvider
 from app.integrations.base.provider import IntegrationProvider
+from app.integrations.dropbox.provider import DropboxProvider
+from app.integrations.jira.provider import JiraProvider
 from app.integrations.mcp_server.provider import MCPServerProvider
+from app.integrations.microsoft.outlook import OutlookProvider
+from app.integrations.microsoft.teams import TeamsProvider
+from app.integrations.notion.provider import NotionProvider
+from app.integrations.slack.provider import SlackProvider
+from app.integrations.todoist.provider import TodoistProvider
 
 PROVIDER_CLASSES: dict[str, type[IntegrationProvider]] = {
+    "slack": SlackProvider,
+    "notion": NotionProvider,
+    "todoist": TodoistProvider,
+    "asana": AsanaProvider,
+    "jira": JiraProvider,
+    "microsoft_teams": TeamsProvider,
+    "outlook": OutlookProvider,
+    "dropbox": DropboxProvider,
     "mcp_server": MCPServerProvider,
 }
 

@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     oauth_microsoft_client_secret: str = ""
     oauth_microsoft_tenant: str = "common"
 
+    # Integration providers (enabled only when both id and secret are set). Teams and Outlook
+    # share the Microsoft app registration above.
+    oauth_slack_client_id: str = ""
+    oauth_slack_client_secret: str = ""
+    oauth_notion_client_id: str = ""
+    oauth_notion_client_secret: str = ""
+    oauth_todoist_client_id: str = ""
+    oauth_todoist_client_secret: str = ""
+    oauth_asana_client_id: str = ""
+    oauth_asana_client_secret: str = ""
+    oauth_jira_client_id: str = ""
+    oauth_jira_client_secret: str = ""
+    oauth_dropbox_client_id: str = ""
+    oauth_dropbox_client_secret: str = ""
+
     # AI. The application only ever talks to the LiteLLM gateway (OpenAI-compatible).
     ai_provider: Literal["litellm", "fake"] = "litellm"  # "fake" = scripted, dev/test only
     litellm_api_base: str = "http://localhost:4000"
