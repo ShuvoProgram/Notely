@@ -26,6 +26,7 @@ import httpx
 import jwt
 from jwt import PyJWKClient
 
+from app.core.config import Settings
 from app.core.exceptions import InvalidOAuthState, OAuthExchangeFailed
 from app.core.kv import kv
 from app.core.logging import get_logger
@@ -85,6 +86,14 @@ class OAuthTokens:
     id_token: str | None
     scope: str | None
     raw: dict[str, Any]
+
+
+def callback_uri(settings: Settings, path: str) -> str:
+    """OAuth callbacks come back through the app's public origin (the web app proxies `/api/*`
+    to the API, and the production edge routes it directly). One origin means the session
+    cookie is always first-party and the registered redirect URI never depends on where the
+    API process happens to listen."""
+    return f"{settings.frontend_origin.rstrip('/')}{settings.api_prefix}{path}"
 
 
 def _b64url(data: bytes) -> str:

@@ -15,6 +15,7 @@ from app.api.deps import (
 )
 from app.core import metrics
 from app.core.exceptions import OAuthExchangeFailed
+from app.core.oauth import callback_uri
 from app.core.rate_limit import client_ip, rate_limit
 from app.core.responses import Envelope, ok
 from app.schemas.auth import (
@@ -145,7 +146,7 @@ async def revoke_session(
 
 @router.get("/providers", response_model=Envelope[list[SignInProviderOut]])
 async def list_providers(settings: SettingsDep) -> dict[str, Any]:
-    base = f"{settings.api_public_url.rstrip('/')}{settings.api_prefix}/auth/oauth"
+    base = callback_uri(settings, "/auth/oauth")
     return ok(
         [
             SignInProviderOut(

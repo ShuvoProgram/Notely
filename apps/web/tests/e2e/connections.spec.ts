@@ -128,11 +128,23 @@ test("marketplace lists every provider; connecting is always the vendor's own co
   for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Payments", "Developer"]) {
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
   }
-  // No vendor OAuth app is registered locally: apps without an official MCP server wait for one.
-  await expect(page.getByRole("link", { name: /^Todoist\b/ }).getByText("Not available on this deployment")).toBeVisible();
+  // No vendor OAuth app is registered locally: apps without an official MCP server show a
+  // guided one-time setup. Saving the workspace's own app turns on the one-click Connect.
+  await expect(page.getByRole("link", { name: /^Todoist\b/ }).getByText("Needs a one-time setup")).toBeVisible();
   await page.getByRole("link", { name: /^Todoist\b/ }).click();
-  await expect(page.getByText(/An administrator needs to register an OAuth app/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Set up Todoist sign-in/)).toBeVisible({ timeout: 15_000 });
+  const setup = page;
+  await expect(setup.getByRole("link", { name: /Open the Todoist app console/ })).toHaveAttribute("href", /todoist\.com/);
+  await expect(setup.getByText("http://localhost:3000/api/v1/oauth/todoist/callback")).toBeVisible();
+  await setup.getByLabel("Client ID").fill("e2e-client-id");
+  await setup.getByLabel("Client secret").fill("e2e-client-secret");
+  await setup.getByRole("button", { name: "Save and enable Connect" }).click();
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
+  await expect(page.getByText("e2e-client-secret")).toHaveCount(0); // never echoed back
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Continue with Notely" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByText("Read tasks and projects")).toBeVisible(); // permissions are still explained
 
   // Vendors with an official MCP server connect with one click: consent card → vendor screen.

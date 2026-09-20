@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from app.ai.tools.base import ToolContext, ToolSpec, untrusted
 from app.core.config import Settings
-from app.core.oauth import OAuthClient, OAuthTokens
+from app.core.oauth import OAuthClient, OAuthTokens, callback_uri
 from app.integrations.base.capabilities import Capability, risk_for
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
@@ -195,10 +195,7 @@ class MCPServerProvider(IntegrationProvider):
         auth = await mcp_oauth.discover(self._url(ctx))
         if auth is None:
             return None
-        redirect = (
-            f"{ctx.settings.api_public_url.rstrip('/')}{ctx.settings.api_prefix}"
-            f"/oauth/{self.manifest.id}/callback"
-        )
+        redirect = callback_uri(ctx.settings, f"/oauth/{self.manifest.id}/callback")
         config = await mcp_oauth.dynamic_client(
             ctx.db, ctx.settings, auth, redirect, self.manifest.id
         )

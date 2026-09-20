@@ -11,6 +11,7 @@ from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -61,6 +62,21 @@ class GoogleDriveProvider(GoogleProvider):
         logo_url="https://cdn.simpleicons.org/googledrive",
         docs_url="https://developers.google.com/drive/api/guides/about-sdk",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://console.cloud.google.com/apis/credentials",
+            console_label="Open Google Cloud credentials",
+            steps=[
+                "Enable the Google Drive API (APIs & Services → Library).",
+                (
+                    "Create (or reuse) a Web application OAuth client with the redirect URI "
+                    "shown here."
+                ),
+                (
+                    "Copy the Client ID and Client secret. The same app serves Gmail and "
+                    "Google Calendar."
+                ),
+            ],
+        ),
         capabilities=[Capability.search, Capability.read, Capability.create],
         permissions=[
             PermissionSpec(

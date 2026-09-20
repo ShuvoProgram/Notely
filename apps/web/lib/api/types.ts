@@ -442,6 +442,19 @@ export interface ConfigField {
 
 export type ConnectMethod = "oauth" | "mcp";
 
+export interface OAuthSetupGuide {
+  console_url: string;
+  console_label: string;
+  steps: string[];
+  scopes_note: string;
+}
+
+export interface WorkspaceApp {
+  client_id: string;
+  configured_by_me: boolean;
+  updated_at: string;
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -455,6 +468,11 @@ export interface Provider {
   config_fields: ConfigField[];
   /** The vendor's official remote MCP server (one-click OAuth without a per-deployment app). */
   mcp_server_url: string | null;
+  /** Registering the workspace's own vendor app when the deployment has none. */
+  settings_prefix: string | null;
+  oauth_setup: OAuthSetupGuide | null;
+  redirect_uri: string | null;
+  workspace_app: WorkspaceApp | null;
   /** How this user can connect on this deployment. Empty → nothing is possible yet. */
   connect_methods: ConnectMethod[];
   supports_webhooks: boolean;

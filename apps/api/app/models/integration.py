@@ -109,6 +109,23 @@ class ExternalItem(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base)
     indexed_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
 
 
+class TenantOAuthApp(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """An OAuth app a workspace registered itself with a vendor (client id + encrypted secret),
+    used instead of the deployment-wide OAUTH_* settings. Keyed by settings prefix ("google"
+    serves Gmail, Calendar and Drive; "microsoft" serves Teams, Outlook and OneDrive)."""
+
+    __tablename__ = "tenant_oauth_apps"
+    __table_args__ = (UniqueConstraint("tenant_id", "prefix", name="uq_tenant_oauth_apps"),)
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prefix: Mapped[str] = mapped_column(String(40), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    client_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    configured_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+
 class OAuthDynamicClient(UUIDPrimaryKeyMixin, Base):
     """A client this deployment registered with an OAuth authorization server via RFC 7591
     (remote MCP servers). One row per issuer; shared by every user of the deployment."""

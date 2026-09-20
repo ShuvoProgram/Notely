@@ -307,7 +307,7 @@ async def test_oauth_connect_flow_with_pkce_state_and_encrypted_tokens(
     assert q["client_id"] == ["fake-client"]
     assert q["code_challenge_method"] == ["S256"]
     assert q["scope"] == ["files:read files:write"]  # required + selected optional, bogus dropped
-    assert q["redirect_uri"] == ["http://localhost:8000/api/v1/oauth/fakeoauth/callback"]
+    assert q["redirect_uri"] == ["http://localhost:3000/api/v1/oauth/fakeoauth/callback"]
     state = q["state"][0]
 
     # Wrong/forged state is refused before any token exchange.

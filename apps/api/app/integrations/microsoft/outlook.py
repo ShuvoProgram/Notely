@@ -12,6 +12,7 @@ from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -90,6 +91,24 @@ class OutlookProvider(MicrosoftGraphProvider):
         logo_url="https://cdn.simpleicons.org/microsoftoutlook",
         docs_url="https://learn.microsoft.com/graph/api/resources/mail-api-overview",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+            console_label="Open Azure app registrations",
+            steps=[
+                (
+                    "New registration (or reuse the Teams/OneDrive one) with the redirect "
+                    "URI shown here."
+                ),
+                (
+                    "API permissions → Microsoft Graph → Delegated: add the scopes listed "
+                    "under Permissions."
+                ),
+                (
+                    "Certificates & secrets → New client secret; copy it with the "
+                    "Application (client) ID."
+                ),
+            ],
+        ),
         capabilities=[
             Capability.search,
             Capability.read,

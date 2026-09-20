@@ -14,6 +14,7 @@ from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -94,6 +95,16 @@ class JiraProvider(RestOAuthProvider):
         docs_url="https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/",
         mcp_server_url="https://mcp.atlassian.com/v1/mcp",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://developer.atlassian.com/console/myapps/",
+            console_label="Open the Atlassian developer console",
+            steps=[
+                "Create → OAuth 2.0 integration.",
+                "Authorization → OAuth 2.0 (3LO) → Callback URL: the redirect URI shown here.",
+                "Permissions → Jira API: add the scopes listed under Permissions.",
+                "Settings: copy the Client ID and Secret.",
+            ],
+        ),
         capabilities=[Capability.search, Capability.read, Capability.create, Capability.comment],
         permissions=[
             PermissionSpec(

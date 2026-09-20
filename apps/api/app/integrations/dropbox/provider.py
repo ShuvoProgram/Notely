@@ -13,6 +13,7 @@ from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -79,6 +80,16 @@ class DropboxProvider(RestOAuthProvider):
         logo_url="https://cdn.simpleicons.org/dropbox",
         docs_url="https://www.dropbox.com/developers/documentation/http/documentation",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://www.dropbox.com/developers/apps",
+            console_label="Open the Dropbox App Console",
+            steps=[
+                "Create app → Scoped access → Full Dropbox (or App folder).",
+                "Settings → Redirect URIs: add the redirect URI shown here.",
+                "Permissions: tick the scopes listed under Permissions, then Submit.",
+                "Settings: copy the App key (client ID) and App secret.",
+            ],
+        ),
         capabilities=[Capability.search, Capability.read, Capability.create],
         permissions=[
             PermissionSpec(

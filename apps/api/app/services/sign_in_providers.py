@@ -11,7 +11,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.core.exceptions import ProviderNotConfigured
-from app.core.oauth import OAuthClient, OAuthClientConfig, OAuthEndpoints
+from app.core.oauth import OAuthClient, OAuthClientConfig, OAuthEndpoints, callback_uri
 from app.models.user import SignInProvider
 
 
@@ -91,8 +91,7 @@ def get_sign_in_provider(settings: Settings, provider_id: str) -> SignInProvider
 
 
 def redirect_uri_for(settings: Settings, provider_id: str) -> str:
-    base = settings.api_public_url.rstrip("/")
-    return f"{base}{settings.api_prefix}/auth/oauth/{provider_id}/callback"
+    return callback_uri(settings, f"/auth/oauth/{provider_id}/callback")
 
 
 def build_client(settings: Settings, spec: SignInProviderSpec) -> OAuthClient:

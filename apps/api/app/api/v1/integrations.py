@@ -12,12 +12,13 @@ from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.core import metrics
 from app.core.config import get_settings
 from app.core.exceptions import APIError, NotFound
+from app.core.oauth import callback_uri
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
 from app.db.base import utcnow
 from app.integrations.base.provider import IntegrationProvider
 from app.integrations.registry import get_provider
-from app.models.integration import UserConnection, WebhookEvent
+from app.models.integration import TenantOAuthApp, UserConnection, WebhookEvent
 from app.schemas.integrations import (
     ConnectionOut,
     ConnectionTestOut,
@@ -26,8 +27,10 @@ from app.schemas.integrations import (
     ProviderDetailOut,
     ProviderOut,
     TestStepOut,
+    WorkspaceAppIn,
+    WorkspaceAppOut,
 )
-from app.services.connection_service import ConnectionService, MarketplaceEntry
+from app.services.connection_service import ConnectionService, MarketplaceEntry, settings_prefix_of
 from app.workers.queue import enqueue
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -50,9 +53,25 @@ def connection_out(conn: UserConnection | None) -> ConnectionOut | None:
     return ConnectionOut.model_validate(conn) if conn else None
 
 
-def provider_out(entry: MarketplaceEntry) -> ProviderOut:
+def provider_out(
+    entry: MarketplaceEntry, app: TenantOAuthApp | None = None, user_id: Any = None
+) -> ProviderOut:
     m = entry.provider.manifest
+    settings = get_settings()
+    prefix = settings_prefix_of(entry.provider)
     return ProviderOut(
+        settings_prefix=prefix,
+        oauth_setup=m.oauth_setup,
+        redirect_uri=callback_uri(settings, f"/oauth/{m.id}/callback") if prefix else None,
+        workspace_app=(
+            WorkspaceAppOut(
+                client_id=app.client_id,
+                configured_by_me=app.configured_by == user_id,
+                updated_at=app.updated_at,
+            )
+            if app is not None
+            else None
+        ),
         id=m.id,
         name=m.name,
         category=m.category,
@@ -89,7 +108,9 @@ async def provider_detail(
     )
     if entry is None:
         raise NotFound("Unknown integration.")
-    base = provider_out(entry).model_dump()
+    prefix = settings_prefix_of(entry.provider)
+    app = await service.workspace_app(ctx.user, prefix) if prefix else None
+    base = provider_out(entry, app, ctx.user.id).model_dump()
     count = await service.local_item_count(entry.connection) if entry.connection else 0
     tools = entry.connection.metadata_.get("tools", []) if entry.connection else []
     return ok(
@@ -97,6 +118,32 @@ async def provider_detail(
             **base, local_item_count=count, tools=tools if isinstance(tools, list) else []
         )
     )
+
+
+@router.put(
+    "/providers/{provider_id}/oauth-app",
+    response_model=Envelope[WorkspaceAppOut],
+    dependencies=[Depends(connect_limit)],
+)
+async def save_workspace_app(
+    provider_id: str, payload: WorkspaceAppIn, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    """Register the workspace's own vendor OAuth app (client id + secret, stored encrypted).
+    After this, everyone in the workspace connects with the normal one-click consent flow."""
+    row = await service.save_workspace_app(
+        ctx.user, provider_id, client_id=payload.client_id, client_secret=payload.client_secret
+    )
+    return ok(
+        WorkspaceAppOut(client_id=row.client_id, configured_by_me=True, updated_at=row.updated_at)
+    )
+
+
+@router.delete("/providers/{provider_id}/oauth-app", response_model=Envelope[dict[str, bool]])
+async def delete_workspace_app(
+    provider_id: str, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    await service.delete_workspace_app(ctx.user, provider_id)
+    return ok({"deleted": True})
 
 
 # --- connections --------------------------------------------------------------------------------

@@ -88,7 +88,7 @@ class FakeAuthServer:
             body = json.loads(r.content)
             self.registrations.append(body)
             assert body["token_endpoint_auth_method"] == "none"
-            assert body["redirect_uris"][0].startswith("http://localhost:8000/api/v1/oauth/")
+            assert body["redirect_uris"][0].startswith("http://localhost:3000/api/v1/oauth/")
             return httpx.Response(
                 201,
                 json={"client_id": f"dyn-{len(self.registrations)}", "client_secret_expires_at": 0},

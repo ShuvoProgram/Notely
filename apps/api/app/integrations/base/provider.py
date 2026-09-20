@@ -51,6 +51,16 @@ class ConfigField(BaseModel):
     options: list[dict[str, str]] = Field(default_factory=list)
 
 
+class OAuthSetupGuide(BaseModel):
+    """How a workspace owner registers their own OAuth app with the vendor (shown in-app when
+    the deployment has none). Steps are plain text; the redirect URI is filled in by the API."""
+
+    console_url: str
+    console_label: str = "Open the developer console"
+    steps: list[str] = Field(default_factory=list)
+    scopes_note: str = ""
+
+
 class ProviderManifest(BaseModel):
     id: str
     name: str
@@ -66,6 +76,8 @@ class ProviderManifest(BaseModel):
     # OAuth app: the server's authorization server registers Notely dynamically (RFC 7591) and
     # the user just clicks Connect. Tools then come from the MCP server instead of the adapter.
     mcp_server_url: str | None = None
+    # How a workspace owner registers their own OAuth app when the deployment has none.
+    oauth_setup: OAuthSetupGuide | None = None
     supports_webhooks: bool = False
     supports_sync: bool = False
 

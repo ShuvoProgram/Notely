@@ -11,8 +11,15 @@ from pydantic import BaseModel
 
 from app.ai.tools.base import ToolContext, ToolSpec, Verification, untrusted
 from app.core.config import Settings
-from app.core.oauth import OAuthClient, OAuthClientConfig, OAuthEndpoints, OAuthTokens
+from app.core.oauth import (
+    OAuthClient,
+    OAuthClientConfig,
+    OAuthEndpoints,
+    OAuthTokens,
+    callback_uri,
+)
 from app.integrations.base.capabilities import Capability, risk_for
+from app.integrations.base.credentials import client_credentials
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.http import ProviderHttpClient
 from app.integrations.base.provider import (
@@ -55,10 +62,10 @@ class RestOAuthProvider(IntegrationProvider):
     # --- configuration ----------------------------------------------------------------------
 
     def oauth_config(self, settings: Settings) -> OAuthClientConfig | None:
-        client_id = getattr(settings, f"oauth_{self.settings_prefix}_client_id", "")
-        client_secret = getattr(settings, f"oauth_{self.settings_prefix}_client_secret", "")
-        if not client_id or not client_secret:
+        creds = client_credentials(settings, self.settings_prefix)
+        if creds is None:
             return None
+        client_id, client_secret = creds
         return OAuthClientConfig(
             provider_id=self.manifest.id,
             client_id=client_id,
@@ -73,11 +80,9 @@ class RestOAuthProvider(IntegrationProvider):
         config = self.oauth_config(ctx.settings)
         if config is None:
             raise ProviderError(ProviderErrorKind.misconfigured, provider=self.manifest.id)
-        redirect = (
-            f"{ctx.settings.api_public_url.rstrip('/')}{ctx.settings.api_prefix}"
-            f"/oauth/{self.manifest.id}/callback"
+        return OAuthClient(
+            config, callback_uri(ctx.settings, f"/oauth/{self.manifest.id}/callback")
         )
-        return OAuthClient(config, redirect)
 
     # --- HTTP -----------------------------------------------------------------------------------
 

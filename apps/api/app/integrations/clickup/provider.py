@@ -17,6 +17,7 @@ from app.integrations.base.http import ProviderHttpClient
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -78,6 +79,14 @@ class ClickUpProvider(RestOAuthProvider):
         logo_url="https://cdn.simpleicons.org/clickup",
         docs_url="https://developer.clickup.com/docs/authentication",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://app.clickup.com/settings/integrations/clickup-api",
+            console_label="Open ClickUp's API settings",
+            steps=[
+                "Create an app; set the redirect URL to the redirect URI shown here.",
+                "Copy the Client ID and Client secret.",
+            ],
+        ),
         capabilities=[Capability.read, Capability.create, Capability.update],
         permissions=[
             PermissionSpec(

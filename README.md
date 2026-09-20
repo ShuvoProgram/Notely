@@ -157,17 +157,20 @@ can do, the risks, what the vendor receives), press *Continue with Notely* and a
 vendor's own screen — exactly like a ChatGPT connector. There is no token to paste, ever. Two
 doors, tried in this order:
 
-1. **The deployment's OAuth app** — `OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET` (Teams, Outlook and
-   OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share `OAUTH_GOOGLE_*`).
-   Redirect URI: `{API_PUBLIC_URL}/api/v1/oauth/{provider}/callback`.
+1. **A vendor OAuth app** — either deployment-wide (`OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET`;
+   Teams, Outlook and OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share
+   `OAUTH_GOOGLE_*`) or **registered in-app by the workspace owner**: the provider page walks
+   through the vendor's console, shows the redirect URI to copy, and takes the client id +
+   secret (stored encrypted, per workspace). Redirect URI:
+   `{FRONTEND_ORIGIN}/api/v1/oauth/{provider}/callback` — callbacks come back through the app's
+   own origin, so they never depend on where the API process listens.
 2. **The vendor's official MCP server** — no app registration at all. Notely discovers the
    server's authorization server (RFC 9728/8414), registers itself once per deployment (RFC 7591
    dynamic client registration) and runs a PKCE flow. Notion, Jira/Atlassian, ClickUp, Stripe and
    PayPal connect this way out of the box; any custom MCP server URL goes through the same
    discovery, and public servers connect instantly.
 
-Vendors with neither door open on a deployment (no OAuth app registered, no official MCP server)
-show *Not available on this deployment* until an administrator registers the app.
+Vendors with neither door open yet show *Needs a one-time setup* with the guided registration.
 
 Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`,
 `onedrive`, `dropbox`, `gmail`, `google_calendar`, `google_drive`, `clickup`, `stripe`, `paypal`,

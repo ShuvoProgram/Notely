@@ -11,6 +11,7 @@ from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
+    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -54,6 +55,18 @@ class GoogleCalendarProvider(GoogleProvider):
         logo_url="https://cdn.simpleicons.org/googlecalendar",
         docs_url="https://developers.google.com/calendar/api/guides/overview",
         auth=AuthType.oauth2,
+        oauth_setup=OAuthSetupGuide(
+            console_url="https://console.cloud.google.com/apis/credentials",
+            console_label="Open Google Cloud credentials",
+            steps=[
+                "Enable the Google Calendar API (APIs & Services → Library).",
+                (
+                    "Create (or reuse) a Web application OAuth client with the redirect URI "
+                    "shown here."
+                ),
+                "Copy the Client ID and Client secret. The same app serves Gmail and Google Drive.",
+            ],
+        ),
         capabilities=[Capability.search, Capability.read, Capability.schedule],
         permissions=[
             PermissionSpec(
