@@ -39,7 +39,7 @@ export function SignupForm() {
       : signup.error;
 
   return (
-    <form noValidate className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
+    <form noValidate aria-label="Create account" className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
       <AuthFormError error={bannerError} />
       <FormField
         label="Name"
@@ -63,6 +63,17 @@ export function SignupForm() {
         error={form.formState.errors.password?.message}
         {...form.register("password")}
       />
+      <p className="text-xs text-muted-foreground">
+        By creating an account you agree to the{" "}
+        <Link href="/terms-and-conditions" className="text-foreground underline-offset-4 hover:underline">
+          Terms &amp; Conditions
+        </Link>{" "}
+        and{" "}
+        <Link href="/privacy-policy" className="text-foreground underline-offset-4 hover:underline">
+          Privacy Policy
+        </Link>
+        .
+      </p>
       <Button type="submit" className="w-full" disabled={signup.isPending}>
         {signup.isPending ? "Creating account…" : "Create account"}
       </Button>

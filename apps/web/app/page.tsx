@@ -2,7 +2,8 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Logo } from "@/components/brand/logo";
+import { SiteFooter } from "@/components/site/site-footer";
+import { SiteHeader } from "@/components/site/site-header";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/api/server";
 
@@ -12,17 +13,7 @@ export default async function LandingPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-5 sm:px-6">
-        <Logo />
-        <nav className="flex items-center gap-2">
-          <Button variant="ghost" asChild>
-            <Link href="/login">Sign in</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/signup">Get started</Link>
-          </Button>
-        </nav>
-      </header>
+      <SiteHeader />
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-4 py-16 sm:px-6">
         <p className="mb-4 text-sm font-medium text-ai">AI-first notes</p>
         <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -43,6 +34,7 @@ export default async function LandingPage() {
           </Button>
         </div>
       </main>
+      <SiteFooter />
     </div>
   );
 }

@@ -14,6 +14,14 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
         <Logo />
       </Link>
       <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-sm sm:p-8">{children}</div>
+      <nav aria-label="Legal" className="mt-6 flex gap-4 text-xs text-muted-foreground">
+        <Link href="/privacy-policy" className="underline-offset-4 hover:text-foreground hover:underline">
+          Privacy Policy
+        </Link>
+        <Link href="/terms-and-conditions" className="underline-offset-4 hover:text-foreground hover:underline">
+          Terms &amp; Conditions
+        </Link>
+      </nav>
     </div>
   );
 }
