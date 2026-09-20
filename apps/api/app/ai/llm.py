@@ -47,8 +47,23 @@ def set_fake_script(messages: list[AIMessage], *, user_id: str | None = None) ->
     captured_prompts.clear()
 
 
+def _has_script(user_id: str | None) -> bool:
+    return bool(_fake_scripts.get(user_id) or _fake_scripts.get(None))
+
+
+# What the scripted model says when nothing was scripted: an honest hint rather than silence.
+UNSCRIPTED_REPLY = (
+    "This deployment runs the scripted `fake` AI provider and no reply was scripted. "
+    "Add your own model under Settings → AI, or point AI_PROVIDER at a real gateway."
+)
+
+
 def _script_for(user_id: str | None) -> list[AIMessage]:
-    return _fake_scripts.get(user_id) or _fake_scripts.get(None) or [AIMessage(content="")]
+    return (
+        _fake_scripts.get(user_id)
+        or _fake_scripts.get(None)
+        or [AIMessage(content=UNSCRIPTED_REPLY)]
+    )
 
 
 def resolve_model_alias(settings: Settings, preference: str | None) -> str:
@@ -68,7 +83,10 @@ def get_chat_model(
     """The model to run with: the scripted model in tests/dev, else the user's own provider
     (`byo`) when they configured one, else the workspace LiteLLM gateway."""
     settings = settings or get_settings()
-    if settings.ai_provider == "fake":
+    # The scripted model stands in for the *workspace gateway* only. A user who brought their
+    # own key gets their real vendor even on a `fake` deployment — unless a test scripted the
+    # reply for them, which is how the BYO plumbing itself is tested offline.
+    if settings.ai_provider == "fake" and (byo is None or _has_script(script_key)):
         if settings.is_production:
             raise RuntimeError("fake AI provider is not permitted in production")
         return ScriptedChatModel(responses=_script_for(script_key))

@@ -366,11 +366,17 @@ class AIRunner:
             _observe_drive(model_label, "failed", drive_timer, usage)
             await self.db.rollback()
             await self._finish(run, RunStatus.failed, error=type(exc).__name__)
-            yield {
-                "type": "error",
-                "code": "AI_RUN_FAILED",
-                "message": "The assistant ran into a problem. Please try again.",
-            }
+            message = "The assistant ran into a problem. Please try again."
+            if byo is not None:
+                # Their own key/model failed: say why (categorised, no raw vendor text) and
+                # where to fix it, instead of a generic shrug.
+                from app.ai.byo import classify_error
+
+                message = (
+                    f"Your own model ({byo.model}) failed: {classify_error(exc)} "
+                    "Check Settings → AI."
+                )
+            yield {"type": "error", "code": "AI_RUN_FAILED", "message": message}
             yield {"type": "done", "run_id": str(run.id), "status": "failed", "usage": usage}
             return
 
