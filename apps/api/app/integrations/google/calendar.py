@@ -70,6 +70,11 @@ class GoogleCalendarProvider(GoogleProvider):
         ],
     )
 
+    async def account_email(self, ctx: ProviderContext) -> str:
+        async with self.http(ctx) as http:
+            cal = (await http.get("/calendars/primary")).json()
+        return str(cal.get("id") or cal.get("summary") or "Google Calendar")
+
     async def probe(self, ctx: ProviderContext) -> str:
         async with self.http(ctx) as http:
             cal = (await http.get("/calendars/primary")).json()

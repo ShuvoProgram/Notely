@@ -126,6 +126,11 @@ class GmailProvider(GoogleProvider):
         ],
     )
 
+    async def account_email(self, ctx: ProviderContext) -> str:
+        async with self.http(ctx) as http:
+            profile = (await http.get("/profile")).json()
+        return str(profile.get("emailAddress") or "Gmail account")
+
     async def probe(self, ctx: ProviderContext) -> str:
         async with self.http(ctx) as http:
             profile = (await http.get("/profile")).json()

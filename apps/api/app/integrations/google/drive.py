@@ -77,6 +77,11 @@ class GoogleDriveProvider(GoogleProvider):
         ],
     )
 
+    async def account_email(self, ctx: ProviderContext) -> str:
+        async with self.http(ctx) as http:
+            about = (await http.get("/about", params={"fields": "user"})).json()
+        return str((about.get("user") or {}).get("emailAddress") or "Google Drive")
+
     async def probe(self, ctx: ProviderContext) -> str:
         async with self.http(ctx) as http:
             about = (await http.get("/about", params={"fields": "user,storageQuota"})).json()

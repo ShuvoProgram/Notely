@@ -30,13 +30,18 @@ class GoogleProvider(RestOAuthProvider):
     use_pkce = True
 
     async def identity(self, ctx: ProviderContext) -> ConnectionIdentity:
-        async with self.http(ctx, "https://www.googleapis.com/oauth2/v2") as http:
-            me = (await http.get("/userinfo")).json()
+        """Who we're connected as. Each product reads it from its own API, because the
+        userinfo endpoint needs the `email`/`profile` scopes that a Gmail/Calendar/Drive token
+        was deliberately not granted."""
+        email = await self.account_email(ctx)
         return ConnectionIdentity(
-            external_account_id=str(me.get("id") or me.get("email")),
-            external_account_name=str(me.get("email") or me.get("name") or "Google account"),
-            metadata={"email": me.get("email")},
+            external_account_id=email,
+            external_account_name=email,
+            metadata={"email": email},
         )
+
+    async def account_email(self, ctx: ProviderContext) -> str:
+        raise NotImplementedError
 
     @staticmethod
     def items(body: dict[str, Any], key: str) -> list[dict[str, Any]]:

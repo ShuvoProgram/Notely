@@ -674,7 +674,7 @@ class VendorMock:
     def _google_calendar(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
         base = "/calendar/v3"
         if path == f"{base}/calendars/primary":
-            return _json(200, {"id": "primary", "summary": "ada@acme.io"})
+            return _json(200, {"id": "ada@acme.io", "summary": "ada@acme.io"})
         if path == f"{base}/calendars/primary/events" and r.method == "GET":
             return _json(
                 200,
