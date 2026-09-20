@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
+import { noteKeys } from "@/features/notes/hooks";
 import { useAutosave } from "@/features/notes/use-autosave";
 import type { Note, TipTapDoc } from "@/lib/api/types";
 
@@ -90,5 +91,46 @@ describe("useAutosave", () => {
     });
     await waitFor(() => expect(result.current.status).toBe("saved"));
     expect(JSON.parse(fetchSpy.mock.calls[1]![1]!.body as string).title).toBe("");
+  });
+
+  it("keeps the cached note in step with the editor, so leaving and coming back shows what was typed", async () => {
+    // Regression: after a save the detail cache kept the *pre-edit* body, so navigating to a
+    // task and back re-mounted the editor from stale content (and a later save wrote it back).
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(noteKeys.detail(note.id), note);
+    const wrap = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    let resolveSave: (r: Response) => void = () => {};
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(() => new Promise((r) => (resolveSave = r)));
+
+    const first = renderHook(() => useAutosave(note), { wrapper: wrap });
+    act(() => first.result.current.queue({ content_json: doc("typed") }));
+    // Before any save, the cache already reflects the keystrokes.
+    expect(client.getQueryData<Note>(noteKeys.detail(note.id))?.content_json).toEqual(doc("typed"));
+
+    // Navigate away: the editor unmounts and flushes; the request is still in flight.
+    first.unmount();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+
+    // Navigate back while that save is still pending: the remounted editor sees the typed text…
+    const cached = client.getQueryData<Note>(noteKeys.detail(note.id))!;
+    expect(cached.content_json).toEqual(doc("typed"));
+    const second = renderHook(() => useAutosave(cached), { wrapper: wrap });
+
+    // …and once the first save lands (version 2), the cache still shows the typed body.
+    await act(async () => {
+      resolveSave(json(200, { data: { ...note, content_json: doc("server-normalised"), version: 2 }, meta: {} }));
+    });
+    await waitFor(() => expect(client.getQueryData<Note>(noteKeys.detail(note.id))?.version).toBe(2));
+    expect(client.getQueryData<Note>(noteKeys.detail(note.id))?.content_json).toEqual(doc("typed"));
+
+    // The second instance continues from version 2 — no false conflict on its next save.
+    fetchSpy.mockResolvedValueOnce(json(200, { data: { ...note, version: 3 }, meta: {} }));
+    act(() => second.result.current.queue({ title: "Again" }));
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    await waitFor(() => expect(second.result.current.status).toBe("saved"));
+    const body = JSON.parse(fetchSpy.mock.calls[1]![1]!.body as string);
+    expect(body).toEqual({ title: "Again", expected_version: 2 });
   });
 });

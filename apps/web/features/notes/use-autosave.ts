@@ -33,6 +33,12 @@ export interface Autosave {
 
 const DEBOUNCE_MS = 900;
 
+// Saves outlive the hook instance that started them (the editor unmounts on navigation and
+// flushes on the way out). A freshly mounted editor for the same note must wait for that save
+// and continue from the version it produced, or its first save would be a false conflict.
+const inflightByNote = new Map<string, Promise<void>>();
+const savedVersionByNote = new Map<string, number>();
+
 function hasPending(change: PendingChange): boolean {
   return change.title !== undefined || change.content_json !== undefined;
 }
@@ -49,7 +55,8 @@ export function useAutosave(note: Note): Autosave {
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [version, setVersion] = React.useState(note.version);
 
-  const versionRef = React.useRef(note.version);
+  // A previous instance may have saved a newer version while this one was mounting.
+  const versionRef = React.useRef(Math.max(note.version, savedVersionByNote.get(note.id) ?? 0));
   const pendingRef = React.useRef<PendingChange>({});
   const latestRef = React.useRef<{ title: string; content_json: TipTapDoc }>({
     title: note.title,
@@ -60,11 +67,29 @@ export function useAutosave(note: Note): Autosave {
 
   // Callers mount one hook instance per note (`key={note.id}`), so no reset-on-change is needed.
 
+  // The detail cache is what a remounted editor initialises from, so it must always hold what
+  // the user sees — not what the server had before they started typing.
+  const mirrorToCache = React.useCallback(
+    (patch: Partial<Note>) => {
+      queryClient.setQueryData<Note>(noteKeys.detail(note.id), (old) =>
+        old ? { ...old, ...patch, title: latestRef.current.title, content_json: latestRef.current.content_json } : old,
+      );
+    },
+    [note.id, queryClient],
+  );
+
   const save = React.useCallback(
     async (force: boolean): Promise<void> => {
+      if (!force && !hasPending(pendingRef.current)) return;
+      const prior = inflightRef.current ?? inflightByNote.get(note.id);
+      if (prior) await prior;
+      const carriedVersion = savedVersionByNote.get(note.id);
+      if (carriedVersion !== undefined && carriedVersion > versionRef.current) {
+        versionRef.current = carriedVersion;
+      }
+      // Re-read after awaiting: more may have been typed, or the prior save may have sent it.
       const change = pendingRef.current;
       if (!force && !hasPending(change)) return;
-      if (inflightRef.current) await inflightRef.current;
 
       const payload: PendingChange & { expected_version?: number } = force
         ? { ...latestRef.current }
@@ -76,10 +101,9 @@ export function useAutosave(note: Note): Autosave {
         try {
           const saved = await notesApi.update(note.id, payload);
           versionRef.current = saved.version;
+          savedVersionByNote.set(note.id, saved.version);
           setVersion(saved.version);
-          queryClient.setQueryData<Note>(noteKeys.detail(note.id), (old) =>
-            old ? { ...old, ...saved, content_json: old.content_json, title: old.title } : saved,
-          );
+          mirrorToCache(saved);
           queryClient.invalidateQueries({ queryKey: ["notes", "list"] });
           setConflictVersion(null);
           setErrorMessage(null);
@@ -106,10 +130,12 @@ export function useAutosave(note: Note): Autosave {
         }
       })();
       inflightRef.current = run;
+      inflightByNote.set(note.id, run);
       await run;
       inflightRef.current = null;
+      if (inflightByNote.get(note.id) === run) inflightByNote.delete(note.id);
     },
-    [note.id, queryClient],
+    [note.id, mirrorToCache, queryClient],
   );
 
   const schedule = React.useCallback(() => {
@@ -125,11 +151,12 @@ export function useAutosave(note: Note): Autosave {
       pendingRef.current = { ...pendingRef.current, ...change };
       latestRef.current = { ...latestRef.current, ...change };
       writeDraft(note.id, { ...latestRef.current, base_version: versionRef.current });
+      mirrorToCache({});
       if (status === "conflict") return; // wait for the user to resolve
       setStatus("dirty");
       schedule();
     },
-    [note.id, schedule, status],
+    [note.id, mirrorToCache, schedule, status],
   );
 
   const flush = React.useCallback(async () => {

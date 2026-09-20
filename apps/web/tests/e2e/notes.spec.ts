@@ -133,3 +133,45 @@ test("unsaved draft survives a crash-like reload", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Note body" })).toContainText("Only in the browser so far");
 });
+
+test("typing, switching to Tasks and coming back keeps the text (client-side navigation)", async ({ page }) => {
+  // Regression: after an autosave the note cache kept the pre-edit body, so returning to the
+  // note via in-app navigation showed the old text — and the next save wrote it back.
+  await signup(page);
+  await page.goto("/app/notes");
+  await page.getByRole("button", { name: "Create your first note" }).click();
+  await expect(page).toHaveURL(/\/app\/notes\/[0-9a-f-]{36}$/);
+  const noteUrl = page.url();
+
+  await page.getByLabel("Note title").fill("Standup notes");
+  const body = page.getByRole("textbox", { name: "Note body" });
+  await body.click();
+  await body.pressSequentially("First thought, saved by autosave.");
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
+
+  // Keep typing and leave immediately, before the debounce fires (the unmount flush must save it).
+  await body.press("Enter");
+  await body.pressSequentially("Second thought, typed right before leaving.");
+  await page.getByRole("link", { name: "Tasks" }).first().click();
+  await expect(page).toHaveURL(/\/app\/tasks/);
+
+  // Back to the same note through the app (no reload): everything typed is still there.
+  await page.getByRole("link", { name: "Notes" }).first().click();
+  await page.getByRole("complementary", { name: "Notes list" }).getByText("Standup notes").click();
+  await expect(page).toHaveURL(noteUrl);
+  const bodyAgain = page.getByRole("textbox", { name: "Note body" });
+  await expect(bodyAgain).toContainText("First thought, saved by autosave.");
+  await expect(bodyAgain).toContainText("Second thought, typed right before leaving.");
+  await expect(page.getByLabel("Note title")).toHaveValue("Standup notes");
+
+  // Editing again saves against the latest version — no conflict banner.
+  await bodyAgain.click();
+  await bodyAgain.press("Control+End");
+  await bodyAgain.pressSequentially(" Third.");
+  await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/changed elsewhere|conflict/i)).toHaveCount(0);
+
+  // And the server has all of it.
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Note body" })).toContainText("Second thought, typed right before leaving. Third.");
+});
