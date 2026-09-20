@@ -1,0 +1,13 @@
+# Scrape config for the Notely API. Put METRICS_TOKEN into the file referenced below.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: notely-api
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/notely-metrics-token
+    static_configs:
+      - targets: ["api:8000"]

@@ -16,6 +16,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import (
+    BodySizeLimitMiddleware,
     CSRFOriginMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -65,7 +66,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # Middleware executes in reverse registration order; CORS must be outermost.
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
+    app.add_middleware(BodySizeLimitMiddleware, settings=settings)
     app.add_middleware(CSRFOriginMiddleware, settings=settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -98,6 +100,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         v1.include_router(ai_dev.router)
     app.include_router(v1)
     app.include_router(health.router)
+    if settings.metrics_enabled:
+        from app.api.metrics import router as metrics_router
+
+        app.include_router(metrics_router)
     return app
 
 

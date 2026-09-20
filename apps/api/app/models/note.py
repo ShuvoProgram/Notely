@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -66,6 +67,7 @@ class Note(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     """A note. `content_json` is canonical TipTap JSON; `plain_text` is derived server-side."""
 
     __tablename__ = "notes"
+    __table_args__ = (Index("ix_notes_user_updated", "user_id", "updated_at"),)
 
     title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     content_json: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False, default=dict)

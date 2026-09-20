@@ -231,9 +231,33 @@ model (opt in with `AI_EVAL=1`; skipped otherwise) and grades deterministically 
 pipeline did: tool/provider selection, approval enforcement, injection resistance, hallucination
 resistance, planning before writes, honest verification reporting. Vendor APIs stay mocked.
 
-## What Phase 7 adds
+## Production hardening (Phase 7)
 
-Production hardening: security review, rate-limit coverage, observability (tracing/metrics),
-error-handling passes, performance, broader E2E, deployment. Selective indexing into
-`external_items` remains post-MVP. Each phase reuses the foundations above rather than adding
-parallel mechanisms.
+Nothing new architecturally; every layer got its production edges (see `docs/deployment.md` for
+the operator's view):
+
+- **Security.** `SecurityHeadersMiddleware` adds CSP (`default-src 'none'`), COOP/CORP,
+  Permissions-Policy and HSTS (when cookies are secure); `BodySizeLimitMiddleware` returns 413
+  before parsing oversized bodies (separate cap for webhooks). Forwarded IP headers are only
+  trusted with `TRUST_PROXY_HEADERS=true`. The web app ships a CSP, HSTS (`WEB_SECURE`) and
+  error boundaries that never show stack traces. Production settings are validated at startup
+  (`Settings.validate_for_runtime`) and reported by `/health/ready`. CI scans for committed
+  secrets and runs dependency audits.
+- **Rate limiting.** `rate_limit(scope, limit, key=user|tenant|ip|provider)`; routes stack
+  several: AI chat/approve/actions (user + tenant), search (user), auth and OAuth (IP), webhooks
+  (provider + IP), integration connect/test (user). All limits are settings.
+- **Observability.** `app/core/metrics.py` (Prometheus) + `GET /metrics` (bearer). Request
+  latency/errors by *route template*, DB statement latency (SQLAlchemy cursor events), queue
+  depth and connection gauges sampled on scrape, job outcomes (`workers/instrument.py`), AI runs /
+  tokens / tool calls / approvals / verifications, provider latency and error kinds, OAuth
+  failures, webhooks. `ContextFilter` puts `request_id` and `user_id` on every log record.
+- **Error handling.** One `ProviderError` → HTTP mapping (`PROVIDER_STATUS`) for every route
+  that touches a vendor: categorised code + message, `retryable`, `Retry-After`; unhandled
+  exceptions are a fixed `INTERNAL_ERROR` envelope.
+- **Performance.** Composite indexes for every per-user listing (`0006`), configurable
+  Postgres pool, immutable caching for hashed assets at the edge.
+- **Deployment.** `docker-compose.prod.yml` (nothing published but the nginx edge, TLS,
+  SSE-safe proxying, worker/web healthchecks), `infra/monitoring/` scrape + alert rules.
+
+Post-MVP: selective indexing into `external_items`, task sync to external providers, vector
+search over notes. Each reuses the foundations above rather than adding parallel mechanisms.

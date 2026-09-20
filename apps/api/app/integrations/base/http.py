@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from app.core import metrics
 from app.core.logging import get_logger
 from app.integrations.base.errors import ProviderError, ProviderErrorKind, classify_http_status
 
@@ -68,8 +69,13 @@ class ProviderHttpClient:
         while True:
             attempt += 1
             try:
-                response = await self._client.request(method, url, **kwargs)
+                with metrics.Timer() as timer:
+                    response = await self._client.request(method, url, **kwargs)
+                metrics.provider_latency.labels(self.provider, method.upper()).observe(
+                    timer.seconds
+                )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                metrics.provider_errors.labels(self.provider, "unavailable").inc()
                 error = ProviderError(
                     ProviderErrorKind.unavailable, type(exc).__name__, provider=self.provider
                 )
@@ -82,6 +88,7 @@ class ProviderHttpClient:
             error = classify_http_status(
                 response.status_code, provider=self.provider, body_hint=response.text[:500]
             )
+            metrics.provider_errors.labels(self.provider, error.kind.value).inc()
             retry_after = _retry_after_seconds(response)
             error.retry_after = retry_after
             if error.retryable and attempt < self.max_attempts:

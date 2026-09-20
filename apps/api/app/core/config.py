@@ -41,11 +41,26 @@ class Settings(BaseSettings):
     # Public URL of this API, used to build OAuth redirect URIs
     api_public_url: str = "http://localhost:8000"
 
-    # Rate limiting (per window)
+    # Rate limiting (per minute window). Keys: user, tenant, IP, provider — see core/rate_limit.py
     rate_limit_enabled: bool = True
-    rate_limit_auth_per_minute: int = 10
-    rate_limit_default_per_minute: int = 120
-    rate_limit_ai_per_minute: int = 30
+    rate_limit_auth_per_minute: int = 10  # per IP
+    rate_limit_default_per_minute: int = 120  # per user (or IP when anonymous)
+    rate_limit_ai_per_minute: int = 30  # per user
+    rate_limit_ai_tenant_per_minute: int = 300  # per tenant (all its users together)
+    rate_limit_search_per_minute: int = 60  # per user
+    rate_limit_oauth_per_minute: int = 20  # per IP
+    rate_limit_webhook_per_minute: int = 600  # per provider + source IP
+
+    # Request hardening
+    max_request_bytes: int = 2 * 1024 * 1024  # JSON bodies (notes are the largest)
+    max_webhook_bytes: int = 1024 * 1024
+    trust_proxy_headers: bool = False  # honour X-Forwarded-For only behind a trusted proxy
+
+    # Observability
+    metrics_enabled: bool = True
+    metrics_token: str = ""  # required in production; `Authorization: Bearer <token>` on /metrics
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
 
     # Sign-in providers (enabled only when both id and secret are set)
     oauth_google_client_id: str = ""
@@ -108,6 +123,12 @@ class Settings(BaseSettings):
                 problems.append("AI_PROVIDER=fake is not allowed in production")
             if self.ai_checkpointer == "memory":
                 problems.append("AI_CHECKPOINTER=memory is not allowed in production")
+            if self.metrics_enabled and not self.metrics_token:
+                problems.append("METRICS_TOKEN must be set when metrics are enabled in production")
+            if not self.api_public_url.startswith("https://"):
+                problems.append("API_PUBLIC_URL must be https in production")
+            if not self.frontend_origin.startswith("https://"):
+                problems.append("FRONTEND_ORIGIN must be https in production")
         if self.encryption_key:
             from app.core.crypto import is_valid_key
 

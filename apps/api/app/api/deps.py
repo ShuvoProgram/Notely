@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import Unauthorized
+from app.core.logging import user_id_var
 from app.db.session import get_db_session
 from app.services.auth_service import AuthContext, AuthService
 
@@ -32,6 +33,7 @@ async def get_optional_auth(
         # Identity for rate limiting and logging is derived from the session, never the client.
         request.state.user_id = str(ctx.user.id)
         request.state.tenant_id = str(ctx.user.tenant_id)
+        user_id_var.set(str(ctx.user.id))
     return ctx
 
 

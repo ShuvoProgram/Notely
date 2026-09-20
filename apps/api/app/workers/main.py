@@ -10,13 +10,15 @@ from arq.cron import cron
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine
-from app.workers.jobs.cleanup import cleanup_expired_sessions, purge_trashed_notes
-from app.workers.jobs.integrations import (
-    check_connections,
-    process_webhook,
-    refresh_oauth_tokens,
-    sync_integration,
-)
+from app.workers.instrument import instrumented
+from app.workers.jobs import cleanup, integrations
+
+cleanup_expired_sessions = instrumented(cleanup.cleanup_expired_sessions)
+purge_trashed_notes = instrumented(cleanup.purge_trashed_notes)
+check_connections = instrumented(integrations.check_connections)
+process_webhook = instrumented(integrations.process_webhook)
+refresh_oauth_tokens = instrumented(integrations.refresh_oauth_tokens)
+sync_integration = instrumented(integrations.sync_integration)
 
 
 async def startup(_: dict[str, Any]) -> None:

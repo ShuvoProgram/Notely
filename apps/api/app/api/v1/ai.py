@@ -32,9 +32,10 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 audit_router = APIRouter(prefix="/audit", tags=["audit"])
 
 ai_limit = rate_limit("ai", lambda s: s.rate_limit_ai_per_minute)
+tenant_ai_limit = rate_limit("ai", lambda s: s.rate_limit_ai_tenant_per_minute, key="tenant")
 
 
-@router.post("/chat", dependencies=[Depends(ai_limit)])
+@router.post("/chat", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
 async def chat(
     payload: ChatRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> StreamingResponse:
@@ -47,7 +48,7 @@ async def chat(
     )
 
 
-@router.post("/approve", dependencies=[Depends(ai_limit)])
+@router.post("/approve", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
 async def approve(
     payload: ApproveRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> StreamingResponse:
@@ -64,7 +65,7 @@ async def approve(
     )
 
 
-@router.post("/actions", dependencies=[Depends(ai_limit)])
+@router.post("/actions", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
 async def note_action(
     payload: NoteActionRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> StreamingResponse:

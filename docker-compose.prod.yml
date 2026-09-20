@@ -1,0 +1,56 @@
+# Production overlay: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+#
+# - nothing but the edge (nginx :80/:443) is published; Postgres, Redis, LiteLLM, api and web
+#   are reachable only on the compose network
+# - the edge terminates TLS and routes /api + /health straight to the API (SSE-friendly), and
+#   everything else to Next.js
+# - every secret comes from the environment / .env (never committed); see docs/deployment.md
+name: notely
+
+services:
+  postgres:
+    ports: []
+    restart: always
+  redis:
+    ports: []
+    restart: always
+  litellm:
+    ports: []
+    restart: always
+  api:
+    ports: []
+    restart: always
+    environment:
+      ENVIRONMENT: production
+      TRUST_PROXY_HEADERS: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+  worker:
+    restart: always
+    environment:
+      ENVIRONMENT: production
+  web:
+    ports: []
+    restart: always
+    build:
+      args:
+        WEB_SECURE: "true"
+  edge:
+    image: nginx:1.27-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/notely.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_CERT_DIR:-./infra/nginx/certs}:/etc/nginx/certs:ro
+    depends_on:
+      - web
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 5

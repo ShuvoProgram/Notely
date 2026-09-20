@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, Numeric, String, Text, Uuid
+from sqlalchemy import Enum, ForeignKey, Index, Numeric, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
@@ -58,6 +58,7 @@ class ApprovalStatus(enum.StrEnum):
 
 class AIThread(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     __tablename__ = "ai_threads"
+    __table_args__ = (Index("ix_ai_threads_user_updated", "user_id", "updated_at"),)
 
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New conversation")
     note_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -75,6 +76,7 @@ class AIThread(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
 
 class AIMessage(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     __tablename__ = "ai_messages"
+    __table_args__ = (Index("ix_ai_messages_thread_created", "thread_id", "created_at"),)
 
     thread_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("ai_threads.id", ondelete="CASCADE"), nullable=False, index=True
@@ -96,6 +98,10 @@ class AIMessage(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
 
 class AIRun(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     __tablename__ = "ai_runs"
+    __table_args__ = (
+        Index("ix_ai_runs_user_created", "user_id", "created_at"),
+        Index("ix_ai_runs_thread_status", "thread_id", "status"),
+    )
 
     thread_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("ai_threads.id", ondelete="CASCADE"), nullable=False, index=True
@@ -185,6 +191,7 @@ class AuditEvent(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     """Every tool execution (internal or external) produces one of these."""
 
     __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_user_created", "user_id", "created_at"),)
 
     connection_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     provider: Mapped[str] = mapped_column(String(60), nullable=False)

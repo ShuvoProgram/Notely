@@ -29,3 +29,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# TLS material for the nginx edge
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep

@@ -273,7 +273,14 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
     if status == "completed" and spec.verify is not None and spec.risk != RiskLevel.read:
         verification = await _verify(ctx, call, tool_ctx, result)
         result["verification"] = verification.to_dict()
-        writer({"type": "verification", "call_id": call.call_id, **verification.to_dict()})
+        writer(
+            {
+                "type": "verification",
+                "call_id": call.call_id,
+                "provider": spec.provider,
+                **verification.to_dict(),
+            }
+        )
     return result
 
 

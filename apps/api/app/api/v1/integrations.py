@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse
 
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
+from app.core import metrics
 from app.core.exceptions import APIError, NotFound
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
@@ -34,6 +35,8 @@ oauth_router = APIRouter(prefix="/oauth", tags=["integrations"])
 webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 connect_limit = rate_limit("integrations", 30)
+oauth_limit = rate_limit("oauth", lambda s: s.rate_limit_oauth_per_minute, key="ip")
+webhook_limit = rate_limit("webhook", lambda s: s.rate_limit_webhook_per_minute, key="provider")
 
 
 def get_connection_service(db: DbDep, settings: SettingsDep) -> ConnectionService:
@@ -169,7 +172,9 @@ async def disconnect(
 # --- provider OAuth -----------------------------------------------------------------------------
 
 
-@oauth_router.get("/{provider_id}/start", dependencies=[Depends(connect_limit)])
+@oauth_router.get(
+    "/{provider_id}/start", dependencies=[Depends(connect_limit), Depends(oauth_limit)]
+)
 async def oauth_start(
     provider_id: str,
     ctx: CurrentAuth,
@@ -197,7 +202,9 @@ async def oauth_start_url(
     )
 
 
-@oauth_router.get("/{provider_id}/callback", dependencies=[Depends(connect_limit)])
+@oauth_router.get(
+    "/{provider_id}/callback", dependencies=[Depends(connect_limit), Depends(oauth_limit)]
+)
 async def oauth_callback(
     provider_id: str,
     ctx: CurrentAuth,
@@ -218,18 +225,23 @@ async def oauth_callback(
 # --- webhooks -----------------------------------------------------------------------------------
 
 
-@webhook_router.post("/{provider_id}", status_code=status.HTTP_202_ACCEPTED)
+@webhook_router.post(
+    "/{provider_id}", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(webhook_limit)]
+)
 async def receive_webhook(
     provider_id: str, request: Request, db: DbDep, settings: SettingsDep
 ) -> dict[str, Any]:
     """Verify signature, store each event once (idempotent), hand off to the worker."""
     provider: IntegrationProvider | None = get_provider(provider_id)
     if provider is None or not provider.manifest.supports_webhooks:
+        metrics.webhooks.labels(provider_id, "unknown").inc()
         raise NotFound("Unknown webhook endpoint.")
     body = await request.body()
     verification = provider.verify_webhook(headers=request.headers, body=body, settings=settings)
     if not verification.ok:
+        metrics.webhooks.labels(provider_id, "rejected").inc()
         raise APIError("Webhook signature rejected.", code="WEBHOOK_REJECTED", status_code=401)
+    metrics.webhooks.labels(provider_id, "accepted").inc()
     digest = hashlib.sha256(body).hexdigest()
     accepted = 0
     duplicates = 0

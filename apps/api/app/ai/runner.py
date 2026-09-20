@@ -31,6 +31,7 @@ from app.ai.checkpoint import get_checkpointer
 from app.ai.llm import get_chat_model, provider_name, resolve_model_alias
 from app.ai.policy import ToolPolicyEngine
 from app.ai.tools import build_registry, get_tool_registry
+from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import Conflict, NotFound
 from app.core.kv import kv
@@ -203,6 +204,8 @@ class AIRunner:
 
         allowed = set(approval.tool_call_ids)
         approved_ids = [] if reject_all else [cid for cid in approved if cid in allowed]
+        metrics.ai_approvals.labels("approved").inc(len(approved_ids))
+        metrics.ai_approvals.labels("rejected").inc(len(allowed) - len(approved_ids))
         approval.status = ApprovalStatus.approved if approved_ids else ApprovalStatus.rejected
         approval.decision = {
             "approved": approved_ids,
@@ -276,6 +279,8 @@ class AIRunner:
         graph = build_graph(get_checkpointer())
         config = {"configurable": {"thread_id": str(thread.id)}}
 
+        drive_timer = metrics.Timer().__enter__()
+        model_label = run.model or "unknown"
         text_parts: list[str] = []
         final_message: AIMessage | None = None
         sources: list[dict[str, Any]] = []
@@ -311,6 +316,7 @@ class AIRunner:
                         "plan",
                         "verification",
                     ):
+                        _observe_event(data)
                         pending_steps.append(data)
                         yield data
                 elif mode == "updates":
@@ -348,11 +354,13 @@ class AIRunner:
                 if may_stop and await kv.get(cancel_key(run.id)):
                     raise _Cancelled()
         except _Cancelled:
+            _observe_drive(model_label, "cancelled", drive_timer, usage)
             await self._finish(run, RunStatus.cancelled)
             yield {"type": "done", "run_id": str(run.id), "status": "cancelled", "usage": usage}
             return
         except Exception as exc:  # noqa: BLE001
             log.exception("ai_run_failed", extra={"run_id": str(run.id)})
+            _observe_drive(model_label, "failed", drive_timer, usage)
             await self.db.rollback()
             await self._finish(run, RunStatus.failed, error=type(exc).__name__)
             yield {
@@ -364,6 +372,7 @@ class AIRunner:
             return
 
         if interrupted:
+            _observe_drive(model_label, "waiting_for_approval", drive_timer, usage)
             run.status = RunStatus.waiting_for_approval
             run.token_usage = {**run.token_usage, **usage} if usage else run.token_usage
             if run.plan:
@@ -394,6 +403,7 @@ class AIRunner:
         thread.updated_at = utcnow()
         run.token_usage = {**run.token_usage, **usage} if usage else run.token_usage
         self._close_plan(run)
+        _observe_drive(model_label, "completed", drive_timer, usage)
         await self._finish(run, RunStatus.completed)
         yield {
             "type": "message",
@@ -550,6 +560,28 @@ def _mark_plan(
                     earlier["status"] = "done"
             break
     run.plan = {**plan, "steps": steps}
+
+
+def _observe_drive(model: str, status: str, timer: metrics.Timer, usage: dict[str, int]) -> None:
+    timer.__exit__(None, None, None)
+    metrics.ai_runs.labels(model, status).inc()
+    metrics.ai_run_latency.labels(model).observe(timer.seconds)
+    for direction, key in (("input", "input_tokens"), ("output", "output_tokens")):
+        if usage.get(key):
+            metrics.ai_tokens.labels(model, direction).inc(usage[key])
+
+
+def _observe_event(event: dict[str, Any]) -> None:
+    kind = event.get("type")
+    if kind == "step" and event.get("status") in ("completed", "failed"):
+        tool = str(event.get("tool", ""))
+        provider = tool.split("__", 1)[0] if "__" in tool else "notely"
+        metrics.ai_tool_calls.labels(provider, tool, str(event["status"])).inc()
+    elif kind == "verification":
+        tool = str(event.get("tool", ""))
+        metrics.ai_verifications.labels(
+            str(event.get("provider", "notely")), str(event.get("status"))
+        ).inc()
 
 
 def _merge_sources(

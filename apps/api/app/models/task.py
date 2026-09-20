@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, Enum, ForeignKey, String, Text, Uuid
+from sqlalchemy import Date, Enum, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantScopedMixin, TimestampMixin, TZDateTime, UUIDPrimaryKeyMixin
@@ -31,6 +31,7 @@ class Task(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     """A task, possibly extracted from a note and possibly synced to an external provider."""
 
     __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_user_status_created", "user_id", "status", "created_at"),)
 
     note_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True

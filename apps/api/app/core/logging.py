@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import sys
 
 from pythonjsonlogger.json import JsonFormatter
+
+# Set by the request middleware so every log line in a request carries the same ids.
+request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "request_id", default=None
+)
+user_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("user_id", default=None)
 
 _REDACT_KEYS = {
     "password",
@@ -26,6 +33,17 @@ class RedactingFilter(logging.Filter):
         return True
 
 
+class ContextFilter(logging.Filter):
+    """Attach the current request id / user id (never the session token) to every record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if "request_id" not in record.__dict__:
+            record.request_id = request_id_var.get()
+        if "user_id" not in record.__dict__:
+            record.user_id = user_id_var.get()
+        return True
+
+
 def configure_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     if root.handlers:
@@ -37,6 +55,7 @@ def configure_logging(level: str = "INFO") -> None:
         )
     )
     handler.addFilter(RedactingFilter())
+    handler.addFilter(ContextFilter())
     root.addHandler(handler)
     root.setLevel(level.upper())
     logging.getLogger("uvicorn.access").disabled = True

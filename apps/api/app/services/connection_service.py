@@ -16,6 +16,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.tools.base import ToolSpec
+from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import NotFound, ValidationFailed
 from app.core.logging import get_logger
@@ -246,6 +247,7 @@ class ConnectionService:
             raise InvalidOAuthState()
         conn = await self._get_or_create(user, provider)
         if error or not code:
+            metrics.oauth_failures.labels(provider_id, "authorize").inc()
             await self._fail(
                 conn,
                 ProviderError(
@@ -254,7 +256,11 @@ class ConnectionService:
                 status=ConnectionStatus.error,
             )
             raise ProviderError(ProviderErrorKind.auth_failed, provider=provider_id).as_api_error()
-        tokens = await client.exchange_code(code, record.get("verifier"))
+        try:
+            tokens = await client.exchange_code(code, record.get("verifier"))
+        except Exception:
+            metrics.oauth_failures.labels(provider_id, "exchange").inc()
+            raise
         self.vault.store_tokens(conn, tokens)
         conn.token_expires_at = (
             utcnow() + timedelta(seconds=int(tokens.expires_in)) if tokens.expires_in else None

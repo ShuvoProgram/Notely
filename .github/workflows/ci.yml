@@ -6,6 +6,37 @@ on:
   pull_request:
 
 jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No committed secrets or env files
+        run: |
+          set -e
+          if git ls-files | grep -E '(^|/)\.env(\..+)?$' | grep -v '\.env\.example$'; then
+            echo "::error::.env files must never be committed"; exit 1; fi
+          if git ls-files -z | xargs -0 grep -nE '(sk-(ant|proj)-[A-Za-z0-9_-]{20,}|xox[abp]-[0-9A-Za-z-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----)' -- . ':!pnpm-lock.yaml' ':!apps/api/uv.lock'; then
+            echo "::error::credential-shaped strings found in tracked files"; exit 1; fi
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # advisory: new CVEs must not block unrelated merges, but are visible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: cd apps/api && uv sync --frozen && uvx pip-audit --strict -r <(uv export --frozen --no-hashes --no-dev)
+        shell: bash
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
+
   api:
     runs-on: ubuntu-latest
     defaults:
@@ -70,10 +101,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
-      - run: docker compose up -d --build --wait postgres redis migrate api web
+      - run: docker compose up -d --build --wait postgres redis migrate api worker web
         env:
           RATE_LIMIT_AUTH_PER_MINUTE: "500"
           AI_PROVIDER: fake
+      - name: Production config gate refuses insecure settings
+        run: |
+          docker compose run --rm -e ENVIRONMENT=production -e API_PUBLIC_URL=http://x -e FRONTEND_ORIGIN=http://x api \
+            python -c "from app.core.config import Settings; p=Settings().validate_for_runtime(); print(p); assert p"
+      - name: Readiness and metrics
+        run: |
+          curl -fsS http://localhost:8000/health/ready
+          curl -fsS http://localhost:8000/metrics | grep -q notely_http_requests_total
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
+from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
 from app.models.note import Folder, Note, Tag
 from app.schemas.notes import (
@@ -198,7 +199,11 @@ async def delete_tag(tag_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -
 # --- unified search -----------------------------------------------------------------------------
 
 
-@search_router.get("", response_model=Envelope[SearchResponse])
+@search_router.get(
+    "",
+    response_model=Envelope[SearchResponse],
+    dependencies=[Depends(rate_limit("search", lambda s: s.rate_limit_search_per_minute))],
+)
 async def search(
     ctx: CurrentAuth,
     db: DbDep,

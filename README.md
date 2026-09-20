@@ -12,7 +12,9 @@ registry, MCP client, marketplace UI), the MVP providers (**Slack, Notion, Todoi
 Microsoft Teams, Outlook, Dropbox** plus a generic **MCP server**), unified search, and cross-app
 AI: the agent plans multi-step work, reads across notes and connected apps, proposes every change
 for one review, and **verifies each approved write with a read-back** before reporting it.
-Phase 7 (production hardening) is next.
+Phase 7 hardened it for production: security headers and body limits, per-user/tenant/IP/provider
+rate limits, Prometheus metrics + request-scoped logs, categorised errors everywhere, index tuning,
+a production config gate, and a TLS edge + runbook — see [docs/deployment.md](docs/deployment.md).
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -151,6 +153,14 @@ Tokens are stored encrypted, refreshed by the worker and never reach the browser
 passes the same end-to-end test (`apps/api/app/tests/test_providers.py`) against a mocked vendor
 API: OAuth exchange in the vendor's own token style, identity, health test, unified search, one
 auto-run read tool and one approval-gated write tool, all audited.
+
+## Production
+
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` runs the hardened stack:
+an nginx edge (TLS, SSE-safe proxying) is the only published port, `ENVIRONMENT=production`
+turns on the startup configuration gate, `/metrics` is bearer-protected, and `/health/ready`
+checks Postgres, Redis, configuration and the model gateway. The full checklist — secrets,
+migrations, health/metrics, backups, scaling — is in [docs/deployment.md](docs/deployment.md).
 
 ## Secrets
 

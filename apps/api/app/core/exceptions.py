@@ -92,6 +92,21 @@ class OAuthExchangeFailed(APIError):
     message = "Authorization failed. Your access wasn't granted."
 
 
+# HTTP status per provider error kind (see integrations/base/errors.py).
+PROVIDER_STATUS: dict[str, int] = {
+    "auth_failed": 401,
+    "expired": 409,
+    "admin_approval_required": 403,
+    "permission_denied": 403,
+    "rate_limited": 429,
+    "unavailable": 503,
+    "invalid_request": 400,
+    "not_found": 404,
+    "misconfigured": 503,
+    "unknown": 502,
+}
+
+
 def error_response(
     status_code: int,
     code: str,
@@ -135,6 +150,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return error_response(
             exc.status_code, code, message, headers=dict(exc.headers) if exc.headers else None
+        )
+
+    from app.integrations.base.errors import ProviderError
+
+    @app.exception_handler(ProviderError)
+    async def _provider_error(_: Request, exc: ProviderError) -> JSONResponse:
+        # One mapping for every route that touches a provider: categorised, never a traceback.
+        title, body = exc.user_message()
+        status = PROVIDER_STATUS.get(exc.kind.value, 502)
+        headers = {"Retry-After": str(int(exc.retry_after))} if exc.retry_after else None
+        return error_response(
+            status,
+            f"PROVIDER_{exc.kind.value.upper()}",
+            body,
+            {"title": title, "provider": exc.provider, "retryable": exc.retryable},
+            headers,
         )
 
     @app.exception_handler(Exception)

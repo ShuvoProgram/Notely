@@ -15,7 +15,9 @@ COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 # API_INTERNAL_URL is read at build time for rewrites; the runtime env overrides it.
 ARG API_INTERNAL_URL=http://api:8000
-ENV API_INTERNAL_URL=$API_INTERNAL_URL
+# WEB_SECURE=true bakes HSTS + upgrade-insecure-requests into the response headers (TLS only).
+ARG WEB_SECURE=false
+ENV API_INTERNAL_URL=$API_INTERNAL_URL WEB_SECURE=$WEB_SECURE
 RUN pnpm --filter web build
 
 FROM node:24-alpine AS runtime

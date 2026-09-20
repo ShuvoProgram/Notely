@@ -13,6 +13,7 @@ from app.api.deps import (
     clear_session_cookie,
     set_session_cookie,
 )
+from app.core import metrics
 from app.core.exceptions import OAuthExchangeFailed
 from app.core.rate_limit import client_ip, rate_limit
 from app.core.responses import Envelope, ok
@@ -195,6 +196,7 @@ async def oauth_callback(
             avatar_url=profile.avatar_url,
         )
     except OAuthExchangeFailed:
+        metrics.oauth_failures.labels(f"signin:{spec.id}", "exchange").inc()
         return _login_redirect(settings, "oauth_failed")
     issued = await auth.issue_session(
         user, user_agent=request.headers.get("user-agent"), ip_address=client_ip(request)

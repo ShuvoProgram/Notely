@@ -29,6 +29,7 @@ dependencies = [
   "psycopg-pool>=3.2",
   "mcp>=1.10",
   "jsonschema>=4.23",
+  "prometheus-client>=0.20",
 ]
 
 [dependency-groups]
