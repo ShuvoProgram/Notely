@@ -34,27 +34,31 @@ export function ActivityLog() {
             {messageFor(audit.error)}
           </p>
         ) : audit.data?.length ? (
-          <ul className="divide-y">
+          <ul className="divide-y divide-glass-border">
             {audit.data.map((e) => (
-              <li key={e.id} className="flex items-center gap-3 py-2 text-sm">
+              <li key={e.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 py-2.5 text-sm sm:flex sm:items-center">
                 {e.status === "completed" || e.status === "verified" ? (
-                  <Check className="size-4 shrink-0 text-success" aria-hidden />
+                  <Check className="mt-0.5 size-4 shrink-0 text-success sm:mt-0" aria-hidden />
                 ) : e.status === "unverified" ? (
-                  <ShieldQuestion className="size-4 shrink-0 text-warning" aria-hidden />
+                  <ShieldQuestion className="mt-0.5 size-4 shrink-0 text-warning sm:mt-0" aria-hidden />
                 ) : (
-                  <XCircle className="size-4 shrink-0 text-destructive" aria-hidden />
+                  <XCircle className="mt-0.5 size-4 shrink-0 text-destructive sm:mt-0" aria-hidden />
                 )}
-                <time className="w-24 shrink-0 text-xs text-muted-foreground" dateTime={e.created_at}>
-                  {new Date(e.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                </time>
-                <span>{providerLabel(e.provider)}</span>
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                  {e.action === "verify" ? `Checked: ${e.tool_name ?? ""}` : String(e.request_metadata["summary"] ?? e.tool_name ?? e.action)}
-                </span>
-                <Badge variant="outline" className="font-normal">
-                  {RISK[e.risk_level]}
-                </Badge>
-                <span className="text-xs capitalize text-muted-foreground">{e.status}</span>
+                <div className="min-w-0 sm:contents">
+                  <span className="mr-2 font-medium sm:mr-0">{providerLabel(e.provider)}</span>
+                  <span className="block min-w-0 text-muted-foreground sm:inline sm:flex-1 sm:truncate">
+                    {e.action === "verify" ? `Checked: ${e.tool_name ?? ""}` : String(e.request_metadata["summary"] ?? e.tool_name ?? e.action)}
+                  </span>
+                  <span className="mt-1 flex flex-wrap items-center gap-2 sm:contents">
+                    <time className="text-xs text-muted-foreground sm:order-first sm:w-24 sm:shrink-0" dateTime={e.created_at}>
+                      {new Date(e.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </time>
+                    <Badge variant="outline" className="font-normal">
+                      {RISK[e.risk_level]}
+                    </Badge>
+                    <span className="text-xs capitalize text-muted-foreground">{e.status}</span>
+                  </span>
+                </div>
               </li>
             ))}
           </ul>

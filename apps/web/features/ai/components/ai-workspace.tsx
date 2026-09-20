@@ -33,15 +33,15 @@ export function AIWorkspace() {
   const select = (id: string | null) => router.replace(id ? `${pathname}?thread=${id}` : pathname);
 
   return (
-    <div className="-mx-4 -my-6 flex h-[calc(100dvh-3.5rem)] min-h-0 sm:-mx-6 sm:-my-8">
-      <aside aria-label="Conversations" className="hidden w-72 shrink-0 flex-col border-r md:flex">
-        <div className="flex items-center justify-between px-3 py-3">
-          <h2 className="text-sm font-semibold">Conversations</h2>
+    <div className="-mx-4 -my-6 flex h-[calc(100dvh-4rem)] min-h-0 sm:-mx-6 sm:-my-8">
+      <aside aria-label="Conversations" className="glass hidden w-72 shrink-0 flex-col rounded-none border-y-0 border-l-0 md:flex">
+        <div className="flex items-center justify-between px-4 py-4">
+          <h2 className="text-base font-semibold tracking-tight">Conversations</h2>
           <Button size="icon-sm" variant="ghost" aria-label="New conversation" onClick={() => select(null)}>
             <Plus aria-hidden />
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
+        <div className="scrollbar-thin flex-1 overflow-y-auto px-2 pb-3">
           {threads.isPending ? (
             <div className="space-y-2 p-1">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -51,7 +51,7 @@ export function AIWorkspace() {
           ) : threads.data?.length ? (
             <ul className="space-y-0.5">
               {threads.data.map((t) => (
-                <li key={t.id} className={cn("group flex items-center rounded-md pr-1 hover:bg-accent/60", t.id === threadId && "bg-accent")}>
+                <li key={t.id} className={cn("group flex items-center rounded-xl pr-1 transition-colors hover:bg-accent/50", t.id === threadId && "bg-accent/80 shadow-1 ring-1 ring-glass-border")}>
                   <button type="button" onClick={() => select(t.id)} aria-current={t.id === threadId ? "page" : undefined} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="truncate">{t.title}</span>
@@ -68,7 +68,7 @@ export function AIWorkspace() {
         </div>
       </aside>
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-4 pb-20 sm:px-6 md:pb-4">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-4 py-4 pb-28 sm:px-6 md:pb-4">
           <div className="mb-2 flex items-center justify-between md:hidden">
             <h1 className="text-lg font-semibold">AI Assistant</h1>
             <Button size="sm" variant="outline" onClick={() => select(null)}>

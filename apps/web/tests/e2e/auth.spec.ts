@@ -12,7 +12,7 @@ test("signup → workspace → sign out → sign in", async ({ page }) => {
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole("heading", { name: /good to see you, e2e/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /good (morning|afternoon|evening), e2e/i })).toBeVisible();
 
   // The session cookie must be HttpOnly and never readable from JS.
   const cookies = await page.context().cookies();

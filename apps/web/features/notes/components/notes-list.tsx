@@ -1,11 +1,12 @@
 "use client";
 
-import { Plus, Search, Star } from "lucide-react";
+import { Inbox, Plus, Search, Star } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/layout/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,10 +50,11 @@ function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
         href={`/app/notes/${note.id}`}
         aria-current={active ? "page" : undefined}
         className={cn(
-          "block rounded-lg px-3 py-2.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
-          active && "bg-accent",
+          "relative block rounded-xl px-3 py-2.5 outline-none transition-colors duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
+          active && "bg-accent/80 shadow-1 ring-1 ring-glass-border",
         )}
       >
+        <span aria-hidden className={cn("absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-ai transition-opacity", active ? "opacity-100" : "opacity-0")} />
         <div className="flex items-start gap-2">
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{note.title || "Untitled"}</p>
           {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 fill-warning text-warning" aria-label="Favorite" /> : null}
@@ -110,20 +112,23 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-3 pt-3">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input aria-label="Filter notes" placeholder="Filter notes…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 pl-8" />
-        </div>
-        <Button size="icon" aria-label="New note" onClick={onCreate} disabled={create.isPending}>
-          <Plus aria-hidden />
+      <div className="flex items-center justify-between px-4 pt-4">
+        <h2 className="text-base font-semibold tracking-tight">Notes</h2>
+        <Button size="sm" aria-label="New note" onClick={onCreate} disabled={create.isPending} className="rounded-full">
+          <Plus aria-hidden /> New
         </Button>
+      </div>
+      <div className="px-3 pt-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input aria-label="Filter notes" placeholder="Filter notes…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 rounded-full bg-muted/40 pl-9" />
+        </div>
       </div>
       <div className="px-3 pt-2">
         <Tabs value={view} onValueChange={(v) => setParam("view", v === "active" ? undefined : v)}>
-          <TabsList className="w-full">
+          <TabsList className="w-full rounded-full">
             {VIEWS.map((v) => (
-              <TabsTrigger key={v.value} value={v.value} className="flex-1 text-xs">
+              <TabsTrigger key={v.value} value={v.value} className="flex-1 rounded-full text-xs">
                 {v.label}
               </TabsTrigger>
             ))}
@@ -152,11 +157,14 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
         </div>
       ) : null}
 
-      <div className="mt-2 flex-1 overflow-y-auto px-2 pb-3">
+      <div className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-2 pb-3">
         {list.isPending ? (
-          <div className="space-y-2 p-1" aria-busy>
+          <div className="space-y-1 p-1" aria-busy>
             {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full" />
+              <div key={i} className="space-y-2 rounded-xl px-3 py-2.5">
+                <Skeleton className="h-3.5 w-2/3" />
+                <Skeleton className="h-3 w-full" />
+              </div>
             ))}
           </div>
         ) : list.error ? (
@@ -164,14 +172,19 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
             {messageFor(list.error)}
           </p>
         ) : notes.length === 0 ? (
-          <div className="p-6 text-center">
-            <p className="text-sm font-medium">{debouncedQ ? "No matching notes" : view === "trash" ? "Trash is empty" : "No notes here yet"}</p>
-            {!debouncedQ && view === "active" ? (
-              <Button variant="outline" size="sm" className="mt-3" onClick={onCreate} disabled={create.isPending}>
-                <Plus aria-hidden /> Create your first note
-              </Button>
-            ) : null}
-          </div>
+          <EmptyState
+            icon={Inbox}
+            className="py-8"
+            title={debouncedQ ? "No matching notes" : view === "trash" ? "Trash is empty" : "No notes here yet"}
+            description={debouncedQ ? "Try a different word, or search everything from the top bar." : view === "active" ? "Your first note is one click away." : undefined}
+            action={
+              !debouncedQ && view === "active" ? (
+                <Button variant="outline" size="sm" onClick={onCreate} disabled={create.isPending}>
+                  <Plus aria-hidden /> Create your first note
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <>
             <ul className="space-y-0.5">

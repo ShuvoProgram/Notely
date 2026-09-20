@@ -11,7 +11,8 @@ import StarterKit from "@tiptap/starter-kit";
 import * as React from "react";
 
 import { EditorToolbar } from "@/features/notes/components/editor-toolbar";
-import type { TipTapDoc } from "@/lib/api/types";
+import { SelectionAIMenu } from "@/features/notes/components/selection-ai-menu";
+import type { NoteAIAction, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
@@ -22,6 +23,8 @@ interface RichTextEditorProps {
   placeholder?: string;
   onChange?: (doc: TipTapDoc) => void;
   onReady?: (editor: Editor) => void;
+  /** Hands a chosen AI action (from the toolbar or the selection menu) to the suggestion panel. */
+  onAskAI?: (action: NoteAIAction) => void;
   className?: string;
 }
 
@@ -29,15 +32,17 @@ export function RichTextEditor({
   content,
   documentKey,
   editable = true,
-  placeholder = "Start writing, or press / for commands…",
+  placeholder = "Start writing, or select text and ask AI…",
   onChange,
   onReady,
+  onAskAI,
   className,
 }: RichTextEditorProps) {
   const onChangeRef = React.useRef(onChange);
   React.useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
 
   const editor = useEditor(
     {
@@ -83,11 +88,14 @@ export function RichTextEditor({
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
-      {editor && editable ? <EditorToolbar editor={editor} /> : null}
-      <EditorContent editor={editor} className="flex-1" />
+      {editor && editable ? <EditorToolbar editor={editor} onAskAI={onAskAI} /> : null}
+      <div ref={containerRef} className="relative flex-1">
+        {editor && editable && onAskAI ? <SelectionAIMenu editor={editor} containerRef={containerRef} onPick={onAskAI} /> : null}
+        <EditorContent editor={editor} />
+      </div>
       {editor ? (
-        <p className="mt-6 text-xs text-muted-foreground" aria-live="polite">
-          {editor.storage.characterCount.words()} words
+        <p className="mt-8 text-xs text-muted-foreground" aria-live="polite">
+          {editor.storage.characterCount.words()} words · {editor.storage.characterCount.characters()} characters
         </p>
       ) : null}
     </div>

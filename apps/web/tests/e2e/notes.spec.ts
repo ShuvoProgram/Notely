@@ -46,7 +46,7 @@ test("create a note, autosave, reload, and find it via search", async ({ page })
 
   // Search uses stemmed full-text search: "launch" matches "launching" in the body.
   await page.goto("/app/search");
-  await page.getByLabel("Search").fill("launching pricing");
+  await page.getByRole("textbox", { name: "Search" }).fill("launching pricing");
   const hit = page.getByRole("link", { name: /Product launch plan/ });
   await expect(hit).toBeVisible();
   await expect(hit.getByText("Notely")).toBeVisible();

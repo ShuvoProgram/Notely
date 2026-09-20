@@ -339,7 +339,7 @@ async def test_oauth_connect_flow_with_pkce_state_and_encrypted_tokens(
     assert done.status_code == 302
     assert (
         done.headers["location"]
-        == "http://localhost:3000/app/settings/connections/fakeoauth?connected=1"
+        == "http://localhost:3000/app/connections/fakeoauth?connected=1"
     )
 
     detail = (await client.get("/api/v1/integrations/providers/fakeoauth")).json()["data"]

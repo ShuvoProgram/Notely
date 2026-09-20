@@ -1,12 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Circle, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Check, CheckSquare, Circle, Plus, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/layout/empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,12 +41,9 @@ export function TaskList() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your own tasks plus the ones AI extracted from notes with your approval.</p>
-      </div>
+      <PageHeader title="Tasks" description="Your own tasks plus the ones AI extracted from notes with your approval." />
       <form
-        className="flex gap-2"
+        className="glass-2 flex gap-2 rounded-full p-1.5 pl-4 transition-shadow focus-within:glow-ai"
         onSubmit={(e) => {
           e.preventDefault();
           const t = title.trim();
@@ -52,15 +51,15 @@ export function TaskList() {
           create.mutate({ title: t }, { onSuccess: () => setTitle("") });
         }}
       >
-        <Input aria-label="New task" placeholder="Add a task…" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <Button type="submit" disabled={!title.trim() || create.isPending}>
+        <Input aria-label="New task" placeholder="Add a task…" value={title} onChange={(e) => setTitle(e.target.value)} className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent" />
+        <Button type="submit" disabled={!title.trim() || create.isPending} className="rounded-full">
           <Plus aria-hidden /> Add
         </Button>
       </form>
       <Tabs value={view} onValueChange={(v) => setView(v as TaskStatus)}>
-        <TabsList>
-          <TabsTrigger value="open">Open</TabsTrigger>
-          <TabsTrigger value="done">Done</TabsTrigger>
+        <TabsList className="rounded-full">
+          <TabsTrigger value="open" className="rounded-full">Open</TabsTrigger>
+          <TabsTrigger value="done" className="rounded-full">Done</TabsTrigger>
         </TabsList>
       </Tabs>
       {tasks.isPending ? (
@@ -74,9 +73,9 @@ export function TaskList() {
           {messageFor(tasks.error)}
         </p>
       ) : tasks.data?.length ? (
-        <ul className="divide-y rounded-xl border bg-card">
+        <ul className="glass divide-y divide-glass-border rounded-2xl">
           {tasks.data.map((t) => (
-            <li key={t.id} className="group flex items-center gap-3 px-3 py-2.5">
+            <li key={t.id} className="group flex items-center gap-3 px-4 py-3 first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/30">
               <button
                 type="button"
                 aria-label={t.status === "done" ? `Mark ${t.title} as open` : `Mark ${t.title} as done`}
@@ -110,9 +109,9 @@ export function TaskList() {
           ))}
         </ul>
       ) : (
-        <p className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
-          {view === "open" ? "Nothing to do. Add a task, or ask AI to extract tasks from a note." : "No completed tasks yet."}
-        </p>
+        <div className="glass rounded-2xl">
+          <EmptyState icon={CheckSquare} title={view === "open" ? "Nothing to do" : "No completed tasks yet"} description={view === "open" ? "Add a task above, or ask AI to extract tasks from a note." : "Tasks you finish show up here."} />
+        </div>
       )}
     </div>
   );

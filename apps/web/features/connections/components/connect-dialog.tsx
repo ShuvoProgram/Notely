@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Sparkles } from "lucide-react";
+import { ExternalLink, Lock, ShieldCheck, Unplug } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
+import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -40,30 +41,30 @@ export function ConnectDialog({
       <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-md">
         <div className="flex flex-col items-center gap-3 pt-2 text-center">
           <div className="flex items-center gap-3">
-            <div className="grid size-14 place-items-center rounded-2xl border bg-card">
-              <Sparkles className="size-6 text-ai" aria-hidden />
-            </div>
-            <span className="text-muted-foreground" aria-hidden>
-              •••
+            <LogoMark size={56} className="shadow-2" />
+            <span className="flex items-center gap-1" aria-hidden>
+              <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+              <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+              <span className="size-1.5 rounded-full bg-ai" />
             </span>
-            <div className="grid size-14 place-items-center rounded-2xl border bg-card">
-              <ProviderLogo provider={provider} />
-            </div>
+            <ProviderLogo provider={provider} size="lg" className="shadow-2" />
           </div>
           <DialogTitle className="text-xl">
-            {reconnect ? "Reconnect" : "Connect"} {provider.name}
+            {reconnect ? "Reconnect" : "Connect"} Notely to {provider.name}
           </DialogTitle>
-          <DialogDescription className="sr-only">{provider.description}</DialogDescription>
+          <DialogDescription className="max-w-xs text-muted-foreground">
+            You’ll be taken to {provider.name} to sign in and approve access, then brought straight back.
+          </DialogDescription>
         </div>
 
-        <div className="mt-2 divide-y rounded-xl border bg-card px-4 text-sm">
-          <Section title="You're in control">
+        <div className="mt-2 divide-y divide-glass-border rounded-xl bg-muted/30 px-4 text-sm ring-1 ring-glass-border">
+          <Section icon={Lock} title="You're in control">
             Notely only does what you ask, and only through the permissions you approve on {provider.name}&apos;s own consent screen. Reads run automatically; every change waits for your review.
           </Section>
-          <Section title="Apps may introduce elevated risk">
+          <Section icon={ShieldCheck} title="Apps may introduce elevated risk">
             Content coming back from {provider.name} is treated as untrusted data, never as instructions — but a malicious message or page could still try to influence a request. Review approvals carefully.
           </Section>
-          <Section title="Data shared with this app">
+          <Section icon={Unplug} title="Data shared with this app">
             {provider.name} receives only the requests Notely makes on your behalf (search terms, the items you ask to read, the changes you approve). Your notes are never sent unless you ask for it. Access is stored encrypted and revoked when you disconnect.
           </Section>
         </div>
@@ -79,7 +80,7 @@ export function ConnectDialog({
         <ContinueButton provider={provider} method={method} serverUrl={isCustomServer ? serverUrl : null} />
 
         {provider.docs_url ? (
-          <Button asChild variant="outline" className="w-full">
+          <Button asChild variant="ghost" className="w-full text-muted-foreground">
             <a href={provider.docs_url} target="_blank" rel="noopener noreferrer">
               Continue to {provider.name} <ExternalLink className="size-3.5" aria-hidden />
             </a>
@@ -90,11 +91,16 @@ export function ConnectDialog({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ icon: Icon, title, children }: { icon: React.ElementType; title: string; children: React.ReactNode }) {
   return (
-    <section className="py-3">
-      <h3 className="font-medium">{title}</h3>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{children}</p>
+    <section className="flex gap-3 py-3">
+      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-ai-soft text-ai">
+        <Icon className="size-3.5" aria-hidden />
+      </span>
+      <span>
+        <h3 className="font-medium">{title}</h3>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{children}</p>
+      </span>
     </section>
   );
 }
@@ -115,7 +121,7 @@ function ContinueButton({ provider, method, serverUrl }: { provider: Provider; m
   });
   const disabled = go.isPending || (serverUrl !== null && !/^https?:\/\//.test(serverUrl));
   return (
-    <Button size="lg" className="w-full" disabled={disabled} onClick={() => go.mutate()}>
+    <Button size="lg" className="w-full rounded-full" disabled={disabled} onClick={() => go.mutate()}>
       {go.isPending ? "Opening…" : "Continue with Notely"}
     </Button>
   );

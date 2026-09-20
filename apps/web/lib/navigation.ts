@@ -3,6 +3,8 @@ import { Activity, CheckSquare, Home, Plug, type LucideIcon, NotebookPen, Search
 export interface NavItem {
   href: string;
   label: string;
+  /** Shorter label for the phone bottom bar. */
+  short?: string;
   icon: LucideIcon;
   /** Match nested routes (e.g. /app/settings/*) */
   prefix?: boolean;
@@ -17,8 +19,8 @@ export const primaryNav: NavItem[] = [
   { href: "/app/notes", label: "Notes", icon: NotebookPen, prefix: true },
   { href: "/app/search", label: "Search", icon: Search },
   { href: "/app/tasks", label: "Tasks", icon: CheckSquare },
-  { href: "/app/ai", label: "AI Assistant", icon: Sparkles },
-  { href: "/app/settings/connections", label: "Connections", icon: Plug, prefix: true },
+  { href: "/app/ai", label: "AI Assistant", short: "AI", icon: Sparkles },
+  { href: "/app/connections", label: "Connections", short: "Apps", icon: Plug, prefix: true },
   { href: "/app/settings", label: "Settings", icon: Settings, prefix: true },
 ];
 
@@ -26,14 +28,14 @@ export const settingsNav: NavItem[] = [
   { href: "/app/settings/profile", label: "Profile", icon: UserRound },
   { href: "/app/settings/security", label: "Security", icon: ShieldCheck },
   { href: "/app/settings/ai", label: "AI", icon: Sparkles },
-  { href: "/app/settings/connections", label: "Connections", icon: Plug, prefix: true },
+  { href: "/app/connections", label: "Connections", icon: Plug, prefix: true },
   { href: "/app/settings/activity", label: "Activity", icon: Activity },
 ];
 
 export function isActive(pathname: string, item: NavItem, siblings: NavItem[] = []): boolean {
   const matches = (i: NavItem) => (i.prefix ? pathname === i.href || pathname.startsWith(`${i.href}/`) : pathname === i.href);
   if (!matches(item)) return false;
-  // When several prefix items match (e.g. /app/settings and /app/settings/connections), only the
+  // When several prefix items match (e.g. /app/settings and /app/connections), only the
   // most specific one is active.
   return !siblings.some((s) => s !== item && matches(s) && s.href.length > item.href.length);
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { Archive, ArchiveRestore, Copy, Folder as FolderIcon, MoreHorizontal, RotateCcw, Star, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, Copy, Folder as FolderIcon, MoreHorizontal, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -27,7 +28,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { NoteAIMenu, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { NOTE_AI_ACTIONS, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { RichTextEditor } from "@/features/notes/components/rich-text-editor";
 import { SaveStatusIndicator } from "@/features/notes/components/save-status";
@@ -105,10 +107,29 @@ function LoadedNoteEditor({ note }: { note: Note }) {
 
   const [confirmPurge, setConfirmPurge] = React.useState(false);
 
+  const folderName = note.folder_id ? folders.find((f) => f.id === note.folder_id)?.name : null;
+  const suggestion = aiAction ? (
+    <NoteAIPanel key={aiAction} noteId={note.id} action={aiAction} editor={editorInstance} onClose={() => setAiAction(null)} />
+  ) : null;
+
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="mx-auto grid w-full max-w-6xl gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="surface flex min-h-full min-w-0 flex-col rounded-2xl px-5 py-6 sm:px-8 sm:py-8">
+      <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
+        <Link href="/app/notes" className="inline-flex items-center gap-1 rounded hover:text-foreground">
+          <ArrowLeft className="size-3.5 md:hidden" aria-hidden /> Notes
+        </Link>
+        {folderName ? (
+          <>
+            <ChevronRight className="size-3" aria-hidden />
+            <Link href={`/app/notes?folder=${note.folder_id}`} className="rounded hover:text-foreground">
+              {folderName}
+            </Link>
+          </>
+        ) : null}
+      </nav>
       {readOnly ? (
-        <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+        <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
           <span>This note is in the trash. Restore it to keep editing.</span>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => actions.restore.mutate(note.id, { onSuccess: () => toast.success("Note restored") })}>
@@ -122,17 +143,20 @@ function LoadedNoteEditor({ note }: { note: Note }) {
       ) : null}
 
       {autosave.status === "conflict" ? (
-        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-          <span>This note changed in another tab or device. Your local edits are safe until you choose.</span>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => void autosave.loadTheirs()}>
-              Load latest
-            </Button>
-            <Button size="sm" onClick={() => void autosave.keepMine()}>
-              Keep mine
-            </Button>
-          </div>
-        </div>
+        <Alert className="mb-4 border-warning/40 bg-warning/10">
+          <AlertTitle>This note changed in another tab or device</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>Your local edits are safe until you choose.</span>
+            <span className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void autosave.loadTheirs()}>
+                Load latest
+              </Button>
+              <Button size="sm" onClick={() => void autosave.keepMine()}>
+                Keep mine
+              </Button>
+            </span>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <div className="mb-2 flex items-start gap-2">
@@ -153,12 +177,11 @@ function LoadedNoteEditor({ note }: { note: Note }) {
             }
           }}
           className={cn(
-            "min-w-0 flex-1 bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50",
+            "min-w-0 flex-1 bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/40 sm:text-4xl",
           )}
         />
         <div className="flex shrink-0 items-center gap-1">
           <SaveStatusIndicator status={autosave.status} message={autosave.errorMessage} />
-          <NoteAIMenu disabled={readOnly} onPick={(action) => setAiAction(action)} />
           <Button
             variant="ghost"
             size="icon"
@@ -246,26 +269,24 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         </div>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
         <TagPicker selected={note.tags} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
-        {note.folder_id ? (
-          <span className="inline-flex items-center gap-1">
-            <FolderIcon className="size-3.5" aria-hidden />
-            {folders.find((f) => f.id === note.folder_id)?.name ?? "Folder"}
-          </span>
-        ) : null}
-        <span>Edited {new Date(note.updated_at).toLocaleString()}</span>
+        <span className="inline-flex items-center gap-1">
+          <FolderIcon className="size-3.5" aria-hidden />
+          {folderName ?? "No folder"}
+        </span>
+        <span aria-hidden>·</span>
+        <span>Edited {new Date(note.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
       </div>
 
-      {aiAction ? (
-        <NoteAIPanel key={aiAction} noteId={note.id} action={aiAction} editor={editorInstance} onClose={() => setAiAction(null)} />
-      ) : null}
+      {suggestion ? <div className="mb-6 2xl:hidden">{suggestion}</div> : null}
 
       <RichTextEditor
         documentKey={note.id}
         content={initial.content}
         editable={!readOnly}
         onChange={onBodyChange}
+        onAskAI={readOnly ? undefined : (action) => setAiAction(action)}
         onReady={(editor) => {
           editorRef.current = editor;
           setEditorInstance(editor);
@@ -301,6 +322,46 @@ function LoadedNoteEditor({ note }: { note: Note }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+
+      <aside aria-label="AI assistant" className="hidden 2xl:block">
+        <div className="sticky top-2 space-y-4">
+          {suggestion ?? (
+            <div className="glass rounded-2xl p-4">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="grid size-8 place-items-center rounded-xl bg-ai-soft text-ai">
+                  <Sparkles className="size-4" aria-hidden />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">AI Assistant</p>
+                  <p className="text-xs text-muted-foreground">Works on your selection, or the whole note.</p>
+                </div>
+              </div>
+              <ul className="space-y-1.5">
+                {NOTE_AI_ACTIONS.map((a) => (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      disabled={readOnly}
+                      onClick={() => setAiAction(a.id)}
+                      className="lift flex w-full items-center gap-3 rounded-xl bg-muted/40 px-3 py-2.5 text-left text-sm ring-1 ring-glass-border outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                    >
+                      <a.icon className="size-4 shrink-0 text-ai" aria-hidden />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{a.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{a.description}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="outline" disabled={readOnly} onClick={() => setAiAction("custom")} className="mt-3 w-full justify-start gap-2 rounded-xl text-muted-foreground">
+                <Sparkles className="size-4 text-ai" aria-hidden /> Ask anything about this note…
+              </Button>
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

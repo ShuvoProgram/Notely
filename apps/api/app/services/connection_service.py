@@ -331,7 +331,7 @@ class ConnectionService:
             # Public server: nothing to authorise; connect right away.
             self.vault.store_token(conn, None)
             await self._finish_connect(user, self.adapter(conn), conn)
-            base = f"{self.settings.frontend_origin}/app/settings/connections"
+            base = f"{self.settings.frontend_origin}/app/connections"
             return f"{base}/{conn.provider}?connected=1"
         try:
             config = await mcp_oauth.dynamic_client(

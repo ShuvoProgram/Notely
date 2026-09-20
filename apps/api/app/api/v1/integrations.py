@@ -228,7 +228,7 @@ async def oauth_callback(
     """The one redirect URI per vendor. `provider_id` is the callback slot: a provider id, or
     a vendor family (`google`, `microsoft`) whose products — and whose "Continue with …"
     sign-in — share one OAuth app. The state record says which flow is completing."""
-    target = f"{settings.frontend_origin}/app/settings/connections/{provider_id}"
+    target = f"{settings.frontend_origin}/app/connections/{provider_id}"
     try:
         record = await consume_oauth_state(
             provider_id, state, callback_uri(settings, f"/oauth/{provider_id}/callback")
@@ -258,13 +258,13 @@ async def oauth_callback(
     except APIError as exc:
         page = exc.details.get("provider_id") if isinstance(exc.details, dict) else None
         if page:
-            target = f"{settings.frontend_origin}/app/settings/connections/{page}"
+            target = f"{settings.frontend_origin}/app/connections/{page}"
         reason = exc.details.get("reason") if isinstance(exc.details, dict) else None
         suffix = f"&reason={quote(str(reason))}" if reason else ""
         return RedirectResponse(
             f"{target}?error={exc.code}{suffix}", status_code=status.HTTP_302_FOUND
         )
-    target = f"{settings.frontend_origin}/app/settings/connections/{conn.provider}"
+    target = f"{settings.frontend_origin}/app/connections/{conn.provider}"
     return RedirectResponse(f"{target}?connected=1", status_code=status.HTTP_302_FOUND)
 
 

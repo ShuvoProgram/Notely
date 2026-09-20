@@ -13,7 +13,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
       <Link href="/" className="mb-8 rounded-md focus-visible:outline-2">
         <Logo />
       </Link>
-      <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-sm sm:p-8">{children}</div>
+      <div className="glass-2 animate-fade-up w-full max-w-sm rounded-2xl p-6 sm:p-8">{children}</div>
       <nav aria-label="Legal" className="mt-6 flex gap-4 text-xs text-muted-foreground">
         <Link href="/privacy-policy" className="underline-offset-4 hover:text-foreground hover:underline">
           Privacy Policy

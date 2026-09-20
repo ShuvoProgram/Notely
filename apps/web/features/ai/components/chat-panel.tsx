@@ -52,7 +52,7 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-1" aria-live="polite">
         {empty ? (
           <div className={cn("flex h-full flex-col items-center justify-center text-center", compact ? "py-6" : "py-16")}>
-            <div className="grid size-11 place-items-center rounded-xl bg-ai-soft text-ai">
+            <div className="grid size-12 place-items-center rounded-2xl bg-ai-soft text-ai ring-1 ring-ai/20">
               <Sparkles className="size-5" aria-hidden />
             </div>
             <h2 className="mt-4 text-base font-semibold">Ask anything about your notes</h2>
@@ -90,7 +90,7 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
       </div>
 
       <form
-        className="relative mt-2 rounded-xl border bg-card p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring"
+        className="glass-2 relative mt-2 rounded-2xl p-2 transition-shadow focus-within:glow-ai"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
@@ -131,7 +131,7 @@ function MessageBubble({ message }: { message: AIMessage }) {
   if (message.role === "user") {
     return (
       <li className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">{message.content}</div>
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-1">{message.content}</div>
       </li>
     );
   }
@@ -165,7 +165,7 @@ function LiveBubble({ live, waiting }: { live: LiveAssistant; waiting: boolean }
 function Plan({ plan }: { plan: AIPlan }) {
   const done = plan.steps.filter((s) => s.status === "done").length;
   return (
-    <section aria-label="Plan" className="rounded-lg border border-ai/30 bg-ai-soft/30 px-3 py-2 text-sm">
+    <section aria-label="Plan" className="rounded-xl border border-ai/30 bg-ai-soft/40 px-3 py-2 text-sm">
       <p className="flex items-center gap-2 font-medium">
         <Sparkles className="size-3.5 text-ai" aria-hidden />
         <span className="truncate">{plan.goal}</span>
@@ -197,7 +197,7 @@ function Plan({ plan }: { plan: AIPlan }) {
 /** Safe execution metadata only — never chain-of-thought. */
 function Steps({ steps, waiting }: { steps: StepState[]; waiting: boolean }) {
   return (
-    <ul className="space-y-1 rounded-lg border bg-card/60 px-3 py-2 text-sm" aria-label="Progress">
+    <ul className="glass space-y-1 rounded-xl px-3 py-2 text-sm" aria-label="Progress">
       {steps.map((s) => (
         <li key={s.call_id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {s.status === "running" ? (

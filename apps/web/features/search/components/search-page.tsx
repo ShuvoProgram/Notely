@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,10 +50,7 @@ export function SearchPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Search your notes and every app you have connected. Results always say where they came from.</p>
-      </div>
+      <PageHeader title="Search" description="Search your notes and every app you have connected. Results always say where they came from." />
       <div className="relative">
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input
@@ -61,7 +59,7 @@ export function SearchPage() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoFocus
-          className="h-11 pl-9 text-base"
+          className="glass-2 h-12 rounded-full border-0 pl-10 text-base transition-shadow focus-visible:glow-ai focus-visible:ring-0"
         />
       </div>
 
@@ -89,7 +87,7 @@ export function SearchPage() {
               </Badge>
             ))}
           </div>
-          <ul className="divide-y rounded-xl border bg-card">
+          <ul className="glass divide-y divide-glass-border rounded-2xl">
             {hits.map((hit) => {
               const Icon = KIND_ICON[hit.kind] ?? FileText;
               const external = hit.source !== "notely";

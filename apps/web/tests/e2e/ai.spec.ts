@@ -85,7 +85,7 @@ test("write actions pause for review; approving one of two executes only that on
   await expect(page.getByText("Finalize pricing")).toBeVisible();
   await expect(page.getByText("Email the team")).toHaveCount(0);
   await expect(page.getByText("high priority")).toBeVisible();
-  await expect(page.getByText("AI", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI", { exact: true }).first()).toBeVisible();
 });
 
 test("note actions preview a suggestion and only change the note on Insert", async ({ page }) => {
@@ -102,7 +102,7 @@ test("note actions preview a suggestion and only change the note on Insert", asy
   const body = page.getByRole("textbox", { name: "Note body" });
   await expect(body).not.toContainText("Ship Friday;");
 
-  await panel.getByRole("button", { name: "Insert below" }).click();
+  await panel.getByRole("button", { name: "Insert" }).click();
   await expect(body).toContainText("Ship Friday; Bob owns QA.");
   await expect(body).toContainText("We agreed to ship on Friday.");
   await expect(page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
@@ -114,11 +114,11 @@ test("extract tasks offers a checklist and adds the chosen ones", async ({ page 
   await script(page, [{ content: '[{"title":"Call Sam","due_date":null,"priority":"medium"},{"title":"Send the invoice","due_date":"2026-10-01","priority":"none"}]' }]);
   await page.goto(`/app/notes/${noteId}`);
   await page.getByRole("button", { name: "Ask AI" }).click();
-  await page.getByRole("menuitem", { name: "Extract tasks" }).click();
+  await page.getByRole("menuitem", { name: "Extract action items" }).click();
   const panel = page.getByRole("complementary", { name: "AI suggestion" });
   await expect(panel.getByText("Call Sam")).toBeVisible();
   await panel.getByLabel(/Send the invoice/).uncheck();
-  await panel.getByRole("button", { name: "Add 1 task" }).click();
+  await panel.getByRole("button", { name: "Add 1 to tasks" }).click();
   await expect(page.getByText("Added 1 task")).toBeVisible();
 
   await page.goto("/app/tasks");
@@ -182,10 +182,11 @@ test("AI settings: bring your own model is saved encrypted, tested for real, and
   await page.goto("/app/settings/ai");
   await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
 
-  await page.getByLabel("Provider").selectOption("openai_compatible");
+  await page.getByRole("button", { name: "Provider" }).click();
+  await page.getByRole("menuitemradio", { name: "OpenAI-compatible endpoint" }).click();
   await expect(page.getByLabel("Base URL")).toHaveValue("http://localhost:11434/v1");
   await page.getByLabel("Base URL").fill("http://127.0.0.1:1/v1"); // nothing listens here
-  await page.locator("#byo-model").fill("llama3.1");
+  await page.getByRole("textbox", { name: "Model name" }).fill("llama3.1");
   await page.getByLabel("API key").fill("sk-local-test-key-9876");
   await page.getByRole("button", { name: "Save model" }).click();
   await expect(page.getByText("In use")).toBeVisible();

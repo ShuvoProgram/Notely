@@ -26,6 +26,8 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { NoteAIMenu } from "@/features/ai/components/note-ai-panel";
+import type { NoteAIAction } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 interface ToolProps {
@@ -50,7 +52,7 @@ function Tool({ icon: Icon, label, shortcut, active, disabled, onClick }: ToolPr
           disabled={disabled}
           onMouseDown={(e) => e.preventDefault()} // keep editor selection
           onClick={onClick}
-          className={cn(active && "bg-accent text-accent-foreground")}
+          className={cn("rounded-lg", active && "bg-ai-soft text-ai hover:bg-ai-soft hover:text-ai")}
         >
           <Icon aria-hidden />
         </Button>
@@ -63,7 +65,7 @@ function Tool({ icon: Icon, label, shortcut, active, disabled, onClick }: ToolPr
   );
 }
 
-export function EditorToolbar({ editor }: { editor: Editor }) {
+export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (action: NoteAIAction) => void }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -102,7 +104,7 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
     <div
       role="toolbar"
       aria-label="Formatting"
-      className="sticky top-0 z-10 -mx-1 mb-4 flex flex-wrap items-center gap-0.5 rounded-lg border bg-card/95 p-1 backdrop-blur supports-[backdrop-filter]:bg-card/80"
+      className="glass-2 sticky top-2 z-20 mb-6 flex flex-wrap items-center gap-0.5 rounded-xl p-1"
     >
       <Tool icon={Undo2} label="Undo" shortcut="⌘Z" disabled={!state.canUndo} onClick={() => editor.chain().focus().undo().run()} />
       <Tool icon={Redo2} label="Redo" shortcut="⌘⇧Z" disabled={!state.canRedo} onClick={() => editor.chain().focus().redo().run()} />
@@ -161,6 +163,11 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
       <Tool icon={ListChecks} label="Task list" active={state.task} onClick={() => editor.chain().focus().toggleTaskList().run()} />
       <Tool icon={Quote} label="Quote" active={state.quote} onClick={() => editor.chain().focus().toggleBlockquote().run()} />
       <Tool icon={SquareCode} label="Code block" active={state.codeBlock} onClick={() => editor.chain().focus().toggleCodeBlock().run()} />
+      {onAskAI ? (
+        <span className="ml-auto" onMouseDown={(e) => e.preventDefault()}>
+          <NoteAIMenu onPick={onAskAI} />
+        </span>
+      ) : null}
     </div>
   );
 }
