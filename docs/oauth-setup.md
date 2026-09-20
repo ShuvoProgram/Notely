@@ -1,0 +1,103 @@
+# OAuth setup: "Continue with Google" and one-click connectors
+
+Notely never asks a user for credentials, client ids or tokens. A user presses **Continue with
+Google** (sign-in) or **Connect** (a tool), approves on the vendor's own screen, and lands back
+in the app. What an operator configures once, per environment, is described here.
+
+## How the redirect URI works (why `redirect_uri_mismatch` happens)
+
+Google only accepts redirect URIs that are registered on the OAuth client, byte for byte.
+Notely therefore uses **exactly one redirect URI per vendor**, for every flow that vendor serves:
+
+| Vendor app | Redirect URI | Serves |
+|---|---|---|
+| `OAUTH_GOOGLE_*` | `{FRONTEND_ORIGIN}/api/v1/oauth/google/callback` | Continue with Google **and** the Gmail, Google Calendar, Google Drive connectors |
+| `OAUTH_MICROSOFT_*` | `{FRONTEND_ORIGIN}/api/v1/oauth/microsoft/callback` | Continue with Microsoft **and** Teams, Outlook, OneDrive |
+| any other vendor | `{FRONTEND_ORIGIN}/api/v1/oauth/{provider}/callback` | that connector (`slack`, `notion`, `dropbox`, …) |
+| MCP-server vendors (Notion, Jira, ClickUp, Stripe, PayPal) | registered automatically by dynamic client registration | nothing to configure |
+
+The callback tells sign-in and connector flows apart by the server-side state record, so the
+URI can never drift between them. `FRONTEND_ORIGIN` is the only input: the web app proxies
+`/api/*` to the API, so the URI is always on the origin the user is browsing.
+
+`redirect_uri_mismatch` means the URI in the table above is not in the client's
+**Authorized redirect URIs** for the environment you are running. Copy it exactly (scheme, host,
+port, path, no trailing slash). Google says changes can take "5 minutes to a few hours".
+
+## Google Cloud Console, step by step
+
+Do this once per environment. Use **separate projects or at least separate OAuth clients** for
+development and production; never put a `localhost` URI on the production client.
+
+1. **APIs & Services → Library**: enable *Gmail API*, *Google Calendar API*, *Google Drive API*
+   (only the ones you offer as connectors; sign-in needs none of them).
+2. **APIs & Services → OAuth consent screen** (now "Google Auth Platform → Branding/Audience"):
+   - User type **External**.
+   - App name, support email, logo, **Authorized domain** = your production domain,
+     privacy-policy and terms URLs (required for publishing).
+   - **Scopes**: add `openid`, `email`, `profile` plus the connector scopes you offer
+     (`.../auth/gmail.readonly`, `.../auth/gmail.send`, `.../auth/calendar.readonly`,
+     `.../auth/calendar.events`, `.../auth/drive.readonly`, `.../auth/drive.file`).
+   - **Publishing status → In production** (see the next section). While it is *Testing*, only
+     the listed test users can sign in — that is the "add every user manually" trap.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID → Web application**:
+   - Authorized JavaScript origins: `{FRONTEND_ORIGIN}` (e.g. `https://notes.example.com`).
+   - Authorized redirect URIs: `{FRONTEND_ORIGIN}/api/v1/oauth/google/callback` — one line.
+   - Copy the Client ID and Client secret into the API environment:
+     `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET`.
+
+Restart the API. **Continue with Google** appears on the login/sign-up pages and Gmail,
+Google Calendar and Google Drive appear in the connectors marketplace automatically — a provider
+is offered only when its app is configured.
+
+### Publishing and verification (so users are never "test users")
+
+- **Sign-in only (`openid email profile`)**: press *Publish app*. No verification is needed;
+  any Google account can sign in immediately.
+- **Sensitive scopes** (`calendar.*`, `drive.file`, `gmail.send`): publishing works right away,
+  but until Google verifies the app users see the *"Google hasn't verified this app"*
+  interstitial (they can continue via *Advanced*), and the app is capped at 100 users. Submit
+  for **brand + scope verification** from the consent-screen page; it needs the privacy policy,
+  a demo video and the authorized domain. Typically days.
+- **Restricted scopes** (`gmail.readonly`, `drive.readonly`): verification is mandatory for
+  general availability and includes a third-party security assessment (CASA). Until it passes,
+  the same 100-user cap applies. If you want Gmail reading without the assessment, Google
+  Workspace *internal* apps (User type **Internal**) skip verification for your own organisation.
+
+None of this is code: Notely's requests are already shaped for a published app (PKCE,
+`access_type=offline` + `prompt=consent` for refresh tokens, `include_granted_scopes`, minimal
+per-connector scopes chosen by the user on the consent card).
+
+## Microsoft (Entra ID) in brief
+
+App registrations → New registration → *Accounts in any organizational directory and personal
+Microsoft accounts* → Authentication → Web → Redirect URI
+`{FRONTEND_ORIGIN}/api/v1/oauth/microsoft/callback` → Certificates & secrets → new secret →
+API permissions → delegated Graph scopes you offer. Set `OAUTH_MICROSOFT_CLIENT_ID/SECRET`
+(`OAUTH_MICROSOFT_TENANT=common` for multi-tenant).
+
+## Environments
+
+| | Development | Staging | Production |
+|---|---|---|---|
+| `ENVIRONMENT` | `development` | `production` | `production` |
+| `FRONTEND_ORIGIN` | `http://localhost:3000` | `https://staging.notes.example.com` | `https://notes.example.com` |
+| Redirect URI to register | `http://localhost:3000/api/v1/oauth/google/callback` | `https://staging…/api/v1/oauth/google/callback` | `https://notes.example.com/api/v1/oauth/google/callback` |
+| Google OAuth client | dev client (Testing status is fine; you are the test user) | own client, published | own client, published + verified |
+| Where the values live | `apps/api/.env` (git-ignored) | secret store → env | secret store → env |
+
+Rules the API enforces in production (`ENVIRONMENT=production`): `https://` origins, secure
+cookies, `SESSION_SECRET` and `ENCRYPTION_KEY` set, and a startup gate that refuses to boot
+otherwise (`docs/deployment.md`).
+
+## What happens on the user's side
+
+1. **Continue with Google** → Google account chooser → back to `/app`, signed in. First time,
+   the account is created from the Google profile (verified email, name, avatar); afterwards the
+   same Google subject always resolves to that account. Cancel or an expired link comes back
+   to the login page with a plain-language reason.
+2. **Connections → Gmail → Connect** → consent card (what Notely can do, what Google receives)
+   → **Continue with Notely** → Google's consent screen for *just* the scopes picked → back to
+   the Gmail page showing *Connected as you@gmail.com*. Tokens are stored encrypted
+   (`ENCRYPTION_KEY`, Fernet) against the user's connection row; refresh is automatic.
+3. **Disconnect** revokes and deletes the tokens; **Reconnect** runs the same one-click flow.

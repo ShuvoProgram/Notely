@@ -38,7 +38,7 @@ def _google(settings: Settings) -> SignInProviderSpec | None:
         id=SignInProvider.google,
         display_name="Google",
         config=OAuthClientConfig(
-            provider_id="signin-google",
+            provider_id="google",
             client_id=settings.oauth_google_client_id,
             client_secret=settings.oauth_google_client_secret,
             scopes=("openid", "email", "profile"),
@@ -61,7 +61,7 @@ def _microsoft(settings: Settings) -> SignInProviderSpec | None:
         id=SignInProvider.microsoft,
         display_name="Microsoft",
         config=OAuthClientConfig(
-            provider_id="signin-microsoft",
+            provider_id="microsoft",
             client_id=settings.oauth_microsoft_client_id,
             client_secret=settings.oauth_microsoft_client_secret,
             scopes=("openid", "email", "profile"),
@@ -90,8 +90,15 @@ def get_sign_in_provider(settings: Settings, provider_id: str) -> SignInProvider
     raise ProviderNotConfigured()
 
 
+# Sign-in and the Gmail/Calendar/Drive (or Teams/Outlook/OneDrive) connectors share one vendor
+# OAuth app, so they share ONE redirect URI: `/api/v1/oauth/{vendor}/callback`. The callback
+# tells the flows apart by the state record (`context.flow == "signin"`), so an operator
+# registers exactly one URI per vendor and it can never drift between the two flows.
+SIGN_IN_FLOW = "signin"
+
+
 def redirect_uri_for(settings: Settings, provider_id: str) -> str:
-    return callback_uri(settings, f"/auth/oauth/{provider_id}/callback")
+    return callback_uri(settings, f"/oauth/{provider_id}/callback")
 
 
 def build_client(settings: Settings, spec: SignInProviderSpec) -> OAuthClient:

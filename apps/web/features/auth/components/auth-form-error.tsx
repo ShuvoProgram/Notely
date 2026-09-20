@@ -9,6 +9,8 @@ const MESSAGES: Record<string, string> = {
   CSRF_ORIGIN_REJECTED: "This request was blocked for security reasons. Reload and try again.",
   oauth_denied: "Sign-in was cancelled before access was granted.",
   oauth_failed: "Authorization failed. Your access wasn't granted.",
+  oauth_expired: "That sign-in link expired or was already used. Please try again.",
+  session_expired: "Your session ended before the connection finished. Sign in and connect again.",
 };
 
 export function messageFor(error: unknown): string {

@@ -162,6 +162,8 @@ doors, tried in this order:
    Redirect URI to register: `{FRONTEND_ORIGIN}/api/v1/oauth/{vendor}/callback`, one per app:
    `/oauth/google/callback` covers Gmail + Calendar + Drive, `/oauth/microsoft/callback` covers
    Teams + Outlook + OneDrive; every other vendor uses its provider id (`/oauth/slack/callback`).
+   The same URI serves **Continue with Google / Microsoft** sign-in. Console walkthrough,
+   dev/staging/prod separation and consent-screen publishing: [docs/oauth-setup.md](docs/oauth-setup.md).
 2. **The vendor's official MCP server** — no app registration at all. Notely discovers the
    server's authorization server (RFC 9728/8414), registers itself once per deployment (RFC 7591
    dynamic client registration) and runs a PKCE flow. Notion, Jira/Atlassian, ClickUp, Stripe and

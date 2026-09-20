@@ -14,7 +14,8 @@ from app.api.deps import (
     set_session_cookie,
 )
 from app.core import metrics
-from app.core.exceptions import OAuthExchangeFailed
+from app.core.config import Settings
+from app.core.exceptions import APIError, OAuthExchangeFailed
 from app.core.oauth import callback_uri
 from app.core.rate_limit import client_ip, rate_limit
 from app.core.responses import Envelope, ok
@@ -26,7 +27,9 @@ from app.schemas.auth import (
     SignupRequest,
     UserOut,
 )
+from app.services.auth_service import AuthService
 from app.services.sign_in_providers import (
+    SIGN_IN_FLOW,
     build_client,
     claims_to_profile,
     enabled_sign_in_providers,
@@ -162,23 +165,28 @@ async def list_providers(settings: SettingsDep) -> dict[str, Any]:
 @router.get("/oauth/{provider_id}/start", dependencies=[Depends(auth_limit)])
 async def oauth_start(provider_id: str, settings: SettingsDep) -> RedirectResponse:
     spec = get_sign_in_provider(settings, provider_id)
-    url = await build_client(settings, spec).begin()
+    url = await build_client(settings, spec).begin(context={"flow": SIGN_IN_FLOW})
     return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
 
 
-@router.get("/oauth/{provider_id}/callback", dependencies=[Depends(auth_limit)])
-async def oauth_callback(
+async def complete_sign_in(
     provider_id: str,
+    record: dict[str, Any],
+    *,
     request: Request,
-    auth: AuthServiceDep,
-    settings: SettingsDep,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+    auth: AuthService,
+    settings: Settings,
+    code: str | None,
+    error: str | None,
 ) -> RedirectResponse:
-    spec = get_sign_in_provider(settings, provider_id)
+    """Finish "Continue with {vendor}" once the shared `/oauth/{vendor}/callback` has validated
+    the state: exchange the code, verify the id_token, create-or-find the account, start a
+    session and land the user in the app. Every failure becomes a readable login-page message."""
+    try:
+        spec = get_sign_in_provider(settings, provider_id)
+    except APIError:
+        return _login_redirect(settings, "oauth_failed")
     client = build_client(settings, spec)
-    record = await client.consume_state(state)
     if error or not code:
         return _login_redirect(settings, "oauth_denied")
     try:
@@ -207,6 +215,10 @@ async def oauth_callback(
     )
     set_session_cookie(response, issued.token, settings)
     return response
+
+
+def login_redirect(settings: Settings, reason: str) -> RedirectResponse:
+    return _login_redirect(settings, reason)
 
 
 def _login_redirect(settings: Any, reason: str) -> RedirectResponse:

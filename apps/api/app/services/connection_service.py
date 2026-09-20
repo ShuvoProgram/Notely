@@ -345,6 +345,18 @@ class ConnectionService:
         """`slot` is the callback the vendor sent the user back to (a provider id, or a vendor
         family such as `google`); the state record names the actual provider."""
         record = await consume_oauth_state(slot, state, self._redirect_uri(slot))
+        return await self.complete_oauth_record(user, slot, record, code=code, error=error)
+
+    async def complete_oauth_record(
+        self,
+        user: User,
+        slot: str,
+        record: dict[str, Any],
+        *,
+        code: str | None,
+        error: str | None,
+    ) -> UserConnection:
+        """Second half of `complete_oauth`, for callers that validated the state themselves."""
         ctx_info = record.get("context") or {}
         if ctx_info.get("user_id") != str(user.id):
             from app.core.exceptions import InvalidOAuthState

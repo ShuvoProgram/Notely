@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from httpx import AsyncClient
 
 from app.tests.conftest import ORIGIN, signup
@@ -157,3 +159,103 @@ async def test_providers_empty_when_unconfigured(client: AsyncClient) -> None:
     start = await client.get("/api/v1/auth/oauth/google/start")
     assert start.status_code == 404
     assert start.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
+
+
+async def test_continue_with_google_signs_up_then_signs_in_via_the_shared_callback(
+    client: AsyncClient, monkeypatch: Any
+) -> None:
+    """Sign-in and the Google connectors share ONE redirect URI (/api/v1/oauth/google/callback);
+    the callback route tells the flows apart by the state record, so an operator registers a
+    single URI in Google Cloud and `redirect_uri_mismatch` cannot come from Notely's side."""
+    from urllib.parse import parse_qs, urlparse
+
+    import httpx
+
+    from app.core import oauth as core_oauth
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(settings, "oauth_google_client_secret", "google-secret")
+
+    token_calls: list[dict[str, list[str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
+            token_calls.append(parse_qs(request.content.decode()))
+            return httpx.Response(
+                200,
+                json={"access_token": "at", "id_token": "signed-by-google", "token_type": "Bearer"},
+            )
+        return httpx.Response(404)
+
+    core_oauth.set_http_transport(httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        core_oauth.OAuthClient,
+        "verify_id_token",
+        lambda self, token, nonce: {
+            "sub": "google-uid-1",
+            "email": "Grace@Example.com",
+            "email_verified": True,
+            "name": "Grace Hopper",
+            "picture": "https://example.com/g.png",
+        },
+    )
+    try:
+        listing = (await client.get("/api/v1/auth/providers")).json()["data"]
+        assert listing[0]["id"] == "google"
+
+        async def continue_with_google() -> dict[str, Any]:
+            start = await client.get("/api/v1/auth/oauth/google/start", follow_redirects=False)
+            assert start.status_code == 302
+            q = parse_qs(urlparse(start.headers["location"]).query)
+            redirect = q["redirect_uri"][0]
+            # The one URI to register — identical to the Gmail/Calendar/Drive connectors'.
+            assert redirect == "http://localhost:3000/api/v1/oauth/google/callback"
+            assert q["scope"] == ["openid email profile"] and q["nonce"]
+            cb = await client.get(
+                redirect.removeprefix("http://localhost:3000"),
+                params={"code": "auth-code", "state": q["state"][0]},
+                follow_redirects=False,
+            )
+            assert cb.status_code == 302, cb.text
+            assert cb.headers["location"] == "http://localhost:3000/app"
+            assert settings.session_cookie_name in cb.headers.get("set-cookie", "")
+            me = await client.get("/api/v1/users/me")
+            assert me.status_code == 200, me.text
+            return dict(me.json()["data"])
+
+        # First time: the account is created from the Google profile.
+        first = await continue_with_google()
+        assert first["email"] == "grace@example.com"
+        assert first["display_name"] == "Grace Hopper"
+        assert token_calls[-1]["redirect_uri"] == [
+            "http://localhost:3000/api/v1/oauth/google/callback"
+        ]
+
+        # Next time: same Google subject → same account, no duplicate.
+        await client.post("/api/v1/auth/logout", headers=ORIGIN)
+        second = await continue_with_google()
+        assert second["id"] == first["id"]
+
+        # A stale/replayed state lands on the login page with a readable reason, never a 4xx.
+        await client.post("/api/v1/auth/logout", headers=ORIGIN)
+        stale = await client.get(
+            "/api/v1/oauth/google/callback",
+            params={"code": "x", "state": "no-such-state"},
+            follow_redirects=False,
+        )
+        assert stale.status_code == 302
+        assert stale.headers["location"] == "http://localhost:3000/login?error=oauth_expired"
+
+        # The user pressing "Cancel" on Google's screen is told so.
+        start = await client.get("/api/v1/auth/oauth/google/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        denied = await client.get(
+            "/api/v1/oauth/google/callback",
+            params={"error": "access_denied", "state": state},
+            follow_redirects=False,
+        )
+        assert denied.headers["location"] == "http://localhost:3000/login?error=oauth_denied"
+    finally:
+        core_oauth.set_http_transport(None)

@@ -23,7 +23,7 @@ Copy `.env.example` to `.env` on the host (never commit it) and set:
 | `POSTGRES_PASSWORD` | Used by the compose Postgres and the `DATABASE_URL` it builds. |
 | `FRONTEND_ORIGIN`, `ALLOWED_ORIGINS`, `API_PUBLIC_URL` | All `https://…`. With the bundled edge they are the same host (`https://notes.example.com`). |
 | `LITELLM_MASTER_KEY` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` | Model providers, configured in `infra/litellm/config.yaml`. |
-| `OAUTH_*_CLIENT_ID/SECRET` | One pair per integration you enable; redirect URI `https://<host>/api/v1/oauth/<vendor>/callback` (`google`, `microsoft`, or the provider id). |
+| `OAUTH_*_CLIENT_ID/SECRET` | One pair per vendor you enable (sign-in and connectors share it); redirect URI `https://<host>/api/v1/oauth/<vendor>/callback` (`google`, `microsoft`, or the provider id). Console steps, publishing and verification: `docs/oauth-setup.md`. |
 | `METRICS_TOKEN` | Bearer token Prometheus presents to `/metrics`. Required in production. |
 | `TRUST_PROXY_HEADERS=true` | Only behind a proxy that sets `X-Forwarded-For` (the bundled edge does). |
 | `WEB_SECURE=true` | Bakes HSTS into the web build. |

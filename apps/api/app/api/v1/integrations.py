@@ -8,10 +8,18 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse
 
-from app.api.deps import CurrentAuth, DbDep, SettingsDep
+from app.api.deps import (
+    AuthServiceDep,
+    CurrentAuth,
+    DbDep,
+    SettingsDep,
+    get_optional_auth,
+)
+from app.api.v1.auth import complete_sign_in, login_redirect
 from app.core import metrics
 from app.core.config import get_settings
 from app.core.exceptions import APIError, NotFound
+from app.core.oauth import callback_uri, consume_oauth_state
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
 from app.db.base import utcnow
@@ -27,7 +35,9 @@ from app.schemas.integrations import (
     ProviderOut,
     TestStepOut,
 )
+from app.services.auth_service import AuthContext
 from app.services.connection_service import ConnectionService, MarketplaceEntry
+from app.services.sign_in_providers import SIGN_IN_FLOW
 from app.workers.queue import enqueue
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -205,19 +215,44 @@ async def oauth_start_url(
 )
 async def oauth_callback(
     provider_id: str,
-    ctx: CurrentAuth,
+    request: Request,
+    ctx: Annotated[AuthContext | None, Depends(get_optional_auth)],
+    auth: AuthServiceDep,
     service: ServiceDep,
     settings: SettingsDep,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
-    # `provider_id` here is the callback slot: a provider id, or a vendor family (`google`,
-    # `microsoft`) whose products share one OAuth app and therefore one redirect URI.
+    """The one redirect URI per vendor. `provider_id` is the callback slot: a provider id, or
+    a vendor family (`google`, `microsoft`) whose products — and whose "Continue with …"
+    sign-in — share one OAuth app. The state record says which flow is completing."""
     target = f"{settings.frontend_origin}/app/settings/connections/{provider_id}"
     try:
-        conn = await service.complete_oauth(
-            ctx.user, provider_id, code=code, state=state, error=error
+        record = await consume_oauth_state(
+            provider_id, state, callback_uri(settings, f"/oauth/{provider_id}/callback")
+        )
+    except APIError as exc:
+        # Nothing to go on but the slot; an expired sign-in state lands on the login page.
+        if ctx is None:
+            return login_redirect(settings, "oauth_expired")
+        return RedirectResponse(f"{target}?error={exc.code}", status_code=status.HTTP_302_FOUND)
+    flow = (record.get("context") or {}).get("flow")
+    if flow == SIGN_IN_FLOW:
+        return await complete_sign_in(
+            provider_id,
+            record,
+            request=request,
+            auth=auth,
+            settings=settings,
+            code=code,
+            error=error,
+        )
+    if ctx is None:
+        return login_redirect(settings, "session_expired")
+    try:
+        conn = await service.complete_oauth_record(
+            ctx.user, provider_id, record, code=code, error=error
         )
     except APIError as exc:
         page = exc.details.get("provider_id") if isinstance(exc.details, dict) else None
