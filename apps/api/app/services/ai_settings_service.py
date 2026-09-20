@@ -13,7 +13,9 @@ from app.ai.byo import (
     BYOModel,
     BYOProvider,
     ModelTest,
+    classify_error,
     key_hint,
+    list_models,
     normalise_base_url,
     provider_info,
     test_model,
@@ -125,6 +127,34 @@ class AISettingsService:
         row.last_error = None if result.ok else result.detail
         await self.db.commit()
         return result
+
+    async def list_models(
+        self, user: User, *, provider: str, api_key: str | None, base_url: str | None
+    ) -> list[str]:
+        """Models available to a key: the one being typed, or the stored one for that provider."""
+        try:
+            provider_id = BYOProvider(provider)
+        except ValueError as exc:
+            raise ValidationFailed("Unknown provider.") from exc
+        key = (api_key or "").strip()
+        if not key:
+            row = await self.get(user)
+            if row is not None and row.provider == provider and row.api_key_encrypted:
+                key = crypto.decrypt(row.api_key_encrypted, key=self._key())
+                base_url = base_url or row.base_url
+        if not key and provider_id != BYOProvider.openai_compatible:
+            raise ValidationFailed(
+                "Enter an API key first.", details={"fields": {"api_key": ["Required"]}}
+            )
+        try:
+            base = normalise_base_url(base_url) or provider_info(provider_id).default_base_url
+        except ValueError as exc:
+            raise ValidationFailed(str(exc), details={"fields": {"base_url": [str(exc)]}}) from exc
+        config = BYOModel(provider=provider_id, model="", api_key=key, base_url=base)
+        try:
+            return await list_models(config)
+        except Exception as exc:  # noqa: BLE001 — same classification as the test button
+            raise ValidationFailed(classify_error(exc), code="MODEL_LIST_FAILED") from exc
 
     async def delete(self, user: User) -> None:
         row = await self.get(user)

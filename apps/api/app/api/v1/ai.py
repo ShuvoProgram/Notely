@@ -22,6 +22,8 @@ from app.schemas.ai import (
     AuditEventOut,
     ChatRequest,
     MessageOut,
+    ModelListIn,
+    ModelListOut,
     ModelTestOut,
     RunOut,
     ThreadDetailOut,
@@ -194,6 +196,21 @@ async def set_user_model(
         enabled=payload.enabled,
     )
     return ok(UserModelOut.model_validate(row, from_attributes=True))
+
+
+@router.post(
+    "/settings/model/models",
+    response_model=Envelope[ModelListOut],
+    dependencies=[Depends(ai_limit)],
+)
+async def list_user_models(
+    payload: ModelListIn, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
+) -> dict[str, Any]:
+    """The models a key can use, from the vendor's own list endpoint (key never stored here)."""
+    models = await AISettingsService(db, settings).list_models(
+        ctx.user, provider=payload.provider, api_key=payload.api_key, base_url=payload.base_url
+    )
+    return ok(ModelListOut(models=models))
 
 
 @router.post(

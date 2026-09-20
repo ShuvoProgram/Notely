@@ -37,7 +37,8 @@ class ProviderInfo:
     default_base_url: str | None = None
 
 
-# Suggested models per provider. The model field is free text so newer models work immediately.
+# Fallback suggestions per provider, shown until a key is entered; with a key, the real list
+# comes from the vendor (`list_models`). The model field stays free text either way.
 PROVIDER_CATALOG: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         BYOProvider.openai,
@@ -63,7 +64,7 @@ PROVIDER_CATALOG: tuple[ProviderInfo, ...] = (
         "Google Gemini",
         "AIza…",
         "https://aistudio.google.com/app/apikey",
-        ("gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"),
+        ("gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"),
     ),
     ProviderInfo(
         BYOProvider.openai_compatible,
@@ -179,6 +180,75 @@ def classify_error(exc: Exception) -> str:
     if "connect" in name or "connection" in text or "resolve" in text or status in (502, 503):
         return "Could not reach the provider. Check the base URL and your network."
     return "The provider returned an error. Check the model name and try again."
+
+
+# Model ids that are not chat models and would only confuse the picker.
+_NOT_CHAT = (
+    "embed",
+    "embedding",
+    "tts",
+    "whisper",
+    "transcribe",
+    "audio",
+    "realtime",
+    "dall-e",
+    "image",
+    "imagen",
+    "veo",
+    "lyria",
+    "moderation",
+    "aqa",
+    "computer-use",
+    "search",
+    "-live",
+)
+
+
+def _chat_like(model_id: str) -> bool:
+    lowered = model_id.lower()
+    return not any(marker in lowered for marker in _NOT_CHAT)
+
+
+async def list_models(config: BYOModel) -> list[str]:
+    """The models this key can actually use, straight from the vendor's list endpoint, so the
+    picker never shows a name the provider will reject. `config.model` may be empty here."""
+    import httpx
+
+    headers: dict[str, str] = {}
+    if config.provider == BYOProvider.openai:
+        url = "https://api.openai.com/v1/models"
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    elif config.provider == BYOProvider.openai_compatible:
+        url = f"{(config.base_url or '').rstrip('/')}/models"
+        if config.api_key:
+            headers["Authorization"] = f"Bearer {config.api_key}"
+    elif config.provider == BYOProvider.anthropic:
+        url = "https://api.anthropic.com/v1/models?limit=100"
+        headers["x-api-key"] = config.api_key
+        headers["anthropic-version"] = "2023-06-01"
+    else:
+        url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200"
+        headers["x-goog-api-key"] = config.api_key
+    async with httpx.AsyncClient(timeout=TEST_TIMEOUT_SECONDS) as http:
+        response = await http.get(url, headers=headers)
+    response.raise_for_status()
+    body = response.json()
+    ids: list[str] = []
+    if config.provider == BYOProvider.google:
+        for m in body.get("models", []):
+            if "generateContent" not in (m.get("supportedGenerationMethods") or []):
+                continue
+            ids.append(str(m.get("name", "")).removeprefix("models/"))
+    else:
+        ids = [str(m.get("id", "")) for m in body.get("data", [])]
+    seen: set[str] = set()
+    out: list[str] = []
+    for model_id in ids:
+        if model_id and _chat_like(model_id) and model_id not in seen:
+            seen.add(model_id)
+            out.append(model_id)
+    # Newest first is the most useful order; vendors mostly follow a version-in-name convention.
+    return sorted(out, reverse=True)
 
 
 def key_hint(api_key: str) -> str:

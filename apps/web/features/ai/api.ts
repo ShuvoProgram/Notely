@@ -22,6 +22,9 @@ export const aiApi = {
   updateSettings: (prefs: AIPreferences) => api.patch<AIPreferences>("/ai/settings", prefs),
   setUserModel: (input: UserModelInput) => api.put<UserModel>("/ai/settings/model", input),
   testUserModel: () => api.post<ModelTestResult>("/ai/settings/model/test"),
+  // Which models a key can use, from the vendor. Empty api_key = the stored key for that provider.
+  listUserModels: (input: { provider: string; api_key?: string | null; base_url?: string | null }) =>
+    api.post<{ models: string[] }>("/ai/settings/model/models", input),
   deleteUserModel: () => api.delete<{ deleted: boolean }>("/ai/settings/model"),
   audit: () => api.get<AuditEvent[]>("/audit"),
 

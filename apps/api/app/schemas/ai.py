@@ -121,6 +121,17 @@ class UserModelIn(BaseModel):
     enabled: bool = True
 
 
+class ModelListIn(BaseModel):
+    provider: str = Field(max_length=40)
+    # Write-only; empty means "use the key stored for this provider".
+    api_key: str | None = Field(default=None, max_length=500)
+    base_url: str | None = Field(default=None, max_length=500)
+
+
+class ModelListOut(BaseModel):
+    models: list[str]
+
+
 class ModelTestOut(BaseModel):
     ok: bool
     detail: str

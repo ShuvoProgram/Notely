@@ -170,3 +170,94 @@ def test_build_model_uses_the_users_credentials() -> None:
     for model in (openai, compat, anthropic, google):
         assert callable(getattr(model, "bind_tools", None))
     assert byo.key_hint("sk-ant-1234") == "…1234" and byo.key_hint("short") == "set"
+
+
+async def test_models_are_listed_live_from_the_vendor(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The picker asks the vendor which models the key can use, filtering out non-chat ids."""
+    import httpx
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((str(request.url), dict(request.headers)))
+        if request.url.host == "generativelanguage.googleapis.com":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {
+                            "name": "models/gemini-3.1-pro-preview",
+                            "supportedGenerationMethods": ["generateContent"],
+                        },
+                        {
+                            "name": "models/gemini-2.5-flash",
+                            "supportedGenerationMethods": ["generateContent"],
+                        },
+                        {
+                            "name": "models/gemini-embedding-001",
+                            "supportedGenerationMethods": ["embedContent"],
+                        },
+                        {"name": "models/veo-3", "supportedGenerationMethods": ["predict"]},
+                    ]
+                },
+            )
+        if request.headers.get("authorization") != "Bearer sk-live":
+            return httpx.Response(401, json={"error": {"message": "bad key"}})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "gpt-5.2"},
+                    {"id": "gpt-5-mini"},
+                    {"id": "text-embedding-3-large"},
+                    {"id": "whisper-1"},
+                    {"id": "gpt-5.2"},
+                ]
+            },
+        )
+
+    real_client = httpx.AsyncClient
+
+    def patched(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched)
+    await signup(client)
+
+    # A key being typed (not stored yet) is used directly and never persisted.
+    resp = await client.post(
+        "/api/v1/ai/settings/model/models",
+        json={"provider": "google", "api_key": "AIza-typed"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["models"] == ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
+    assert calls[-1][1]["x-goog-api-key"] == "AIza-typed"
+    assert (await client.get("/api/v1/ai/settings")).json()["data"]["user_model"] is None
+
+    # With a key stored for the provider, omitting api_key uses the stored one.
+    await put_model(client, provider="openai", model="gpt-5.2", api_key="sk-live")
+    resp = await client.post(
+        "/api/v1/ai/settings/model/models", json={"provider": "openai"}, headers=ORIGIN
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["models"] == ["gpt-5.2", "gpt-5-mini"]
+
+    # A rejected key surfaces the same friendly message as the Test button.
+    resp = await client.post(
+        "/api/v1/ai/settings/model/models",
+        json={"provider": "openai", "api_key": "sk-wrong"},
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 422
+    assert "rejected" in resp.json()["error"]["message"]
+
+    # No key at all (and none stored for that provider) is a field error, not a vendor call.
+    resp = await client.post(
+        "/api/v1/ai/settings/model/models", json={"provider": "anthropic"}, headers=ORIGIN
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["details"]["fields"]["api_key"] == ["Required"]

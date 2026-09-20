@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ExternalLink, KeyRound, Loader2, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -74,6 +74,36 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
     },
     onError: (e) => toast.error(messageFor(e)),
   });
+  // Live model list from the vendor: fetched with the key being typed (debounced) or the stored
+  // key, so the picker only offers names the provider actually accepts today. The result is
+  // tagged with the inputs that produced it, so a stale answer is simply ignored.
+  const signature = `${providerId}|${apiKey}|${info?.needs_base_url ? baseUrl : ""}`;
+  const [live, setLive] = React.useState<{ signature: string; models?: string[]; error?: string } | null>(null);
+  const hasKey = apiKey.trim() !== "" || (saved?.provider === providerId && !!saved.key_hint) || info?.id === "openai_compatible";
+  const listModels = useMutation({
+    mutationFn: async () => ({
+      signature,
+      ...(await aiApi.listUserModels({
+        provider: providerId,
+        api_key: apiKey || null,
+        base_url: info?.needs_base_url ? baseUrl || null : null,
+      })),
+    }),
+    onSuccess: (r) => setLive({ signature: r.signature, models: r.models }),
+    onError: (e) => setLive({ signature, error: messageFor(e) }),
+  });
+  const refreshModels = listModels.mutate;
+  React.useEffect(() => {
+    if (!hasKey) return;
+    const handle = window.setTimeout(() => refreshModels(), apiKey ? 700 : 0);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when the inputs that matter change
+  }, [signature, hasKey]);
+  const liveModels = live?.signature === signature && live.models ? live.models : null;
+  const liveError = live?.signature === signature ? (live.error ?? null) : null;
+  const suggestions = liveModels ?? info?.models ?? [];
+  const unknownModel = liveModels !== null && model !== "" && !liveModels.includes(model);
+
   const remove = useMutation({
     mutationFn: aiApi.deleteUserModel,
     onSuccess: () => {
@@ -173,14 +203,49 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="byo-model">Model</Label>
-              <Input id="byo-model" name="byo-model-name" autoComplete="off" list="byo-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder={info?.models[0] ?? "model name"} aria-invalid={errors.model ? true : undefined} />
-              <datalist id="byo-models">{info?.models.map((m) => <option key={m} value={m} />)}</datalist>
+              <div className="flex gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button id="byo-model" type="button" variant="outline" className="min-w-0 flex-1 justify-between font-normal" aria-invalid={errors.model || unknownModel ? true : undefined}>
+                      <span className="truncate">{model || "Choose a model"}</span>
+                      {listModels.isPending ? <Loader2 className="size-4 shrink-0 animate-spin opacity-60" aria-hidden /> : <ChevronDown className="size-4 shrink-0 opacity-60" aria-hidden />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto">
+                    <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                      {suggestions.map((m) => (
+                        <DropdownMenuRadioItem key={m} value={m}>
+                          {m}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {hasKey ? (
+                  <Button type="button" variant="outline" size="icon" aria-label="Refresh model list" title="Refresh model list" disabled={listModels.isPending} onClick={() => refreshModels()}>
+                    <RefreshCw className="size-4" aria-hidden />
+                  </Button>
+                ) : null}
+              </div>
+              <Input name="byo-model-name" autoComplete="off" aria-label="Model name" value={model} onChange={(e) => setModel(e.target.value)} placeholder={suggestions[0] ?? "or type a model name"} aria-invalid={errors.model ? true : undefined} className="h-8 text-xs" />
               {errors.model ? (
                 <p role="alert" className="text-xs text-destructive">
                   {errors.model}
                 </p>
+              ) : liveError ? (
+                <p role="alert" className="text-xs text-destructive">
+                  Couldn&apos;t list models: {liveError}
+                </p>
+              ) : liveModels ? (
+                <p className="text-xs text-muted-foreground" aria-live="polite">
+                  {unknownModel ? (
+                    <span className="text-warning">“{model}” isn&apos;t in the {liveModels.length} models your key can use — pick one from the list.</span>
+                  ) : (
+                    <>{liveModels.length} models available to your key, newest first.</>
+                  )}
+                </p>
               ) : (
-                <p className="text-xs text-muted-foreground">Pick a suggestion or type any model your key can use.</p>
+                <p className="text-xs text-muted-foreground">{hasKey ? "Loading the models your key can use…" : "Enter your API key to load the models it can use."}</p>
               )}
             </div>
           </div>
