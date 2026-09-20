@@ -16,7 +16,6 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
-    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -67,12 +66,6 @@ class AsanaProvider(RestOAuthProvider):
         description="See and search your tasks; create and complete tasks with approval.",
         logo_url="https://cdn.simpleicons.org/asana",
         docs_url="https://developers.asana.com/docs/oauth",
-        token_auth=TokenAuthSpec(
-            label="Personal access token",
-            help="Asana → My settings → Apps → Developer apps → Create personal access token.",
-            help_url="https://app.asana.com/0/my-apps",
-            placeholder="1/…",
-        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.search, Capability.read, Capability.create, Capability.update],
         permissions=[

@@ -177,20 +177,6 @@ CASES: dict[str, dict[str, Any]] = {
             "write",
         ),
     },
-    "linear": {
-        "authorize_host": "linear.app",
-        "scope_param": "scope",
-        "account": "Ada @ Acme",
-        "search_title": "ENG-42: Pricing page",
-        "read": ("linear__read_issue", {"issue": "ENG-42"}, "Finalize the pricing page."),
-        "write": (
-            "linear__create_issue",
-            {"team_key": "ENG", "title": "Fix typo"},
-            "POST",
-            "/graphql",
-            "write",
-        ),
-    },
     "clickup": {
         "authorize_host": "app.clickup.com",
         "scope_param": "scope",
@@ -202,19 +188,6 @@ CASES: dict[str, dict[str, Any]] = {
             {"list_id": "list-1", "name": "Email the team"},
             "POST",
             "/list/list-1/task",
-            "write",
-        ),
-    },
-    "trello": {
-        "connect": {"config": {"api_key": "trello-key"}, "token": "trello-token"},
-        "account": "Ada Lovelace",
-        "search_title": "Finalize pricing",
-        "read": ("trello__read_card", {"card_id": "card-1"}, "Pricing page"),
-        "write": (
-            "trello__create_card",
-            {"list_id": "l1", "name": "Email the team"},
-            "POST",
-            "/1/cards",
             "write",
         ),
     },
@@ -246,7 +219,7 @@ def write_capability(provider_id: str, tool_name: str) -> str:
     raise AssertionError(tool_name)
 
 
-# Which OAuth client settings each provider reads (None = token-only provider).
+# Which OAuth client settings each provider reads.
 SETTINGS_PREFIX: dict[str, str | None] = {
     "microsoft_teams": "microsoft",
     "outlook": "microsoft",
@@ -254,22 +227,11 @@ SETTINGS_PREFIX: dict[str, str | None] = {
     "gmail": "google",
     "google_calendar": "google",
     "google_drive": "google",
-    "trello": None,
 }
 
 
 async def connect(client: Any, provider_id: str, case: dict[str, Any]) -> dict[str, Any]:
-    """OAuth for OAuth providers; the token form for token-only ones (Trello)."""
-    if "connect" not in case:
-        return await connect_via_oauth(client, provider_id, case)
-    resp = await client.post(
-        f"/api/v1/integrations/providers/{provider_id}/connect",
-        json=case["connect"],
-        headers=ORIGIN,
-    )
-    assert resp.status_code == 201, resp.text
-    detail = (await client.get(f"/api/v1/integrations/providers/{provider_id}")).json()["data"]
-    return detail
+    return await connect_via_oauth(client, provider_id, case)
 
 
 @pytest.fixture
@@ -327,7 +289,7 @@ async def test_provider_end_to_end(client: Any, vendor: VendorMock) -> None:
     conn = detail["connection"]
     assert conn["status"] == "connected", conn
     assert conn["external_account_name"] == case["account"]
-    assert conn["auth_type"] == ("token" if "connect" in case else "oauth2")
+    assert conn["auth_type"] == "oauth2"
 
     # Health test reports the standard four steps.
     test = (
@@ -462,76 +424,3 @@ def test_vendor_payload_shapes() -> None:
 
     with pytest.raises(OAuthExchangeFailed):
         parse_slack_tokens({"ok": False, "error": "invalid_code"})
-
-
-# --- personal API tokens: the easy path when a deployment has no vendor OAuth app -------------
-
-
-@pytest.mark.parametrize("vendor", ["todoist"], indirect=True)
-async def test_connect_with_personal_token_when_oauth_is_not_configured(
-    client: Any, vendor: VendorMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.core.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "oauth_todoist_client_id", "")
-    await signup(client)
-    detail = (await client.get("/api/v1/integrations/providers/todoist")).json()["data"]
-    assert detail["configured"] is False
-    assert detail["connect_methods"] == ["token"]
-    assert detail["token_auth"]["label"] == "API token"
-    assert detail["token_auth"]["help_url"]
-
-    missing = await client.post(
-        "/api/v1/integrations/providers/todoist/connect",
-        json={"config": {}, "token": ""},
-        headers=ORIGIN,
-    )
-    assert missing.status_code == 422
-    assert missing.json()["error"]["details"]["fields"] == {"token": ["Required"]}
-
-    resp = await client.post(
-        "/api/v1/integrations/providers/todoist/connect",
-        json={"config": {}, "token": "  personal-token-123 "},
-        headers=ORIGIN,
-    )
-    assert resp.status_code == 201, resp.text
-    conn = resp.json()["data"]
-    assert conn["status"] == "connected" and conn["auth_type"] == "token"
-    assert conn["external_account_name"] == "Todoist account"
-    sent = vendor.captured.find("GET", "/rest/v2/projects")
-    assert sent is not None and sent.headers["authorization"] == "Bearer personal-token-123"
-    # The token is stored encrypted and never returned.
-    assert "personal-token-123" not in resp.text
-    tools = (await client.get("/api/v1/ai/settings")).json()["data"]["tools"]
-    assert any(t["name"] == "todoist__create_task" for t in tools)
-
-
-@pytest.mark.parametrize("vendor", ["jira"], indirect=True)
-async def test_jira_api_token_uses_site_and_basic_auth(client: Any, vendor: VendorMock) -> None:
-    await signup(client)
-    bad_site = await client.post(
-        "/api/v1/integrations/providers/jira/connect",
-        json={"config": {"site_url": "https://acme.atlassian.net"}, "token": "tok"},
-        headers=ORIGIN,
-    )
-    assert bad_site.status_code == 422
-    assert bad_site.json()["error"]["details"]["fields"] == {"email": ["Required"]}
-    resp = await client.post(
-        "/api/v1/integrations/providers/jira/connect",
-        json={
-            "config": {"site_url": "https://acme.atlassian.net/", "email": "ada@acme.io"},
-            "token": "atlassian-api-token",
-        },
-        headers=ORIGIN,
-    )
-    assert resp.status_code == 201, resp.text
-    conn = resp.json()["data"]
-    assert conn["external_account_name"] == "Ada @ acme.atlassian.net"
-    assert vendor.state["jira_basic"] == "ada@acme.io:atlassian-api-token"
-    # Reads and writes go to the site, not the OAuth gateway.
-    search = (await client.get("/api/v1/search", params={"q": "pricing"})).json()["data"]
-    assert any(
-        h["source"] == "jira" and h["title"] == "PROJ-482: Pricing page" for h in search["hits"]
-    )
-    assert vendor.captured.find("POST", "acme.atlassian.net/rest/api/3/search/jql") is not None
-    assert vendor.captured.find("GET", "api.atlassian.com") is None

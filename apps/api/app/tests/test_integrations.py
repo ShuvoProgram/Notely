@@ -22,21 +22,23 @@ from app.integrations.base.http import ProviderHttpClient
 from app.integrations.registry import get_providers
 from app.models.integration import ExternalItem, UserConnection, WebhookEvent
 from app.tests.conftest import ORIGIN, read_sse, signup
-from app.tests.integrations_fixtures import MCP_TOKEN, WEBHOOK_SECRET, FakeOAuthProvider
+from app.tests.integrations_fixtures import (
+    MCP_TOKEN,
+    WEBHOOK_SECRET,
+    FakeOAuthProvider,
+    connect_mcp_via_oauth,
+)
 from app.tests.test_ai import chat, tool_call, types
 from app.workers import queue
 
-pytestmark = pytest.mark.usefixtures("client")
+pytestmark = pytest.mark.usefixtures("client", "auth_server")
 
 
-async def connect_mcp(client: Any, token: str = MCP_TOKEN) -> dict[str, Any]:
-    resp = await client.post(
-        "/api/v1/integrations/providers/mcp_server/connect",
-        json={"config": {"server_url": "https://mcp.example.com/mcp"}, "token": token},
-        headers=ORIGIN,
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["data"]
+MCP_URL = "https://mcp.example.com/mcp"
+
+
+async def connect_mcp(client: Any) -> dict[str, Any]:
+    return await connect_mcp_via_oauth(client, MCP_URL)
 
 
 # --- marketplace --------------------------------------------------------------------------------
@@ -48,8 +50,9 @@ async def test_marketplace_lists_providers_from_registry(client: Any) -> None:
     assert resp.status_code == 200
     entries = {p["id"]: p for p in resp.json()["data"]}
     mcp = entries["mcp_server"]
-    assert mcp["auth"] == "token" and mcp["configured"] is True and mcp["connection"] is None
-    assert [f["key"] for f in mcp["config_fields"]] == ["server_url", "token"]
+    assert mcp["auth"] == "oauth2" and mcp["connect_methods"] == ["mcp"]
+    assert mcp["connection"] is None
+    assert [f["key"] for f in mcp["config_fields"]] == ["server_url"]
     assert "search" in mcp["capabilities"] and "delete" in mcp["capabilities"]
 
 
@@ -61,7 +64,7 @@ async def test_connect_mcp_server_encrypts_token_and_discovers_tools(
 ) -> None:
     await signup(client)
     conn = await connect_mcp(client)
-    assert conn["status"] == "connected"
+    assert conn["status"] == "connected" and conn["auth_type"] == "mcp"
     assert conn["external_account_name"] == "Demo Docs"
     assert [t["name"] for t in conn["metadata"]["tools"]] == [
         "search_docs",
@@ -84,23 +87,30 @@ async def test_connect_mcp_server_encrypts_token_and_discovers_tools(
     assert [(a["provider"], a["action"]) for a in audit] == [("mcp_server", "connect")]
 
 
-async def test_connect_requires_server_url_and_rejects_bad_token(
-    client: Any, mcp_server: Any
+async def test_connect_requires_https_url_and_surfaces_rejected_tokens(
+    client: Any, mcp_server: Any, auth_server: Any
 ) -> None:
     await signup(client)
-    missing = await client.post(
-        "/api/v1/integrations/providers/mcp_server/connect", json={"config": {}}, headers=ORIGIN
+    bad_url = await client.get(
+        "/api/v1/oauth/mcp_server/start-url", params={"method": "mcp", "server_url": "ftp://x"}
     )
-    assert missing.status_code == 422
-    assert "server_url" in missing.json()["error"]["details"]["fields"]
+    assert bad_url.status_code == 422
+    assert "server_url" in bad_url.json()["error"]["details"]["fields"]
 
-    bad = await client.post(
-        "/api/v1/integrations/providers/mcp_server/connect",
-        json={"config": {"server_url": "https://mcp.example.com/mcp"}, "token": "wrong"},
-        headers=ORIGIN,
+    # The authorization server issues a token the MCP server does not accept.
+    auth_server.issued_token = "wrong"
+    from urllib.parse import parse_qs, urlparse
+
+    url = (
+        await client.get(
+            "/api/v1/oauth/mcp_server/start-url", params={"method": "mcp", "server_url": MCP_URL}
+        )
+    ).json()["data"]["authorize_url"]
+    state = parse_qs(urlparse(url).query)["state"][0]
+    cb = await client.get(
+        "/api/v1/oauth/mcp_server/callback", params={"code": "good-code", "state": state}
     )
-    assert bad.status_code == 401
-    assert bad.json()["error"]["code"] == "PROVIDER_AUTH_FAILED"
+    assert cb.status_code == 302 and "error=PROVIDER_AUTH_FAILED" in cb.headers["location"]
     detail = (await client.get("/api/v1/integrations/providers/mcp_server")).json()["data"]
     assert detail["connection"]["status"] == "error"
     assert detail["connection"]["last_error_code"] == "auth_failed"

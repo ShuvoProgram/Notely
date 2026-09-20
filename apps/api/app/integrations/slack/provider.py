@@ -17,7 +17,6 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
-    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -88,15 +87,6 @@ class SlackProvider(RestOAuthProvider):
         description="Search and read the channels you're in; post messages with your approval.",
         logo_url="https://cdn.simpleicons.org/slack",
         docs_url="https://api.slack.com/authentication/oauth-v2",
-        token_auth=TokenAuthSpec(
-            label="User token",
-            help=(
-                "Create a Slack app for your workspace, add the user scopes listed under "
-                "Permissions, install it, and paste the User OAuth Token (starts with xoxp-)."
-            ),
-            help_url="https://api.slack.com/apps",
-            placeholder="xoxp-…",
-        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.search, Capability.read, Capability.send],
         permissions=[

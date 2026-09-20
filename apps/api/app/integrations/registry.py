@@ -13,7 +13,6 @@ from app.integrations.google.calendar import GoogleCalendarProvider
 from app.integrations.google.drive import GoogleDriveProvider
 from app.integrations.google.gmail import GmailProvider
 from app.integrations.jira.provider import JiraProvider
-from app.integrations.linear.provider import LinearProvider
 from app.integrations.mcp_server.provider import MCPServerProvider
 from app.integrations.microsoft.onedrive import OneDriveProvider
 from app.integrations.microsoft.outlook import OutlookProvider
@@ -21,7 +20,6 @@ from app.integrations.microsoft.teams import TeamsProvider
 from app.integrations.notion.provider import NotionProvider
 from app.integrations.slack.provider import SlackProvider
 from app.integrations.todoist.provider import TodoistProvider
-from app.integrations.trello.provider import TrelloProvider
 
 PROVIDER_CLASSES: dict[str, type[IntegrationProvider]] = {
     "slack": SlackProvider,
@@ -36,9 +34,7 @@ PROVIDER_CLASSES: dict[str, type[IntegrationProvider]] = {
     "google_calendar": GoogleCalendarProvider,
     "google_drive": GoogleDriveProvider,
     "onedrive": OneDriveProvider,
-    "linear": LinearProvider,
     "clickup": ClickUpProvider,
-    "trello": TrelloProvider,
     "mcp_server": MCPServerProvider,
 }
 

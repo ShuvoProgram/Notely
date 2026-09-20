@@ -123,7 +123,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter web exec playwright install --with-deps chromium
       - uses: astral-sh/setup-uv@v5
-      - run: cd apps/api && uv sync --frozen && (uv run python scripts/demo_mcp_server.py --port 8765 --token demo-token &)
+      - run: cd apps/api && uv sync --frozen && (uv run python scripts/demo_mcp_server.py --port 8765 &)
       - run: pnpm --filter web test:e2e
         env:
           CI: "true"

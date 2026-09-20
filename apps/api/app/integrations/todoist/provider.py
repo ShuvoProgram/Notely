@@ -17,7 +17,6 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
-    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -67,11 +66,6 @@ class TodoistProvider(RestOAuthProvider):
         description="Read your tasks and projects; create and complete tasks with approval.",
         logo_url="https://cdn.simpleicons.org/todoist",
         docs_url="https://developer.todoist.com/guides/#authorization",
-        token_auth=TokenAuthSpec(
-            label="API token",
-            help="Todoist → Settings → Integrations → Developer → copy your API token.",
-            help_url="https://app.todoist.com/app/settings/integrations/developer",
-        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.read, Capability.create, Capability.update],
         permissions=[

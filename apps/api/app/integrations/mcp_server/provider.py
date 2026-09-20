@@ -1,8 +1,9 @@
 """Generic MCP server provider: connect Notely to any MCP server over Streamable HTTP.
 
-The user supplies the server URL (and optionally a bearer token). Tools are discovered from the
-server, mapped onto unified capabilities from their annotations, and exposed to the agent through
-the normal policy/approval pipeline. Nothing here is specific to a vendor.
+The user supplies the server URL; Notely discovers how it authorises (OAuth with dynamic client
+registration, or nothing for public servers). Tools are discovered from the server, mapped onto
+unified capabilities from their annotations, and exposed to the agent through the normal
+policy/approval pipeline. Nothing here is specific to a vendor.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from app.integrations.base.provider import (
     ConnectionIdentity,
     ConnectionTest,
     IntegrationProvider,
+    PermissionSpec,
     ProviderContext,
     ProviderManifest,
     TestStep,
@@ -60,13 +62,24 @@ class MCPServerProvider(IntegrationProvider):
             "the assistant with the same review rules as everything else."
         ),
         docs_url="https://modelcontextprotocol.io",
-        auth=AuthType.token,
+        auth=AuthType.oauth2,
         capabilities=[
             Capability.search,
             Capability.read,
             Capability.create,
             Capability.update,
             Capability.delete,
+        ],
+        permissions=[
+            PermissionSpec(
+                scope="mcp",
+                label="Use the server's tools as you",
+                description=(
+                    "The server's own sign-in screen shows exactly what it grants. Reads run "
+                    "automatically; changes wait for your review."
+                ),
+                capability=Capability.read,
+            )
         ],
         config_fields=[
             ConfigField(
@@ -76,20 +89,13 @@ class MCPServerProvider(IntegrationProvider):
                 placeholder="https://mcp.example.com/mcp",
                 help="The Streamable HTTP endpoint of the MCP server.",
             ),
-            ConfigField(
-                key="token",
-                label="Access token",
-                kind="secret",
-                required=False,
-                help="Sent as a Bearer token if the server requires one. Stored encrypted.",
-            ),
         ],
     )
 
     def connect_methods(self, settings: Settings) -> list[str]:
         if self.manifest.id == "mcp_server":
-            # Custom server: the user types a URL, Notely discovers OAuth (or none) — or a token.
-            return ["mcp", "token"]
+            # Custom server: the user types a URL and Notely discovers how it authorises.
+            return ["mcp"]
         return super().connect_methods(settings)
 
     # --- helpers --------------------------------------------------------------------------------
@@ -181,7 +187,7 @@ class MCPServerProvider(IntegrationProvider):
 
     async def refresh_credentials(self, ctx: ProviderContext) -> OAuthTokens | None:
         """Tokens issued by the server's authorization server refresh through the client this
-        deployment registered there; token-based connections have nothing to refresh."""
+        deployment registered there; public servers have nothing to refresh."""
         if not ctx.credentials.refresh_token:
             return None
         from app.mcp import oauth as mcp_oauth

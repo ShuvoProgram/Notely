@@ -184,16 +184,6 @@ All vendor content returned to the model goes through `untrusted()`; list-style 
 too. Auth failures (401 / `invalid_auth`) mark the connection `expired`, hide its tools, and are
 surfaced per source in search.
 
-**Personal-token connect.** `ProviderManifest.token_auth: TokenAuthSpec` (label, help,
-help URL, extra non-secret fields) declares that a vendor accepts user-issued tokens.
-`IntegrationProvider.connect_methods(settings)` returns `oauth` / `token` / `config` for the
-deployment, the marketplace and detail page render accordingly, and
-`ConnectionService.connect_with_config` stores the token (auth_type `token`, all permissions
-assumed granted, no refresh). `RestOAuthProvider.token_scheme` (`bearer` | `raw` | `basic`)
-decides how the token is sent; Jira's basic scheme also switches the API base to the user's
-site. Adapters with token support: Slack, Notion, Todoist, Asana, Jira, Dropbox, Linear,
-ClickUp; Trello is token-only.
-
 **One-click OAuth through official MCP servers (`app/mcp/oauth.py`).** `discover(url)` probes
 the server, follows `WWW-Authenticate: resource_metadata` / the RFC 9728 well-known URLs to the
 protected-resource metadata, then RFC 8414 / OIDC discovery to the authorization server.
@@ -204,13 +194,14 @@ Connections made this way have `auth_type="mcp"` and `metadata.mcp_url`;
 `ConnectionService.adapter(conn)` swaps the REST adapter for an `MCPModeAdapter` that keeps the
 vendor's identity (ids `notion__…`, labels, audit) while tools, health checks and refresh go
 through MCP. `ProviderManifest.mcp_server_url` opts a REST adapter into this door (Notion,
-Linear, Jira, ClickUp); `integrations/remote_mcp/providers.py` lists vendors that exist only as
-MCP servers. `connect_methods` orders the doors: `oauth` (own app) → `mcp` → `token`/`config`.
+Jira, ClickUp); `integrations/remote_mcp/providers.py` lists vendors that exist only as MCP
+servers (Stripe, PayPal). `connect_methods` orders the doors: `oauth` (own app) → `mcp`. Every
+provider is `AuthType.oauth2`: the user always authorises on the vendor's own screen, and Notely
+never asks for a pasted token.
 
 **More adapters.** Gmail / Google Calendar / Google Drive (`integrations/google/`, one Google
-client, per-product scopes), OneDrive (Graph base), Linear (GraphQL through `_gql`, the PRD's
-"GraphQL provider" shape), ClickUp (bare-token auth), Trello (key + token as query params via a
-small `ProviderHttpClient` subclass). All follow the same read/verify/write pattern.
+client, per-product scopes), OneDrive (Graph base), ClickUp (bare-token auth header). All follow
+the same read/verify/write pattern.
 
 **Bring your own model.** `user_ai_settings` (0007) holds a user's provider, model, base URL and
 Fernet-encrypted key; `AISettingsService.resolve()` turns it into a `BYOModel` and

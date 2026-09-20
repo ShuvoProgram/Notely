@@ -6,7 +6,6 @@ from `integrations_fixtures`, which only accepts the token the mock AS issues.""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -20,92 +19,16 @@ from app.ai.llm import set_fake_script
 from app.core import oauth as core_oauth
 from app.models.integration import OAuthDynamicClient
 from app.tests.conftest import ORIGIN, signup
-from app.tests.integrations_fixtures import MCP_TOKEN
+from app.tests.integrations_fixtures import AS_ISSUER as ISSUER
+from app.tests.integrations_fixtures import MCP_TOKEN, FakeAuthServer
 from app.tests.test_ai import chat, tool_call
 
 SERVER = "https://mcp.notion.com/mcp"
-ISSUER = "https://auth.notion.example"
-
-
-class FakeAuthServer:
-    """Just enough of an OAuth 2.1 authorization server for the MCP flow."""
-
-    def __init__(self) -> None:
-        self.registrations: list[dict[str, Any]] = []
-        self.token_requests: list[dict[str, str]] = []
-        self.refreshes = 0
-        self.require_auth = True
-
-    def handle(self, r: httpx.Request) -> httpx.Response:
-        host, path = r.url.host, r.url.path
-        if host == "mcp.notion.com" and path == "/mcp":
-            if not self.require_auth:
-                return httpx.Response(200, json={"jsonrpc": "2.0", "id": 0, "result": {}})
-            return httpx.Response(
-                401,
-                headers={
-                    "WWW-Authenticate": (
-                        'Bearer resource_metadata="https://mcp.notion.com/.well-known/'
-                        'oauth-protected-resource/mcp"'
-                    )
-                },
-            )
-        if host == "mcp.notion.com" and path == "/.well-known/oauth-protected-resource/mcp":
-            return httpx.Response(
-                200,
-                json={
-                    "resource": SERVER,
-                    "authorization_servers": [ISSUER],
-                    "scopes_supported": ["read", "write"],
-                },
-            )
-        if host == "auth.notion.example" and path == "/.well-known/oauth-authorization-server":
-            return httpx.Response(
-                200,
-                json={
-                    "issuer": ISSUER,
-                    "authorization_endpoint": f"{ISSUER}/authorize",
-                    "token_endpoint": f"{ISSUER}/token",
-                    "registration_endpoint": f"{ISSUER}/register",
-                    "code_challenge_methods_supported": ["S256"],
-                    "response_types_supported": ["code"],
-                },
-            )
-        if host == "auth.notion.example" and path == "/register":
-            body = json.loads(r.content)
-            self.registrations.append(body)
-            assert body["token_endpoint_auth_method"] == "none"
-            assert body["redirect_uris"] == ["http://localhost:8000/api/v1/oauth/notion/callback"]
-            return httpx.Response(
-                201,
-                json={"client_id": f"dyn-{len(self.registrations)}", "client_secret_expires_at": 0},
-            )
-        if host == "auth.notion.example" and path == "/token":
-            form = dict(httpx.QueryParams(r.content.decode()))
-            self.token_requests.append(form)
-            assert "client_secret" not in form, "public clients never send a secret"
-            assert form["client_id"].startswith("dyn-")
-            assert form["resource"] == SERVER
-            if form["grant_type"] == "refresh_token":
-                self.refreshes += 1
-                assert form["refresh_token"] == "mcp-refresh"
-            else:
-                assert form["code"] == "good-code" and form["code_verifier"]
-            return httpx.Response(
-                200,
-                json={
-                    "access_token": MCP_TOKEN,
-                    "refresh_token": "mcp-refresh",
-                    "expires_in": 3600,
-                    "token_type": "Bearer",
-                },
-            )
-        return httpx.Response(404, json={"error": f"unmocked {host}{path}"})
 
 
 @pytest.fixture
 def auth_server() -> Iterator[FakeAuthServer]:
-    fake = FakeAuthServer()
+    fake = FakeAuthServer(SERVER)
     core_oauth.set_http_transport(httpx.MockTransport(fake.handle))
     yield fake
     core_oauth.set_http_transport(None)
@@ -124,7 +47,7 @@ async def test_notion_connects_with_one_click_through_its_mcp_server(
     detail = (await client.get("/api/v1/integrations/providers/notion")).json()["data"]
     # No Notion OAuth app is configured on this deployment, yet the click path exists.
     assert detail["configured"] is False
-    assert detail["connect_methods"] == ["mcp", "token"]
+    assert detail["connect_methods"] == ["mcp"]
 
     url = (await start(client, "notion"))["authorize_url"]
     parsed = urlparse(url)
@@ -230,9 +153,10 @@ def test_remote_mcp_catalog_is_registered() -> None:
     from app.integrations.registry import get_providers
 
     providers = get_providers()
-    for pid in ("sentry", "stripe", "supabase", "vercel", "figma", "zapier", "huggingface"):
+    for pid in ("stripe", "paypal"):
         m = providers[pid].manifest
         assert m.mcp_server_url and m.mcp_server_url.startswith("https://")
         assert m.auth.value == "oauth2" and m.permissions
-    assert providers["huggingface"].manifest.token_auth is not None
+    # Every provider is OAuth: the user authorises on the vendor's screen, never pastes a token.
+    assert all(p.manifest.auth.value == "oauth2" for p in providers.values())
     assert list(providers)[-1] == "mcp_server"

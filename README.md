@@ -139,37 +139,39 @@ tools, search, sync, webhooks). Credentials are Fernet-encrypted with `ENCRYPTIO
 Try it locally with the bundled MCP server:
 
 ```bash
-cd apps/api && uv run python scripts/demo_mcp_server.py --port 8765 --token demo-token
+cd apps/api && uv run python scripts/demo_mcp_server.py --port 8765
 ```
 
-then connect `http://127.0.0.1:8765/mcp` with token `demo-token` under Connections → MCP server.
+then connect `http://127.0.0.1:8765/mcp` under Connections → MCP server (it needs no sign-in).
 Its tools show up in the assistant; reads run automatically, writes ask for approval.
 
 ### Vendor providers
 
-Fifteen adapters share one contract (`apps/api/app/integrations/<provider>/`): Slack, Notion,
+Fourteen adapters share one contract (`apps/api/app/integrations/<provider>/`): Slack, Notion,
 Todoist, Asana, Jira, Microsoft Teams, Outlook, OneDrive, Gmail, Google Calendar, Google Drive,
-Linear, ClickUp, Trello and a generic MCP server. Every one passes the same end-to-end contract
-test against a mocked vendor API.
+ClickUp, Stripe, PayPal, plus any custom MCP server. Every one passes the same end-to-end
+contract test against a mocked vendor API.
 
-**Connecting is one click.** Press *Connect*, read the consent card (what Notely can do, the
-risks, what the vendor receives), press *Continue with Notely* and approve on the vendor's own
-screen. Three doors, tried in this order:
+**Connecting is one click, always OAuth.** Press *Connect*, read the consent card (what Notely
+can do, the risks, what the vendor receives), press *Continue with Notely* and approve on the
+vendor's own screen — exactly like a ChatGPT connector. There is no token to paste, ever. Two
+doors, tried in this order:
 
 1. **The deployment's OAuth app** — `OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET` (Teams, Outlook and
    OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share `OAUTH_GOOGLE_*`).
    Redirect URI: `{API_PUBLIC_URL}/api/v1/oauth/{provider}/callback`.
 2. **The vendor's official MCP server** — no app registration at all. Notely discovers the
    server's authorization server (RFC 9728/8414), registers itself once per deployment (RFC 7591
-   dynamic client registration) and runs a PKCE flow. This is how Notion, Linear, Jira/Atlassian,
-   ClickUp, Sentry, Stripe, Supabase, Vercel, Figma, Canva, Intercom, PayPal, Zapier, monday.com,
-   Box and Hugging Face connect out of the box; public servers (Cloudflare Docs) connect
-   instantly. Any custom MCP server URL goes through the same discovery.
-3. **A personal token** — under *Show other options* for vendors that issue them (Slack, Notion,
-   Todoist, Asana, Jira, Dropbox, Linear, ClickUp, Trello, Hugging Face).
+   dynamic client registration) and runs a PKCE flow. Notion, Jira/Atlassian, ClickUp, Stripe and
+   PayPal connect this way out of the box; any custom MCP server URL goes through the same
+   discovery, and public servers connect instantly.
+
+Vendors with neither door open on a deployment (no OAuth app registered, no official MCP server)
+show *Not available on this deployment* until an administrator registers the app.
 
 Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`,
-`onedrive`, `dropbox`, `gmail`, `google_calendar`, `google_drive`, `linear`, `clickup`, `trello`.
+`onedrive`, `dropbox`, `gmail`, `google_calendar`, `google_drive`, `clickup`, `stripe`, `paypal`,
+`mcp_server`.
 Tokens are stored encrypted, refreshed by the worker and never reach the browser. Every adapter
 passes the same end-to-end test (`apps/api/app/tests/test_providers.py`) against a mocked vendor
 API: OAuth exchange in the vendor's own token style, identity, health test, unified search, one

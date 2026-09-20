@@ -22,7 +22,6 @@ from app.schemas.integrations import (
     ConnectionOut,
     ConnectionTestOut,
     ConnectionUpdate,
-    ConnectRequest,
     OAuthStartOut,
     ProviderDetailOut,
     ProviderOut,
@@ -64,7 +63,6 @@ def provider_out(entry: MarketplaceEntry) -> ProviderOut:
         capabilities=[c.value for c in m.capabilities],
         permissions=m.permissions,
         config_fields=m.config_fields,
-        token_auth=m.token_auth,
         connect_methods=entry.provider.connect_methods(get_settings()),
         supports_webhooks=m.supports_webhooks,
         supports_sync=m.supports_sync,
@@ -99,22 +97,6 @@ async def provider_detail(
             **base, local_item_count=count, tools=tools if isinstance(tools, list) else []
         )
     )
-
-
-@router.post(
-    "/providers/{provider_id}/connect",
-    status_code=status.HTTP_201_CREATED,
-    response_model=Envelope[ConnectionOut],
-    dependencies=[Depends(connect_limit)],
-)
-async def connect_provider(
-    provider_id: str, payload: ConnectRequest, ctx: CurrentAuth, service: ServiceDep
-) -> dict[str, Any]:
-    """Connect a token/config-based provider (OAuth providers use /oauth/{provider}/start)."""
-    conn = await service.connect_with_config(
-        ctx.user, provider_id, config=payload.config, token=payload.token
-    )
-    return ok(connection_out(conn))
 
 
 # --- connections --------------------------------------------------------------------------------

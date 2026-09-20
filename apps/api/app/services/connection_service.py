@@ -380,7 +380,7 @@ class ConnectionService:
 
     async def refresh_if_needed(self, user: User, conn: UserConnection) -> None:
         """Refresh an OAuth token nearing expiry. Marks the connection expired if that fails."""
-        if conn.auth_type not in (AuthType.oauth2.value, MCP_AUTH) or conn.token_expires_at is None:
+        if conn.token_expires_at is None:
             return
         if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
             return
@@ -410,43 +410,6 @@ class ConnectionService:
         conn.token_expires_at = (
             utcnow() + timedelta(seconds=int(tokens.expires_in)) if tokens.expires_in else None
         )
-
-    # --- token / config connect -------------------------------------------------------------------
-
-    async def connect_with_config(
-        self, user: User, provider_id: str, *, config: dict[str, Any], token: str | None
-    ) -> UserConnection:
-        provider = self.provider_or_404(provider_id)
-        manifest = provider.manifest
-        token_spec = manifest.token_auth
-        uses_token = manifest.auth == AuthType.token or (
-            manifest.auth == AuthType.oauth2 and token_spec is not None
-        )
-        if manifest.auth == AuthType.oauth2 and token_spec is None:
-            raise ValidationFailed("This integration connects with OAuth. Use the connect button.")
-        fields = list(token_spec.fields) if token_spec is not None else list(manifest.config_fields)
-        errors: dict[str, list[str]] = {
-            f.key: ["Required"]
-            for f in fields
-            if f.required and f.kind != "secret" and not str(config.get(f.key, "")).strip()
-        }
-        if uses_token and not (token or "").strip():
-            errors["token"] = ["Required"]
-        if errors:
-            raise ValidationFailed("Some settings are missing.", details={"fields": errors})
-        conn = await self._get_or_create(user, provider)
-        allowed = {f.key for f in fields if f.kind != "secret"}
-        conn.config = {k: str(v).strip() for k, v in config.items() if k in allowed}
-        conn.status = ConnectionStatus.connecting
-        conn.auth_type = AuthType.token.value if uses_token else manifest.auth.value
-        if uses_token:
-            self.vault.store_token(conn, (token or "").strip())
-            conn.token_expires_at = None
-            # A personal token carries whatever the user granted it; we can't enumerate scopes.
-            conn.scopes = [p.scope for p in manifest.permissions]
-        await self.db.flush()
-        await self._finish_connect(user, provider, conn)
-        return conn
 
     async def _finish_connect(
         self, user: User, provider: IntegrationProvider, conn: UserConnection

@@ -215,7 +215,7 @@ class VendorMock:
             form = self._form(r)
             assert form.get("client_secret") == "test-secret"
             return _json(200, {"access_token": "td-token", "token_type": "Bearer"})
-        if r.headers.get("authorization") not in ("Bearer td-token", "Bearer personal-token-123"):
+        if r.headers.get("authorization") != "Bearer td-token":
             return _json(401, {})
         if path == "/rest/v2/projects":
             return _json(200, [{"id": "pr1", "name": "Inbox", "is_inbox_project": True}])
@@ -347,10 +347,7 @@ class VendorMock:
                     "scope": "read:jira-work read:jira-user offline_access",
                 },
             )
-        auth_header = r.headers.get("authorization", "")
-        if auth_header != "Bearer jira-token" and not (
-            host.endswith(".atlassian.net") and auth_header.startswith("Basic ")
-        ):
+        if r.headers.get("authorization") != "Bearer jira-token":
             return _json(401, {})
         if path == "/oauth/token/accessible-resources":
             return _json(
@@ -365,12 +362,6 @@ class VendorMock:
                 ],
             )
         base = "/ex/jira/cloud-1/rest/api/3"
-        if host.endswith(".atlassian.net"):
-            # API-token connections talk to the site directly with Basic auth.
-            auth = r.headers.get("authorization", "")
-            assert auth.startswith("Basic "), "API-token connections must use Basic auth"
-            self.state["jira_basic"] = base64.b64decode(auth[6:]).decode()
-            base = "/rest/api/3"
         if path == f"{base}/myself":
             return _json(200, {"accountId": "acc-1", "displayName": "Ada"})
         if path == f"{base}/project/search":
@@ -756,105 +747,6 @@ class VendorMock:
             return _json(200, {"id": "f2", "name": self.state.get("gdrive_name"), "trashed": False})
         return None
 
-    # --- Linear (GraphQL) -------------------------------------------------------------------------
-
-    def _linear(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
-        if host == "api.linear.app" and path == "/oauth/token":
-            form = self._form(r)
-            assert form.get("client_secret") == "test-secret"
-            return _json(
-                200, {"access_token": "lin-token", "token_type": "Bearer", "scope": "read,write"}
-            )
-        auth = r.headers.get("authorization", "")
-        if auth not in ("Bearer lin-token", "lin_api_personal"):
-            return _json(401, {"errors": [{"message": "Authentication required"}]})
-        if path != "/graphql":
-            return None
-        body = r_json(r)
-        query, variables = body.get("query", ""), body.get("variables", {})
-        issue = {
-            "id": "iss-1",
-            "identifier": "ENG-42",
-            "title": "Pricing page",
-            "description": "Finalize the pricing page.",
-            "url": "https://linear.app/acme/issue/ENG-42",
-            "priority": 2,
-            "updatedAt": "2026-09-19T00:00:00Z",
-            "state": {"name": "Todo", "type": "unstarted"},
-            "assignee": {"name": "Ada"},
-            "team": {"id": "team-1", "key": "ENG", "name": "Engineering"},
-        }
-        if "viewer {" in query and "assignedIssues" not in query:
-            return _json(
-                200,
-                {
-                    "data": {
-                        "viewer": {
-                            "id": "u1",
-                            "name": "Ada",
-                            "email": "ada@acme.io",
-                            "organization": {"name": "Acme"},
-                        }
-                    }
-                },
-            )
-        if query.strip().startswith("{ teams"):
-            return _json(
-                200,
-                {
-                    "data": {
-                        "teams": {"nodes": [{"id": "team-1", "key": "ENG", "name": "Engineering"}]}
-                    }
-                },
-            )
-        if "issues(filter" in query:
-            return _json(200, {"data": {"issues": {"nodes": [issue]}}})
-        if "assignedIssues" in query:
-            return _json(200, {"data": {"viewer": {"assignedIssues": {"nodes": [issue]}}}})
-        if "teams(filter" in query:
-            return _json(200, {"data": {"teams": {"nodes": [{"id": "team-1", "key": "ENG"}]}}})
-        if "issueCreate" in query:
-            self.state["linear_title"] = variables["input"]["title"]
-            created = {
-                **issue,
-                "id": "iss-2",
-                "identifier": "ENG-43",
-                "title": self.state["linear_title"],
-            }
-            return _json(200, {"data": {"issueCreate": {"success": True, "issue": created}}})
-        if "commentCreate" in query:
-            return _json(
-                200,
-                {
-                    "data": {
-                        "commentCreate": {
-                            "success": True,
-                            "comment": {"id": "c1", "url": "https://linear.app/c1"},
-                        }
-                    }
-                },
-            )
-        if "comment(id" in query:
-            return _json(200, {"data": {"comment": {"id": "c1"}}})
-        if "issue(id" in query:
-            ref = variables.get("id")
-            if ref in ("iss-2", "ENG-43"):
-                return _json(
-                    200,
-                    {
-                        "data": {
-                            "issue": {
-                                **issue,
-                                "id": "iss-2",
-                                "identifier": "ENG-43",
-                                "title": self.state.get("linear_title"),
-                            }
-                        }
-                    },
-                )
-            return _json(200, {"data": {"issue": issue}})
-        return _json(200, {"errors": [{"message": f"unmocked query {query[:40]}"}]})
-
     # --- ClickUp ----------------------------------------------------------------------------------
 
     def _clickup(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
@@ -902,39 +794,6 @@ class VendorMock:
             return _json(
                 200,
                 {"id": "task-2", "name": self.state.get("cu_name"), "status": {"status": "to do"}},
-            )
-        return None
-
-    # --- Trello (key + token as query params) -----------------------------------------------------
-
-    def _trello(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
-        params = r.url.params
-        if params.get("key") != "trello-key" or params.get("token") != "trello-token":
-            return httpx.Response(401, text="invalid key")
-        card = {
-            "id": "card-1",
-            "name": "Finalize pricing",
-            "desc": "Pricing page",
-            "shortUrl": "https://trello.com/c/card-1",
-            "dateLastActivity": "2026-09-19T00:00:00Z",
-            "closed": False,
-        }
-        if path == "/1/members/me":
-            return _json(200, {"id": "me-1", "fullName": "Ada Lovelace", "username": "ada"})
-        if path == "/1/members/me/boards":
-            return _json(
-                200, [{"id": "b1", "name": "Launch", "lists": [{"id": "l1", "name": "To do"}]}]
-            )
-        if path == "/1/search":
-            return _json(200, {"cards": [card]})
-        if path == "/1/cards/card-1":
-            return _json(200, card)
-        if path == "/1/cards" and r.method == "POST":
-            self.state["trello_name"] = params.get("name")
-            return _json(200, {"id": "card-2", "shortUrl": "https://trello.com/c/card-2"})
-        if path == "/1/cards/card-2":
-            return _json(
-                200, {"id": "card-2", "name": self.state.get("trello_name"), "closed": False}
             )
         return None
 
@@ -1002,7 +861,6 @@ def combined_transport(mocks: dict[str, VendorMock]) -> httpx.MockTransport:
         "app.asana.com": "asana",
         "auth.atlassian.com": "jira",
         "api.atlassian.com": "jira",
-        "acme.atlassian.net": "jira",
         "login.microsoftonline.com": "microsoft",
         "graph.microsoft.com": "microsoft",
         "api.dropboxapi.com": "dropbox",
@@ -1011,11 +869,8 @@ def combined_transport(mocks: dict[str, VendorMock]) -> httpx.MockTransport:
         "oauth2.googleapis.com": "google",
         "www.googleapis.com": "google",
         "gmail.googleapis.com": "google",
-        "linear.app": "linear",
-        "api.linear.app": "linear",
         "app.clickup.com": "clickup",
         "api.clickup.com": "clickup",
-        "api.trello.com": "trello",
     }
     families = {
         "microsoft": ("microsoft_teams", "outlook", "onedrive"),

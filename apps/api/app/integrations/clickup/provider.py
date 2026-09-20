@@ -20,7 +20,6 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
-    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -88,12 +87,6 @@ class ClickUpProvider(RestOAuthProvider):
             ),
         ],
         mcp_server_url="https://mcp.clickup.com/mcp",
-        token_auth=TokenAuthSpec(
-            label="Personal API token",
-            help="ClickUp → your avatar → Settings → Apps → API Token → Generate.",
-            help_url="https://app.clickup.com/settings/apps",
-            placeholder="pk_…",
-        ),
     )
 
     def http(self, ctx: ProviderContext, base_url: str | None = None) -> ProviderHttpClient:

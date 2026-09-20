@@ -4,8 +4,6 @@ import type { Connection, ConnectionTestResult, Provider, ProviderDetail } from 
 export const connectionsApi = {
   providers: () => api.get<Provider[]>("/integrations/providers"),
   provider: (id: string) => api.get<ProviderDetail>(`/integrations/providers/${id}`),
-  connect: (providerId: string, input: { config: Record<string, unknown>; token?: string | null }) =>
-    api.post<Connection>(`/integrations/providers/${providerId}/connect`, input),
   oauthStartUrl: (providerId: string, scopes: string[], options: { method?: string; serverUrl?: string } = {}) => {
     const params = new URLSearchParams();
     if (scopes.length) params.set("scopes", scopes.join(","));

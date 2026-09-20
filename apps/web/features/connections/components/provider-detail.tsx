@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ExternalLink, KeyRound, Loader2, RefreshCw, Sparkles, Stethoscope, Unplug, XCircle } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Loader2, RefreshCw, Sparkles, Stethoscope, Unplug, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -81,9 +81,6 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   const conn = p.connection && p.connection.status !== "disconnected" ? p.connection : null;
   const canOAuth = p.connect_methods.includes("oauth");
   const canMcp = p.connect_methods.includes("mcp");
-  const canToken = p.connect_methods.includes("token");
-  const canConfig = p.connect_methods.includes("config");
-  const aOrAn = (label: string) => `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label.toLowerCase()}`;
   const attention = conn && (conn.status === "expired" || conn.status === "needs_attention" || conn.status === "error");
 
   return (
@@ -110,12 +107,8 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           <div className="mt-3">
             {conn ? (
               <ConnectionStatusBadge status={conn.status} lastChecked={conn.last_checked_at} lastError={conn.last_error} />
-            ) : canOAuth || canMcp || canConfig || (canToken && p.auth !== "oauth2") ? (
+            ) : canOAuth || canMcp ? (
               <ConnectionStatusBadge status="none" lastChecked={null} lastError={null} />
-            ) : canToken ? (
-              <p className="text-sm text-muted-foreground">
-                Sign-in with {p.name} isn&apos;t set up on this Notely deployment, but you can connect with {aOrAn(p.token_auth?.label ?? "token")} in a minute.
-              </p>
             ) : (
               <p className="text-sm text-muted-foreground">
                 {p.name} isn&apos;t configured on this Notely deployment yet. An administrator needs to register an OAuth app and set its client id and secret.
@@ -124,16 +117,15 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!conn && (canOAuth || canMcp || canConfig || canToken) ? (
-            <Button onClick={() => setConnectMethod(canOAuth ? "oauth" : canMcp ? "mcp" : canToken ? "token" : "config")}>
-              {canOAuth || canMcp ? <Sparkles aria-hidden /> : <KeyRound aria-hidden />}
-              {canOAuth || canMcp ? "Connect" : "Connect with a token"}
+          {!conn && (canOAuth || canMcp) ? (
+            <Button onClick={() => setConnectMethod(canOAuth ? "oauth" : "mcp")}>
+              <Sparkles aria-hidden /> Connect
             </Button>
           ) : null}
           {conn ? (
             <>
               {attention ? (
-                <Button onClick={() => setConnectMethod(conn.auth_type === "token" ? "token" : canOAuth ? "oauth" : canMcp ? "mcp" : canToken ? "token" : "config")}>
+                <Button onClick={() => setConnectMethod(canOAuth ? "oauth" : "mcp")}>
                   <RefreshCw aria-hidden /> {conn.status === "expired" ? "Reconnect" : "Fix"}
                 </Button>
               ) : null}
@@ -190,7 +182,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                 <dt>Local data</dt>
                 <dd>{p.local_item_count} indexed item{p.local_item_count === 1 ? "" : "s"}</dd>
                 <dt>Connected via</dt>
-                <dd>{conn.auth_type === "mcp" ? `${p.name}'s official MCP server` : conn.auth_type === "token" ? "personal token" : "OAuth"}</dd>
+                <dd>{conn.auth_type === "mcp" ? `${p.name}'s official MCP server` : "OAuth"}</dd>
               </dl>
               {Object.keys(conn.config).length ? (
                 <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -267,7 +259,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
         ) : null}
       </div>
 
-      {connectMethod ? <ConnectDialog key={connectMethod} provider={p} initialMethod={connectMethod} open onOpenChange={(o) => !o && setConnectMethod(null)} reconnect={Boolean(conn)} /> : null}
+      {connectMethod ? <ConnectDialog key={connectMethod} provider={p} method={connectMethod} open onOpenChange={(o) => !o && setConnectMethod(null)} reconnect={Boolean(conn)} /> : null}
 
       <Dialog open={disconnectStep === 1} onOpenChange={(o) => !o && setDisconnectStep(0)}>
         <DialogContent>

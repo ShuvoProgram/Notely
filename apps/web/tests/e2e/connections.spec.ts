@@ -2,11 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Drives the integration framework end to end against a real MCP server over Streamable HTTP
- * (apps/api/scripts/demo_mcp_server.py --port 8765 --token demo-token) and the scripted model.
+ * (apps/api/scripts/demo_mcp_server.py --port 8765 — a public server, so connecting needs no
+ * consent step) and the scripted model.
  */
 
 const MCP_URL = process.env.E2E_MCP_URL ?? "http://127.0.0.1:8765/mcp";
-const MCP_TOKEN = process.env.E2E_MCP_TOKEN ?? "demo-token";
 const password = "a perfectly fine passphrase";
 
 async function signup(page: Page) {
@@ -24,20 +24,18 @@ async function script(page: Page, replies: unknown[]) {
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
-async function openMcpDialog(page: Page, url: string) {
+async function startMcpConnect(page: Page, url: string) {
   await page.goto("/app/settings/connections/mcp_server");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  // The one-click path asks the server how to sign in; this demo server wants a token instead.
+  await expect(dialog.getByText("You're in control")).toBeVisible();
   await dialog.getByLabel("Server URL").fill(url);
-  await dialog.getByRole("button", { name: "Show other options" }).click();
-  return dialog;
+  await dialog.getByRole("button", { name: "Continue with Notely" }).click();
 }
 
 async function connectMcp(page: Page) {
-  const dialog = await openMcpDialog(page, MCP_URL);
-  await dialog.getByLabel(/Access token/).fill(MCP_TOKEN);
-  await dialog.getByRole("button", { name: "Connect", exact: true }).click();
+  // One click: Notely discovers the server needs no sign-in and connects straight away.
+  await startMcpConnect(page, MCP_URL);
   await expect(page.getByText("Connected", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 }
 
@@ -113,60 +111,38 @@ test("connect an MCP server, test it, use its tools with approval, then disconne
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
 });
 
-test("a wrong token yields a categorised error and an error status", async ({ page }) => {
+test("an unreachable server yields a categorised error and an error status", async ({ page }) => {
   await signup(page);
-  const dialog = await openMcpDialog(page, MCP_URL);
-  await dialog.getByLabel(/Access token/).fill("not-the-token");
-  await dialog.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.getByText(/Your access wasn't granted/).first()).toBeVisible({ timeout: 15_000 });
+  await startMcpConnect(page, "http://127.0.0.1:9/mcp"); // nothing listens here
+  await expect(page.getByText(/temporarily unavailable/).first()).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");
   await expect(page.getByText("Connection error")).toBeVisible();
 });
 
-test("marketplace lists every provider; OAuth-less deployments still offer a personal-token path", async ({ page }) => {
+test("marketplace lists every provider; connecting is always the vendor's own consent screen", async ({ page }) => {
   await signup(page);
   await page.goto("/app/settings/connections");
-  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "Gmail", "Google Calendar", "Google Drive", "OneDrive", "Linear", "ClickUp", "Trello", "MCP server"]) {
+  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "Gmail", "Google Calendar", "Google Drive", "OneDrive", "ClickUp", "Stripe", "PayPal", "MCP server"]) {
     await expect(page.getByRole("link", { name: new RegExp(`^${name}\\b`) })).toBeVisible();
   }
-  for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Developer"]) {
+  for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Payments", "Developer"]) {
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
   }
-  // No vendor OAuth app is registered locally: Teams/Outlook/Gmail have no way in yet ...
-  await expect(page.getByRole("link", { name: /^Microsoft Teams\b/ }).getByText("Not available on this deployment")).toBeVisible();
-  // ... but Todoist offers its API token.
-  const todoist = page.getByRole("link", { name: /^Todoist\b/ });
-  await expect(todoist.getByText("Connect with an api token")).toBeVisible();
-  await todoist.click();
-  await expect(page.getByText(/you can connect with an api token in a minute/)).toBeVisible();
+  // No vendor OAuth app is registered locally: apps without an official MCP server wait for one.
+  await expect(page.getByRole("link", { name: /^Todoist\b/ }).getByText("Not available on this deployment")).toBeVisible();
+  await page.getByRole("link", { name: /^Todoist\b/ }).click();
+  await expect(page.getByText(/An administrator needs to register an OAuth app/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Connect with a token" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Connect with an api token")).toBeVisible();
-  await expect(dialog.getByText(/Settings → Integrations → Developer/)).toBeVisible();
-  await expect(dialog.getByRole("link", { name: /Open Todoist settings/ })).toHaveAttribute("href", /todoist\.com/);
-  // Submitting without a token is caught before anything leaves the browser's tab.
-  await dialog.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(dialog.getByRole("alert")).toHaveText("Required");
-  await page.keyboard.press("Escape");
+  await expect(page.getByText("Read tasks and projects")).toBeVisible(); // permissions are still explained
 
-  // Vendors with an official MCP server connect with one click, ChatGPT-style: consent → vendor.
+  // Vendors with an official MCP server connect with one click: consent card → vendor screen.
   await page.goto("/app/settings/connections/notion");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const consent = page.getByRole("dialog");
   await expect(consent.getByText("You're in control")).toBeVisible();
+  await expect(consent.getByText("Apps may introduce elevated risk")).toBeVisible();
   await expect(consent.getByText("Data shared with this app")).toBeVisible();
   await expect(consent.getByRole("button", { name: "Continue with Notely" })).toBeVisible();
-  await expect(consent.getByLabel("Internal integration secret")).toHaveCount(0); // tokens are hidden until asked for
-  await consent.getByRole("button", { name: "Show other options" }).click();
-  await expect(consent.getByLabel("Internal integration secret")).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  // Jira's token path needs a site URL and account email as well.
-  await page.goto("/app/settings/connections/jira");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Show other options" }).click();
-  await expect(page.getByRole("dialog").getByLabel("Site URL")).toBeVisible();
-  await expect(page.getByRole("dialog").getByLabel("Atlassian account email")).toBeVisible();
-  await expect(page.getByRole("dialog").getByLabel("API token")).toBeVisible();
+  await expect(consent.getByRole("link", { name: /Continue to Notion/ })).toBeVisible();
+  await expect(consent.locator("input")).toHaveCount(0); // nothing to type, nothing to paste
 });

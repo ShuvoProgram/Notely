@@ -16,7 +16,6 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
-    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -79,16 +78,6 @@ class DropboxProvider(RestOAuthProvider):
         description="Search and read your files; save text files with approval.",
         logo_url="https://cdn.simpleicons.org/dropbox",
         docs_url="https://www.dropbox.com/developers/documentation/http/documentation",
-        token_auth=TokenAuthSpec(
-            label="Access token",
-            help=(
-                "In the Dropbox App Console create an app with the permissions listed here, "
-                "then generate an access token on its Settings tab. Generated tokens expire "
-                "after a few hours; reconnect when they do."
-            ),
-            help_url="https://www.dropbox.com/developers/apps",
-            placeholder="sl.…",
-        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.search, Capability.read, Capability.create],
         permissions=[
