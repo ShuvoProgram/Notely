@@ -88,6 +88,14 @@ class OAuthTokens:
     raw: dict[str, Any]
 
 
+def callback_slot(provider: Any) -> str:
+    """Which `/oauth/{slot}/callback` a provider comes back to. Vendor families that share one
+    OAuth app (Gmail/Calendar/Drive → `google`, Teams/Outlook/OneDrive → `microsoft`) share
+    one redirect URI too, so an operator registers a single URI per vendor."""
+    prefix = getattr(provider, "settings_prefix", None)
+    return str(prefix) if prefix else str(provider.manifest.id)
+
+
 def callback_uri(settings: Settings, path: str) -> str:
     """OAuth callbacks come back through the app's public origin (the web app proxies `/api/*`
     to the API, and the production edge routes it directly). One origin means the session

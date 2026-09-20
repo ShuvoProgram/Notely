@@ -263,12 +263,19 @@ async def connect_via_oauth(client: Any, provider_id: str, case: dict[str, Any])
     assert q["client_id"] == ["test-id"] and q["state"]
     if case["scope_param"]:
         assert case["scope_param"] in q and q[case["scope_param"]][0]
+    # The vendor sends the user back to the redirect_uri we gave it: one per vendor family
+    # (Gmail/Calendar/Drive share `/oauth/google/callback`), so operators register one URI.
+    prefix = SETTINGS_PREFIX.get(provider_id, provider_id)
+    redirect = q["redirect_uri"][0]
+    assert redirect == f"http://localhost:3000/api/v1/oauth/{prefix}/callback", redirect
     cb = await client.get(
-        f"/api/v1/oauth/{provider_id}/callback",
+        redirect.removeprefix("http://localhost:3000"),
         params={"code": "good-code", "state": q["state"][0]},
     )
     assert cb.status_code == 302, cb.text
-    assert cb.headers["location"].endswith("?connected=1"), cb.headers["location"]
+    assert cb.headers["location"] == (
+        f"http://localhost:3000/app/settings/connections/{provider_id}?connected=1"
+    ), cb.headers["location"]
     detail = (await client.get(f"/api/v1/integrations/providers/{provider_id}")).json()["data"]
     return detail
 

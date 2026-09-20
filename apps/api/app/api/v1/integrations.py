@@ -212,11 +212,19 @@ async def oauth_callback(
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
+    # `provider_id` here is the callback slot: a provider id, or a vendor family (`google`,
+    # `microsoft`) whose products share one OAuth app and therefore one redirect URI.
     target = f"{settings.frontend_origin}/app/settings/connections/{provider_id}"
     try:
-        await service.complete_oauth(ctx.user, provider_id, code=code, state=state, error=error)
+        conn = await service.complete_oauth(
+            ctx.user, provider_id, code=code, state=state, error=error
+        )
     except APIError as exc:
+        page = exc.details.get("provider_id") if isinstance(exc.details, dict) else None
+        if page:
+            target = f"{settings.frontend_origin}/app/settings/connections/{page}"
         return RedirectResponse(f"{target}?error={exc.code}", status_code=status.HTTP_302_FOUND)
+    target = f"{settings.frontend_origin}/app/settings/connections/{conn.provider}"
     return RedirectResponse(f"{target}?connected=1", status_code=status.HTTP_302_FOUND)
 
 

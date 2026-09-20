@@ -79,8 +79,12 @@ class RestOAuthProvider(IntegrationProvider):
         config = self.oauth_config(ctx.settings)
         if config is None:
             raise ProviderError(ProviderErrorKind.misconfigured, provider=self.manifest.id)
+        # Same callback slot as the connect flow (one redirect URI per vendor family).
+        from dataclasses import replace
+
         return OAuthClient(
-            config, callback_uri(ctx.settings, f"/oauth/{self.manifest.id}/callback")
+            replace(config, provider_id=self.settings_prefix),
+            callback_uri(ctx.settings, f"/oauth/{self.settings_prefix}/callback"),
         )
 
     # --- HTTP -----------------------------------------------------------------------------------

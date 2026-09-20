@@ -18,9 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.tools.base import ToolSpec
 from app.core import metrics
 from app.core.config import Settings
-from app.core.exceptions import NotFound, ValidationFailed
+from app.core.exceptions import APIError, NotFound, ValidationFailed
 from app.core.logging import get_logger
-from app.core.oauth import OAuthClient, OAuthTokens, callback_uri, consume_oauth_state
+from app.core.oauth import (
+    OAuthClient,
+    OAuthTokens,
+    callback_slot,
+    callback_uri,
+    consume_oauth_state,
+)
 from app.db.base import utcnow
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
@@ -152,8 +158,9 @@ class ConnectionService:
             return MCPModeAdapter(provider.manifest)
         return provider
 
-    def _redirect_uri(self, provider_id: str) -> str:
-        return callback_uri(self.settings, f"/oauth/{provider_id}/callback")
+    def _redirect_uri(self, provider: IntegrationProvider | str) -> str:
+        slot = provider if isinstance(provider, str) else callback_slot(provider)
+        return callback_uri(self.settings, f"/oauth/{slot}/callback")
 
     async def _integration_row(self, provider_id: str) -> Integration:
         row = await self.db.scalar(select(Integration).where(Integration.provider == provider_id))
@@ -229,11 +236,13 @@ class ConnectionService:
             raise ProviderError(
                 ProviderErrorKind.misconfigured, provider=provider.manifest.id
             ).as_api_error()
-        if scopes:
-            from dataclasses import replace
+        from dataclasses import replace
 
+        # State is keyed by the callback slot the vendor will send the user back to.
+        config = replace(config, provider_id=callback_slot(provider))
+        if scopes:
             config = replace(config, scopes=tuple(scopes))
-        return OAuthClient(config, self._redirect_uri(provider.manifest.id))
+        return OAuthClient(config, self._redirect_uri(provider))
 
     async def start_oauth(
         self,
@@ -266,7 +275,12 @@ class ConnectionService:
         await self.db.commit()
         client = self._oauth_client(provider, scopes)
         return await client.begin(
-            context={"user_id": str(user.id), "connection_id": str(conn.id), "mode": "oauth"}
+            context={
+                "user_id": str(user.id),
+                "connection_id": str(conn.id),
+                "mode": "oauth",
+                "provider_id": provider.manifest.id,
+            }
         )
 
     async def _start_mcp_oauth(
@@ -315,25 +329,46 @@ class ConnectionService:
                 "connection_id": str(conn.id),
                 "mode": "mcp",
                 "server_url": url,
+                "provider_id": conn.provider,
             }
         )
 
     async def complete_oauth(
         self,
         user: User,
-        provider_id: str,
+        slot: str,
         *,
         code: str | None,
         state: str | None,
         error: str | None,
     ) -> UserConnection:
-        provider = self.provider_or_404(provider_id)
-        record = await consume_oauth_state(provider_id, state, self._redirect_uri(provider_id))
+        """`slot` is the callback the vendor sent the user back to (a provider id, or a vendor
+        family such as `google`); the state record names the actual provider."""
+        record = await consume_oauth_state(slot, state, self._redirect_uri(slot))
         ctx_info = record.get("context") or {}
         if ctx_info.get("user_id") != str(user.id):
             from app.core.exceptions import InvalidOAuthState
 
             raise InvalidOAuthState()
+        provider_id = str(ctx_info.get("provider_id") or slot)
+        try:
+            return await self._complete_oauth(user, provider_id, record, code=code, error=error)
+        except APIError as exc:
+            # So the callback route can send the user back to the right provider page.
+            exc.details.setdefault("provider_id", provider_id)
+            raise
+
+    async def _complete_oauth(
+        self,
+        user: User,
+        provider_id: str,
+        record: dict[str, Any],
+        *,
+        code: str | None,
+        error: str | None,
+    ) -> UserConnection:
+        ctx_info = record.get("context") or {}
+        provider = self.provider_or_404(provider_id)
         conn = await self._get_or_create(user, provider)
         if ctx_info.get("mode") == "mcp":
             from app.mcp import oauth as mcp_oauth
