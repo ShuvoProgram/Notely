@@ -119,35 +119,20 @@ test("an unreachable server yields a categorised error and an error status", asy
   await expect(page.getByText("Connection error")).toBeVisible();
 });
 
-test("marketplace lists every provider; connecting is always the vendor's own consent screen", async ({ page }) => {
+test("marketplace only offers vendors you can connect to; connecting is always the vendor's consent screen", async ({ page }) => {
   await signup(page);
   await page.goto("/app/settings/connections");
-  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "Gmail", "Google Calendar", "Google Drive", "OneDrive", "ClickUp", "Stripe", "PayPal", "MCP server"]) {
+  // Vendors with an official MCP server are always available (no app registration needed) ...
+  for (const name of ["Notion", "Jira", "ClickUp", "Stripe", "PayPal", "MCP server"]) {
     await expect(page.getByRole("link", { name: new RegExp(`^${name}\\b`) })).toBeVisible();
   }
-  for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Payments", "Developer"]) {
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+  // ... vendors whose OAuth app isn't configured on this deployment are simply not offered.
+  for (const name of ["Todoist", "Slack", "Asana"]) {
+    await expect(page.getByRole("link", { name: new RegExp(`^${name}\\b`) })).toHaveCount(0);
   }
-  // No vendor OAuth app is registered locally: apps without an official MCP server show a
-  // guided one-time setup. Saving the workspace's own app turns on the one-click Connect.
-  await expect(page.getByRole("link", { name: /^Todoist\b/ }).getByText("Needs a one-time setup")).toBeVisible();
-  await page.getByRole("link", { name: /^Todoist\b/ }).click();
-  await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
-  await expect(page.getByText(/Set up Todoist sign-in/)).toBeVisible({ timeout: 15_000 });
-  const setup = page;
-  await expect(setup.getByRole("link", { name: /Open the Todoist app console/ })).toHaveAttribute("href", /todoist\.com/);
-  await expect(setup.getByText("http://localhost:3000/api/v1/oauth/todoist/callback")).toBeVisible();
-  await setup.getByLabel("Client ID").fill("e2e-client-id");
-  await setup.getByLabel("Client secret").fill("e2e-client-secret");
-  await setup.getByRole("button", { name: "Save and enable Connect" }).click();
-  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
-  await expect(page.getByText("e2e-client-secret")).toHaveCount(0); // never echoed back
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.getByRole("dialog").getByRole("button", { name: "Continue with Notely" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByText("Read tasks and projects")).toBeVisible(); // permissions are still explained
+  await expect(page.getByText("Not available on this deployment")).toHaveCount(0);
 
-  // Vendors with an official MCP server connect with one click: consent card → vendor screen.
+  // One click: consent card → vendor screen. Nothing to type, nothing to paste.
   await page.goto("/app/settings/connections/notion");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const consent = page.getByRole("dialog");
@@ -156,5 +141,7 @@ test("marketplace lists every provider; connecting is always the vendor's own co
   await expect(consent.getByText("Data shared with this app")).toBeVisible();
   await expect(consent.getByRole("button", { name: "Continue with Notely" })).toBeVisible();
   await expect(consent.getByRole("link", { name: /Continue to Notion/ })).toBeVisible();
-  await expect(consent.locator("input")).toHaveCount(0); // nothing to type, nothing to paste
+  await expect(consent.locator("input")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Access the pages you choose during setup")).toBeVisible(); // permissions are still explained
 });

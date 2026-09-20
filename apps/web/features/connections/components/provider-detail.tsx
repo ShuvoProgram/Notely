@@ -15,7 +15,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
-import { OAuthAppSetup } from "@/features/connections/components/oauth-app-setup";
 import { ConnectionStatusBadge, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
 import type { ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
@@ -111,9 +110,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
             ) : canOAuth || canMcp ? (
               <ConnectionStatusBadge status="none" lastChecked={null} lastError={null} />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                {p.name} sign-in isn&apos;t set up for this workspace yet — register your {p.name} app below (two minutes), then everyone can connect with a click.
-              </p>
+              <p className="text-sm text-muted-foreground">{p.name} isn&apos;t available on this Notely deployment.</p>
             )}
           </div>
         </div>
@@ -165,7 +162,6 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        {p.settings_prefix && (!canOAuth || p.workspace_app) && !canMcp ? <OAuthAppSetup key={p.workspace_app?.updated_at ?? "new"} provider={p} /> : null}
         {conn ? (
           <Card>
             <CardHeader>

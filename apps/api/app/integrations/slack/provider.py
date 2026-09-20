@@ -14,7 +14,6 @@ from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -89,16 +88,6 @@ class SlackProvider(RestOAuthProvider):
         logo_url="https://cdn.simpleicons.org/slack",
         docs_url="https://api.slack.com/authentication/oauth-v2",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://api.slack.com/apps",
-            console_label="Open Slack's app dashboard",
-            steps=[
-                "Create New App → From scratch, pick your workspace.",
-                "OAuth & Permissions → Redirect URLs: add the redirect URI shown here.",
-                "OAuth & Permissions → User Token Scopes: add the scopes listed under Permissions.",
-                "Basic Information → App Credentials: copy the Client ID and Client Secret.",
-            ],
-        ),
         capabilities=[Capability.search, Capability.read, Capability.send],
         permissions=[
             PermissionSpec(

@@ -184,14 +184,10 @@ All vendor content returned to the model goes through `untrusted()`; list-style 
 too. Auth failures (401 / `invalid_auth`) mark the connection `expired`, hide its tools, and are
 surfaced per source in search.
 
-**Workspace OAuth apps.** `tenant_oauth_apps` (0009) holds a workspace's own vendor client id +
-encrypted secret, keyed by settings prefix. `ConnectionService.load_workspace_apps(user)` puts
-them in a context variable (`integrations/base/credentials.py`) before any provider method
-runs, and `RestOAuthProvider.oauth_config` resolves credentials workspace-app-first, then
-`OAUTH_<prefix>_*`. `ProviderManifest.oauth_setup` carries the vendor's console URL and steps for
-the in-app guide. All OAuth callbacks (sign-in and integrations) use
-`core.oauth.callback_uri(settings, path)` = `FRONTEND_ORIGIN + /api/v1/...`, i.e. the app's
-public origin, proxied to the API.
+**Callbacks.** All OAuth callbacks (sign-in and integrations) use
+`core.oauth.callback_uri(settings, path)` = `FRONTEND_ORIGIN + /api/v1/...`, the app's public
+origin, proxied to the API — never the API process's own address. The marketplace lists only
+providers with a connect method (or an existing connection).
 
 **One-click OAuth through official MCP servers (`app/mcp/oauth.py`).** `discover(url)` probes
 the server, follows `WWW-Authenticate: resource_metadata` / the RFC 9728 well-known URLs to the

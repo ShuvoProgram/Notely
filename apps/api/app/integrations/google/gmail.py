@@ -12,7 +12,6 @@ from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -105,25 +104,6 @@ class GmailProvider(GoogleProvider):
         logo_url="https://cdn.simpleicons.org/gmail",
         docs_url="https://developers.google.com/gmail/api/guides",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://console.cloud.google.com/apis/credentials",
-            console_label="Open Google Cloud credentials",
-            steps=[
-                "Enable the Gmail API (APIs & Services → Library).",
-                (
-                    "Configure the OAuth consent screen (External, add yourself as a test "
-                    "user while testing)."
-                ),
-                (
-                    "Create credentials → OAuth client ID → Web application → Authorized "
-                    "redirect URIs: add the redirect URI shown here."
-                ),
-                (
-                    "Copy the Client ID and Client secret. The same app serves Google "
-                    "Calendar and Google Drive."
-                ),
-            ],
-        ),
         capabilities=[Capability.search, Capability.read, Capability.draft, Capability.send],
         permissions=[
             PermissionSpec(

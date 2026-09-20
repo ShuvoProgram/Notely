@@ -118,7 +118,7 @@ function ProviderCard({ provider }: { provider: Provider }) {
           <p className="truncate text-xs text-muted-foreground">{provider.description}</p>
           <div className="mt-2">
             {provider.connect_methods.length === 0 && !conn ? (
-              <p className="text-xs text-muted-foreground">Needs a one-time setup</p>
+              <p className="text-xs text-muted-foreground">Not available on this deployment</p>
             ) : (
               <ConnectionStatusBadge status={conn?.status ?? "none"} lastChecked={conn?.last_checked_at} lastError={conn?.last_error} />
             )}

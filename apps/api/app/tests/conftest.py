@@ -24,6 +24,20 @@ else:
 os.environ["AI_CHECKPOINTER"] = "memory"
 # Deterministic Fernet key so encrypted-at-rest assertions are stable.
 os.environ["ENCRYPTION_KEY"] = "8bVJ7u2Q9mJmZcJ3b8lZ5G3Q0eVfG2Yg2b8nQx4bY9k="
+# Tests must not pick up a developer's real vendor apps from .env; fixtures set what they need.
+for _prefix in (
+    "google",
+    "microsoft",
+    "slack",
+    "notion",
+    "todoist",
+    "asana",
+    "jira",
+    "dropbox",
+    "clickup",
+):
+    os.environ[f"OAUTH_{_prefix.upper()}_CLIENT_ID"] = ""
+    os.environ[f"OAUTH_{_prefix.upper()}_CLIENT_SECRET"] = ""
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.kv import kv  # noqa: E402

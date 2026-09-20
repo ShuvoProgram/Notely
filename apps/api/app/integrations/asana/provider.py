@@ -13,7 +13,6 @@ from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -68,14 +67,6 @@ class AsanaProvider(RestOAuthProvider):
         logo_url="https://cdn.simpleicons.org/asana",
         docs_url="https://developers.asana.com/docs/oauth",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://app.asana.com/0/my-apps",
-            console_label="Open Asana's developer apps",
-            steps=[
-                "Create new app → OAuth → add the redirect URI shown here.",
-                "Copy the Client ID and Client secret from the app's OAuth page.",
-            ],
-        ),
         capabilities=[Capability.search, Capability.read, Capability.create, Capability.update],
         permissions=[
             PermissionSpec(

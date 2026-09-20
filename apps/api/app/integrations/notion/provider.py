@@ -12,7 +12,6 @@ from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -84,15 +83,6 @@ class NotionProvider(RestOAuthProvider):
         docs_url="https://developers.notion.com/docs/authorization",
         mcp_server_url="https://mcp.notion.com/mcp",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://www.notion.so/my-integrations",
-            console_label="Open Notion's integrations page",
-            steps=[
-                "New integration → type Public, pick your workspace.",
-                "Redirect URIs: add the redirect URI shown here.",
-                "Copy the OAuth client ID and OAuth client secret from the Configuration tab.",
-            ],
-        ),
         capabilities=[Capability.search, Capability.read, Capability.create],
         # Notion grants access per page the user selects during consent; there are no scopes.
         permissions=[

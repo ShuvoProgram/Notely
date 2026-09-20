@@ -19,7 +19,6 @@ from app.core.oauth import (
     callback_uri,
 )
 from app.integrations.base.capabilities import Capability, risk_for
-from app.integrations.base.credentials import client_credentials
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.http import ProviderHttpClient
 from app.integrations.base.provider import (
@@ -62,10 +61,10 @@ class RestOAuthProvider(IntegrationProvider):
     # --- configuration ----------------------------------------------------------------------
 
     def oauth_config(self, settings: Settings) -> OAuthClientConfig | None:
-        creds = client_credentials(settings, self.settings_prefix)
-        if creds is None:
+        client_id = getattr(settings, f"oauth_{self.settings_prefix}_client_id", "")
+        client_secret = getattr(settings, f"oauth_{self.settings_prefix}_client_secret", "")
+        if not client_id or not client_secret:
             return None
-        client_id, client_secret = creds
         return OAuthClientConfig(
             provider_id=self.manifest.id,
             client_id=client_id,

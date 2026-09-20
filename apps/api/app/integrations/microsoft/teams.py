@@ -11,7 +11,6 @@ from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -53,25 +52,6 @@ class TeamsProvider(MicrosoftGraphProvider):
         logo_url="https://cdn.simpleicons.org/microsoftteams",
         docs_url="https://learn.microsoft.com/graph/api/resources/teams-api-overview",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
-            console_label="Open Azure app registrations",
-            steps=[
-                (
-                    "New registration → Accounts in any organizational directory and "
-                    "personal accounts."
-                ),
-                "Authentication → Web → Redirect URI: the redirect URI shown here.",
-                (
-                    "API permissions → Microsoft Graph → Delegated: add the scopes listed "
-                    "under Permissions."
-                ),
-                (
-                    "Certificates & secrets → New client secret; copy it with the "
-                    "Application (client) ID. The same app serves Outlook and OneDrive."
-                ),
-            ],
-        ),
         capabilities=[Capability.read, Capability.send],
         permissions=[
             PermissionSpec(

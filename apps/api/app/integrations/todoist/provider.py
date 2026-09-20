@@ -14,7 +14,6 @@ from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
-    OAuthSetupGuide,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
@@ -68,14 +67,6 @@ class TodoistProvider(RestOAuthProvider):
         logo_url="https://cdn.simpleicons.org/todoist",
         docs_url="https://developer.todoist.com/guides/#authorization",
         auth=AuthType.oauth2,
-        oauth_setup=OAuthSetupGuide(
-            console_url="https://developer.todoist.com/appconsole.html",
-            console_label="Open the Todoist app console",
-            steps=[
-                "Create a new app; set the OAuth redirect URL to the redirect URI shown here.",
-                "Copy the Client ID and Client secret.",
-            ],
-        ),
         capabilities=[Capability.read, Capability.create, Capability.update],
         permissions=[
             PermissionSpec(

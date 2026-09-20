@@ -16,13 +16,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.tools.base import ToolSpec
-from app.core import crypto, metrics
+from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import NotFound, ValidationFailed
 from app.core.logging import get_logger
 from app.core.oauth import OAuthClient, OAuthTokens, callback_uri, consume_oauth_state
 from app.db.base import utcnow
-from app.integrations.base.credentials import set_overrides
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
@@ -38,7 +37,6 @@ from app.models.integration import (
     ConnectionStatus,
     ExternalItem,
     Integration,
-    TenantOAuthApp,
     UserConnection,
 )
 from app.models.user import User
@@ -77,12 +75,6 @@ def status_from_error(error: ProviderError) -> ConnectionStatus:
 MCP_AUTH = "mcp"
 
 
-def settings_prefix_of(provider: IntegrationProvider) -> str | None:
-    """Which OAUTH_<prefix>_* settings / workspace app a REST adapter uses (None for MCP-only)."""
-    prefix = getattr(provider, "settings_prefix", None)
-    return str(prefix) if prefix else None
-
-
 class ConnectionService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self.db = db
@@ -118,7 +110,6 @@ class ConnectionService:
         await self.db.commit()
 
     async def marketplace(self, user: User) -> list[MarketplaceEntry]:
-        await self.load_workspace_apps(user)
         rows = {
             c.provider: c
             for c in await self.db.scalars(
@@ -132,6 +123,10 @@ class ConnectionService:
         entries = []
         for provider in get_providers().values():
             if enabled and provider.manifest.id not in enabled:
+                continue
+            # Only vendors people can actually click Connect on (or already connected) are
+            # listed; a vendor with no OAuth app on this deployment simply isn't offered.
+            if not provider.connect_methods(self.settings) and provider.manifest.id not in rows:
                 continue
             entries.append(
                 MarketplaceEntry(
@@ -147,84 +142,6 @@ class ConnectionService:
         if provider is None:
             raise NotFound("Unknown integration.")
         return provider
-
-    # --- workspace OAuth apps --------------------------------------------------------------------
-
-    async def load_workspace_apps(self, user: User) -> dict[str, tuple[str, str]]:
-        """Make the workspace's own vendor apps visible to every adapter for this request."""
-        rows = list(
-            await self.db.scalars(
-                select(TenantOAuthApp).where(TenantOAuthApp.tenant_id == user.tenant_id)
-            )
-        )
-        apps = {
-            row.prefix: (
-                row.client_id,
-                crypto.decrypt(row.client_secret_encrypted, key=self.settings.encryption_key),
-            )
-            for row in rows
-            if self.settings.encryption_key
-        }
-        set_overrides(apps)
-        return apps
-
-    async def workspace_app(self, user: User, prefix: str) -> TenantOAuthApp | None:
-        return await self.db.scalar(
-            select(TenantOAuthApp).where(
-                TenantOAuthApp.tenant_id == user.tenant_id, TenantOAuthApp.prefix == prefix
-            )
-        )
-
-    async def save_workspace_app(
-        self, user: User, provider_id: str, *, client_id: str, client_secret: str | None
-    ) -> TenantOAuthApp:
-        provider = self.provider_or_404(provider_id)
-        prefix = settings_prefix_of(provider)
-        if prefix is None:
-            raise ValidationFailed("This integration does not use a vendor OAuth app.")
-        if not self.settings.encryption_key:
-            raise ValidationFailed(
-                "This deployment has no ENCRYPTION_KEY, so secrets can't be stored safely.",
-                code="ENCRYPTION_NOT_CONFIGURED",
-            )
-        client_id = client_id.strip()
-        secret = (client_secret or "").strip()
-        errors: dict[str, list[str]] = {}
-        if not client_id:
-            errors["client_id"] = ["Required"]
-        row = await self.workspace_app(user, prefix)
-        if not secret and row is None:
-            errors["client_secret"] = ["Required"]
-        if errors:
-            raise ValidationFailed("Some fields are missing.", details={"fields": errors})
-        if row is None:
-            row = TenantOAuthApp(tenant_id=user.tenant_id, prefix=prefix)
-            self.db.add(row)
-        row.client_id = client_id
-        if secret:
-            row.client_secret_encrypted = crypto.encrypt(secret, key=self.settings.encryption_key)
-        row.configured_by = user.id
-        await self.db.commit()
-        await self.audit.record(
-            user,
-            provider=provider_id,
-            action="configure_oauth_app",
-            risk_level=RiskLevel.write,
-            status="completed",
-            request_metadata={"prefix": prefix, "client_id": client_id[:12] + "…"},
-        )
-        await self.db.commit()
-        await self.load_workspace_apps(user)
-        return row
-
-    async def delete_workspace_app(self, user: User, provider_id: str) -> None:
-        provider = self.provider_or_404(provider_id)
-        prefix = settings_prefix_of(provider)
-        row = await self.workspace_app(user, prefix) if prefix else None
-        if row is not None:
-            await self.db.delete(row)
-            await self.db.commit()
-        await self.load_workspace_apps(user)
 
     def adapter(self, conn: UserConnection) -> IntegrationProvider:
         """The object that talks to the vendor for this connection: the REST adapter, or — for
@@ -333,7 +250,6 @@ class ConnectionService:
         vendor's official MCP server, or `server_url` for the generic MCP entry, with a
         dynamically registered client). Default: own app when configured, else MCP."""
         provider = self.provider_or_404(provider_id)
-        await self.load_workspace_apps(user)
         methods = provider.connect_methods(self.settings)
         if method is None:
             method = "oauth" if "oauth" in methods else "mcp" if "mcp" in methods else ""
@@ -412,7 +328,6 @@ class ConnectionService:
         error: str | None,
     ) -> UserConnection:
         provider = self.provider_or_404(provider_id)
-        await self.load_workspace_apps(user)
         record = await consume_oauth_state(provider_id, state, self._redirect_uri(provider_id))
         ctx_info = record.get("context") or {}
         if ctx_info.get("user_id") != str(user.id):
@@ -471,7 +386,6 @@ class ConnectionService:
             return
         if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
             return
-        await self.load_workspace_apps(user)
         provider = self.adapter(conn)
         try:
             tokens = await provider.refresh_credentials(self.context(user, conn))
@@ -529,7 +443,6 @@ class ConnectionService:
     # --- health ----------------------------------------------------------------------------------
 
     async def test(self, user: User, conn: UserConnection) -> ConnectionTest:
-        await self.load_workspace_apps(user)
         provider = self.adapter(conn)
         if conn.status == ConnectionStatus.disconnected:
             return ConnectionTest([TestStep("Connection", False, "Not connected")])
@@ -635,7 +548,6 @@ class ConnectionService:
     # --- agent tool discovery -------------------------------------------------------------------
 
     async def tools_for_user(self, user: User) -> list[ToolSpec]:
-        await self.load_workspace_apps(user)
         specs: list[ToolSpec] = []
         for conn in await self.list_usable(user):
             if get_provider(conn.provider) is None:

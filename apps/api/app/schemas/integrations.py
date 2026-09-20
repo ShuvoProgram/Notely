@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.integrations.base.provider import ConfigField, OAuthSetupGuide, PermissionSpec
+from app.integrations.base.provider import ConfigField, PermissionSpec
 from app.models.integration import ConnectionStatus
 
 
@@ -33,20 +33,6 @@ class ConnectionOut(BaseModel):
     updated_at: datetime
 
 
-class WorkspaceAppOut(BaseModel):
-    """The workspace's own OAuth app for a vendor. The secret is never returned."""
-
-    client_id: str
-    configured_by_me: bool
-    updated_at: datetime
-
-
-class WorkspaceAppIn(BaseModel):
-    client_id: str = Field(min_length=1, max_length=500)
-    # Write-only; omit to keep the stored secret when only the id changes.
-    client_secret: str | None = Field(default=None, max_length=500)
-
-
 class ProviderOut(BaseModel):
     id: str
     name: str
@@ -58,11 +44,6 @@ class ProviderOut(BaseModel):
     capabilities: list[str]
     permissions: list[PermissionSpec]
     config_fields: list[ConfigField]
-    # Registering the workspace's own vendor app (when the deployment has none).
-    settings_prefix: str | None = None
-    oauth_setup: OAuthSetupGuide | None = None
-    redirect_uri: str | None = None
-    workspace_app: WorkspaceAppOut | None = None
     # Ways the user can connect on this deployment: oauth (own app) | mcp (official server).
     connect_methods: list[str] = Field(default_factory=list)
     supports_webhooks: bool
