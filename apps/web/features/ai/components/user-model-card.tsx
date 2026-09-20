@@ -1,13 +1,20 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, KeyRound, Loader2, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, KeyRound, Loader2, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { aiApi } from "@/features/ai/api";
@@ -130,6 +137,7 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
         ) : null}
         <form
           className="space-y-4"
+          autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault();
             save.mutate();
@@ -138,13 +146,25 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="byo-provider">Provider</Label>
-              <select id="byo-provider" value={providerId} onChange={(e) => pickProvider(e.target.value)} className="h-9 w-full rounded-md border bg-transparent px-3 text-sm">
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
+              {/* A themed menu rather than a native <select>: Chromium paints native option
+                  lists with the OS palette, which is unreadable on the dark theme. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button id="byo-provider" type="button" variant="outline" className="w-full justify-between font-normal">
+                    {info?.label ?? "Choose a provider"}
+                    <ChevronDown className="size-4 opacity-60" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+                  <DropdownMenuRadioGroup value={providerId} onValueChange={pickProvider}>
+                    {providers.map((p) => (
+                      <DropdownMenuRadioItem key={p.id} value={p.id}>
+                        {p.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {info?.docs_url ? (
                 <a href={info.docs_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline">
                   Get an API key <ExternalLink className="size-3" aria-hidden />
@@ -153,7 +173,7 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="byo-model">Model</Label>
-              <Input id="byo-model" list="byo-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder={info?.models[0] ?? "model name"} aria-invalid={errors.model ? true : undefined} />
+              <Input id="byo-model" name="byo-model-name" autoComplete="off" list="byo-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder={info?.models[0] ?? "model name"} aria-invalid={errors.model ? true : undefined} />
               <datalist id="byo-models">{info?.models.map((m) => <option key={m} value={m} />)}</datalist>
               {errors.model ? (
                 <p role="alert" className="text-xs text-destructive">
@@ -179,7 +199,7 @@ export function UserModelCard({ settings }: { settings: AISettings }) {
           ) : null}
           <div className="space-y-2">
             <Label htmlFor="byo-key">API key</Label>
-            <Input id="byo-key" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={saved?.key_hint ? `Stored (${saved.key_hint}) — enter a new key to replace it` : info?.key_placeholder} aria-invalid={errors.api_key ? true : undefined} />
+            <Input id="byo-key" name="byo-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={saved?.key_hint ? `Stored (${saved.key_hint}) — enter a new key to replace it` : info?.key_placeholder} aria-invalid={errors.api_key ? true : undefined} />
             {errors.api_key ? (
               <p role="alert" className="text-xs text-destructive">
                 {errors.api_key}
