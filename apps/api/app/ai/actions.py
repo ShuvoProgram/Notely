@@ -90,6 +90,9 @@ class NoteActionService:
         if not source_text.strip():
             raise ValidationFailed("This note is empty, so there is nothing to work with.")
 
+        from app.services.ai_settings_service import AISettingsService
+
+        byo = await AISettingsService(self.db, self.settings).resolve(user)
         model = get_chat_model(
             resolve_model_alias(
                 self.settings, prefs.get("model") if isinstance(prefs, dict) else None
@@ -97,6 +100,7 @@ class NoteActionService:
             settings=self.settings,
             temperature=0.3,
             script_key=str(user.id),
+            byo=byo,
         )
         instruction = _instruction(request.action, instruction=request.instruction, prefs=prefs)
         messages = [

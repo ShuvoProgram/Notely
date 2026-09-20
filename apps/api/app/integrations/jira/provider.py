@@ -13,10 +13,12 @@ from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
+    ConfigField,
     ConnectionIdentity,
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
+    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -92,6 +94,23 @@ class JiraProvider(RestOAuthProvider):
         description="Search and read issues; create issues and comments with approval.",
         logo_url="https://cdn.simpleicons.org/jira",
         docs_url="https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/",
+        token_auth=TokenAuthSpec(
+            label="API token",
+            help=(
+                "Create an API token at id.atlassian.com, then enter your site URL and the "
+                "email of the Atlassian account that owns the token."
+            ),
+            help_url="https://id.atlassian.com/manage-profile/security/api-tokens",
+            fields=[
+                ConfigField(
+                    key="site_url",
+                    label="Site URL",
+                    kind="url",
+                    placeholder="https://your-team.atlassian.net",
+                ),
+                ConfigField(key="email", label="Atlassian account email", kind="text"),
+            ],
+        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.search, Capability.read, Capability.create, Capability.comment],
         permissions=[
@@ -111,7 +130,17 @@ class JiraProvider(RestOAuthProvider):
         ],
     )
 
+    token_scheme = "basic"
+
+    def basic_user(self, ctx: ProviderContext) -> str:
+        return str(ctx.connection.config.get("email", ""))
+
+    def _site(self, ctx: ProviderContext) -> str:
+        return str(ctx.connection.config.get("site_url", "")).rstrip("/")
+
     def _base(self, ctx: ProviderContext) -> str:
+        if self.is_token_connection(ctx):
+            return f"{self._site(ctx)}/rest/api/3"
         cloud_id = ctx.connection.metadata_.get("cloud_id")
         if not cloud_id:
             raise ProviderError(
@@ -120,6 +149,22 @@ class JiraProvider(RestOAuthProvider):
         return f"{GATEWAY}/ex/jira/{cloud_id}/rest/api/3"
 
     async def identity(self, ctx: ProviderContext) -> ConnectionIdentity:
+        if self.is_token_connection(ctx):
+            site = self._site(ctx)
+            if not site.startswith("https://"):
+                raise ProviderError(
+                    ProviderErrorKind.invalid_request, "site URL must be https", provider="jira"
+                )
+            async with self.http(ctx, self._base(ctx)) as http:
+                me = (await http.get("/myself")).json()
+            return ConnectionIdentity(
+                external_account_id=str(me.get("accountId")),
+                external_account_name=(
+                    f"{me.get('displayName') or me.get('emailAddress')} @ "
+                    f"{site.removeprefix('https://')}"
+                ),
+                metadata={"site_url": site},
+            )
         async with self.http(ctx, GATEWAY) as http:
             sites = (await http.get("/oauth/token/accessible-resources")).json()
         jira_sites = [s for s in sites if "jira" in " ".join(s.get("scopes", [])) or s.get("url")]

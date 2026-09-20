@@ -334,11 +334,49 @@ export interface AIPreferences {
   confirm_reads: boolean;
 }
 
+export interface UserModel {
+  provider: string;
+  model: string;
+  base_url: string | null;
+  key_hint: string;
+  enabled: boolean;
+  verified_at: string | null;
+  last_error: string | null;
+}
+
+export interface UserModelInput {
+  provider: string;
+  model: string;
+  base_url?: string | null;
+  /** Write-only; omit or send "" to keep the stored key. */
+  api_key?: string | null;
+  enabled: boolean;
+}
+
+export interface UserModelProvider {
+  id: string;
+  label: string;
+  key_placeholder: string;
+  docs_url: string;
+  models: string[];
+  needs_base_url: boolean;
+  default_base_url: string | null;
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  detail: string;
+  latency_ms: number | null;
+}
+
 export interface AISettings {
   provider: string;
   models: { id: string; label: string }[];
   preferences: AIPreferences;
   tools: { name: string; risk: RiskLevel; provider: string; description: string }[];
+  user_model: UserModel | null;
+  user_model_providers: UserModelProvider[];
+  encryption_available: boolean;
 }
 
 export interface AuditEvent {
@@ -402,6 +440,16 @@ export interface ConfigField {
   options: { value: string; label: string }[];
 }
 
+export interface TokenAuthSpec {
+  label: string;
+  help: string;
+  help_url: string | null;
+  placeholder: string;
+  fields: ConfigField[];
+}
+
+export type ConnectMethod = "oauth" | "token" | "config";
+
 export interface Provider {
   id: string;
   name: string;
@@ -413,6 +461,9 @@ export interface Provider {
   capabilities: string[];
   permissions: PermissionSpec[];
   config_fields: ConfigField[];
+  token_auth: TokenAuthSpec | null;
+  /** How this user can connect on this deployment. Empty → nothing is possible yet. */
+  connect_methods: ConnectMethod[];
   supports_webhooks: boolean;
   supports_sync: boolean;
   configured: boolean;

@@ -41,6 +41,7 @@ class ProviderHttpClient:
         provider: str,
         base_url: str = "",
         bearer_token: str | None = None,
+        basic_auth: tuple[str, str] | None = None,
         headers: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = DEFAULT_TIMEOUT,
@@ -54,6 +55,7 @@ class ProviderHttpClient:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers=merged,
+            auth=httpx.BasicAuth(*basic_auth) if basic_auth else None,
             timeout=timeout,
             transport=transport or transport_for(provider),
         )

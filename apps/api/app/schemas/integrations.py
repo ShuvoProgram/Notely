@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.integrations.base.provider import ConfigField, PermissionSpec
+from app.integrations.base.provider import ConfigField, PermissionSpec, TokenAuthSpec
 from app.models.integration import ConnectionStatus
 
 
@@ -44,6 +44,9 @@ class ProviderOut(BaseModel):
     capabilities: list[str]
     permissions: list[PermissionSpec]
     config_fields: list[ConfigField]
+    token_auth: TokenAuthSpec | None = None
+    # Ways the user can connect on this deployment: oauth | token | config.
+    connect_methods: list[str] = Field(default_factory=list)
     supports_webhooks: bool
     supports_sync: bool
     configured: bool

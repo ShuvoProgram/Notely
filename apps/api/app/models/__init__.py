@@ -13,6 +13,7 @@ from app.models.ai import (
     RiskLevel,
     RunStatus,
     ToolCallStatus,
+    UserAISetting,
 )
 from app.models.integration import (
     ConnectionStatus,
@@ -34,6 +35,7 @@ __all__ = [
     "AIToolCall",
     "ApprovalStatus",
     "AuditEvent",
+    "UserAISetting",
     "AuthIdentity",
     "Base",
     "ConnectionStatus",

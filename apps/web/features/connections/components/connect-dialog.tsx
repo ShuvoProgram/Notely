@@ -12,23 +12,47 @@ import { Label } from "@/components/ui/label";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ApiError } from "@/lib/api/client";
-import type { Provider } from "@/lib/api/types";
+import type { ConfigField, ConnectMethod, Provider } from "@/lib/api/types";
 
 /**
  * Connect flow: shows what Notely will be able to do (permissions) and either sends the user to
- * the provider's consent screen (OAuth) or collects non-secret config + a token (token/none).
+ * the provider's consent screen (OAuth), or collects non-secret config + a user-issued token
+ * (token / config methods, and the "personal token" fallback for OAuth providers).
  */
-export function ConnectDialog({ provider, open, onOpenChange, reconnect = false }: { provider: Provider; open: boolean; onOpenChange: (o: boolean) => void; reconnect?: boolean }) {
+export function ConnectDialog({
+  provider,
+  method,
+  open,
+  onOpenChange,
+  reconnect = false,
+}: {
+  provider: Provider;
+  method: ConnectMethod;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  reconnect?: boolean;
+}) {
   const queryClient = useQueryClient();
+  const tokenSpec = method === "token" ? provider.token_auth : null;
+  // Fields shown for this method: the token spec's own fields (personal-token path) or the
+  // provider's config fields; a token method always adds one secret input.
+  const fields: ConfigField[] = React.useMemo(() => {
+    const base = tokenSpec?.fields.length ? tokenSpec.fields : provider.config_fields;
+    const hasSecret = base.some((f) => f.kind === "secret");
+    if (method === "token" && !hasSecret) {
+      return [...base, { key: "__token", label: tokenSpec?.label ?? "Token", kind: "secret", required: true, placeholder: tokenSpec?.placeholder ?? "", help: "", options: [] }];
+    }
+    return base;
+  }, [method, provider.config_fields, tokenSpec]);
   const [values, setValues] = React.useState<Record<string, string>>(() =>
-    Object.fromEntries(provider.config_fields.map((f) => [f.key, String(provider.connection?.config[f.key] ?? "")])),
+    Object.fromEntries(fields.map((f) => [f.key, String(provider.connection?.config[f.key] ?? "")])),
   );
   const [optionalScopes, setOptionalScopes] = React.useState<Set<string>>(() => new Set(provider.connection?.scopes ?? []));
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
 
   const connect = useMutation({
     mutationFn: async () => {
-      if (provider.auth === "oauth2") {
+      if (method === "oauth") {
         const optional = provider.permissions.filter((p) => !p.required && optionalScopes.has(p.scope)).map((p) => p.scope);
         const { authorize_url } = await connectionsApi.oauthStartUrl(provider.id, optional);
         window.location.assign(authorize_url); // full navigation to the provider's consent page
@@ -36,7 +60,7 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
       }
       const config: Record<string, unknown> = {};
       let token: string | null = null;
-      for (const f of provider.config_fields) {
+      for (const f of fields) {
         if (f.kind === "secret") token = values[f.key] || null;
         else config[f.key] = values[f.key] ?? "";
       }
@@ -53,7 +77,8 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
       // The backend records the failure on the connection; make the page reflect it.
       queryClient.invalidateQueries({ queryKey: ["integrations"] });
       if (error instanceof ApiError && Object.keys(error.fieldErrors).length) {
-        setFieldErrors(Object.fromEntries(Object.entries(error.fieldErrors).map(([k, v]) => [k, v[0] ?? "Invalid"])));
+        // The API reports the secret as "token"; the form may call it "__token".
+        setFieldErrors(Object.fromEntries(Object.entries(error.fieldErrors).map(([k, v]) => [k === "token" ? "__token" : k, v[0] ?? "Invalid"])));
         return;
       }
       toast.error(messageFor(error));
@@ -62,6 +87,7 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
 
   const required = provider.permissions.filter((p) => p.required);
   const optional = provider.permissions.filter((p) => !p.required);
+  const aOrAn = (label: string) => `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label.toLowerCase()}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -76,11 +102,24 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
           <DialogHeader>
             <DialogTitle>
               {reconnect ? "Reconnect" : "Connect"} {provider.name}
+              {tokenSpec ? ` with ${aOrAn(tokenSpec.label)}` : ""}
             </DialogTitle>
             <DialogDescription>{provider.description}</DialogDescription>
           </DialogHeader>
 
           <div className="my-5 space-y-5">
+            {tokenSpec ? (
+              <section className="rounded-lg border bg-muted/40 p-3 text-sm">
+                <p className="font-medium">Where to get {aOrAn(tokenSpec.label)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{tokenSpec.help}</p>
+                {tokenSpec.help_url ? (
+                  <a href={tokenSpec.help_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs underline-offset-2 hover:underline">
+                    Open {provider.name} settings <ExternalLink className="size-3" aria-hidden />
+                  </a>
+                ) : null}
+                <p className="mt-2 text-xs text-muted-foreground">The token is stored encrypted and only used to act on your behalf. You can revoke it in {provider.name} at any time.</p>
+              </section>
+            ) : null}
             {provider.permissions.length ? (
               <section>
                 <h3 className="text-sm font-medium">Notely will be able to</h3>
@@ -124,7 +163,7 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
               </section>
             ) : null}
 
-            {provider.config_fields.map((f) => (
+            {fields.map((f) => (
               <div key={f.key} className="space-y-2">
                 <Label htmlFor={`cfg-${f.key}`}>
                   {f.label}
@@ -152,7 +191,7 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
               </div>
             ))}
 
-            {provider.auth === "oauth2" ? (
+            {method === "oauth" ? (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <ExternalLink className="size-3.5" aria-hidden /> You&apos;ll be taken to {provider.name} to sign in and approve access, then brought back here.
               </p>
@@ -164,7 +203,7 @@ export function ConnectDialog({ provider, open, onOpenChange, reconnect = false 
               Cancel
             </Button>
             <Button type="submit" disabled={connect.isPending}>
-              {connect.isPending ? "Connecting…" : provider.auth === "oauth2" ? `Continue to ${provider.name}` : "Connect"}
+              {connect.isPending ? "Connecting…" : method === "oauth" ? `Continue to ${provider.name}` : "Connect"}
             </Button>
           </DialogFooter>
         </form>

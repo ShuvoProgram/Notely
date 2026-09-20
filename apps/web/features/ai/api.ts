@@ -4,7 +4,7 @@ import type {
   AIChatEvent,
   AIPreferences,
   AIRun,
-  AISettings,
+  AISettings, ModelTestResult, UserModel, UserModelInput,
   AIThread,
   AIThreadDetail,
   AuditEvent,
@@ -20,6 +20,9 @@ export const aiApi = {
   cancel: (runId: string) => api.post<AIRun>(`/ai/runs/${runId}/cancel`),
   settings: () => api.get<AISettings>("/ai/settings"),
   updateSettings: (prefs: AIPreferences) => api.patch<AIPreferences>("/ai/settings", prefs),
+  setUserModel: (input: UserModelInput) => api.put<UserModel>("/ai/settings/model", input),
+  testUserModel: () => api.post<ModelTestResult>("/ai/settings/model/test"),
+  deleteUserModel: () => api.delete<{ deleted: boolean }>("/ai/settings/model"),
   audit: () => api.get<AuditEvent[]>("/audit"),
 
   chat: (

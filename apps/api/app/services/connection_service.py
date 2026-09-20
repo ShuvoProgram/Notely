@@ -309,26 +309,33 @@ class ConnectionService:
         self, user: User, provider_id: str, *, config: dict[str, Any], token: str | None
     ) -> UserConnection:
         provider = self.provider_or_404(provider_id)
-        if provider.manifest.auth == AuthType.oauth2:
+        manifest = provider.manifest
+        token_spec = manifest.token_auth
+        uses_token = manifest.auth == AuthType.token or (
+            manifest.auth == AuthType.oauth2 and token_spec is not None
+        )
+        if manifest.auth == AuthType.oauth2 and token_spec is None:
             raise ValidationFailed("This integration connects with OAuth. Use the connect button.")
-        missing = [
-            f.key
-            for f in provider.manifest.config_fields
+        fields = list(token_spec.fields) if token_spec is not None else list(manifest.config_fields)
+        errors: dict[str, list[str]] = {
+            f.key: ["Required"]
+            for f in fields
             if f.required and f.kind != "secret" and not str(config.get(f.key, "")).strip()
-        ]
-        if missing:
-            raise ValidationFailed(
-                "Some settings are missing.", details={"fields": {k: ["Required"] for k in missing}}
-            )
-        conn = await self._get_or_create(user, provider)
-        conn.config = {
-            k: v
-            for k, v in config.items()
-            if k in {f.key for f in provider.manifest.config_fields if f.kind != "secret"}
         }
+        if uses_token and not (token or "").strip():
+            errors["token"] = ["Required"]
+        if errors:
+            raise ValidationFailed("Some settings are missing.", details={"fields": errors})
+        conn = await self._get_or_create(user, provider)
+        allowed = {f.key for f in fields if f.kind != "secret"}
+        conn.config = {k: str(v).strip() for k, v in config.items() if k in allowed}
         conn.status = ConnectionStatus.connecting
-        if provider.manifest.auth == AuthType.token:
-            self.vault.store_token(conn, token)
+        conn.auth_type = AuthType.token.value if uses_token else manifest.auth.value
+        if uses_token:
+            self.vault.store_token(conn, (token or "").strip())
+            conn.token_expires_at = None
+            # A personal token carries whatever the user granted it; we can't enumerate scopes.
+            conn.scopes = [p.scope for p in manifest.permissions]
         await self.db.flush()
         await self._finish_connect(user, provider, conn)
         return conn

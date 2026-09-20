@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.core import metrics
+from app.core.config import get_settings
 from app.core.exceptions import APIError, NotFound
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
@@ -63,6 +64,8 @@ def provider_out(entry: MarketplaceEntry) -> ProviderOut:
         capabilities=[c.value for c in m.capabilities],
         permissions=m.permissions,
         config_fields=m.config_fields,
+        token_auth=m.token_auth,
+        connect_methods=entry.provider.connect_methods(get_settings()),
         supports_webhooks=m.supports_webhooks,
         supports_sync=m.supports_sync,
         configured=entry.configured,

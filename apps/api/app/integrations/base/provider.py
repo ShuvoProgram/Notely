@@ -53,6 +53,19 @@ class ConfigField(BaseModel):
     options: list[dict[str, str]] = Field(default_factory=list)
 
 
+class TokenAuthSpec(BaseModel):
+    """How a user can connect with a personal API token instead of (or as well as) OAuth.
+
+    Shown as a form: `fields` (non-secret settings such as a site URL) plus the token itself.
+    `help` tells the user where the vendor issues such tokens."""
+
+    label: str = "Personal API token"
+    help: str = ""
+    help_url: str | None = None
+    placeholder: str = ""
+    fields: list[ConfigField] = Field(default_factory=list)
+
+
 class ProviderManifest(BaseModel):
     id: str
     name: str
@@ -64,6 +77,9 @@ class ProviderManifest(BaseModel):
     capabilities: list[Capability]
     permissions: list[PermissionSpec] = Field(default_factory=list)
     config_fields: list[ConfigField] = Field(default_factory=list)
+    # Optional second way in for OAuth providers: a user-issued token. Lets people connect on
+    # deployments that have no vendor OAuth app registered (self-hosted, trials).
+    token_auth: TokenAuthSpec | None = None
     supports_webhooks: bool = False
     supports_sync: bool = False
 
@@ -124,6 +140,18 @@ class IntegrationProvider(ABC):
     def is_configured(self, settings: Settings) -> bool:
         """OAuth providers need client credentials on this deployment; others are always on."""
         return self.manifest.auth != AuthType.oauth2 or self.oauth_config(settings) is not None
+
+    def connect_methods(self, settings: Settings) -> list[str]:
+        """Ways this user can connect right now: `oauth` (when the deployment has client
+        credentials), `token` (when the provider accepts user-issued tokens), `config`."""
+        methods: list[str] = []
+        if self.manifest.auth == AuthType.oauth2 and self.oauth_config(settings) is not None:
+            methods.append("oauth")
+        if self.manifest.auth == AuthType.token or self.manifest.token_auth is not None:
+            methods.append("token")
+        if self.manifest.auth == AuthType.none:
+            methods.append("config")
+        return methods
 
     def oauth_config(self, settings: Settings) -> OAuthClientConfig | None:  # noqa: ARG002
         return None

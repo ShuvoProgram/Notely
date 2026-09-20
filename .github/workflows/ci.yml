@@ -105,6 +105,8 @@ jobs:
         env:
           RATE_LIMIT_AUTH_PER_MINUTE: "500"
           AI_PROVIDER: fake
+          # Throwaway key so token/BYO-model flows (which encrypt secrets) run in e2e.
+          ENCRYPTION_KEY: 8bVJ7u2Q9mJmZcJ3b8lZ5G3Q0eVfG2Yg2b8nQx4bY9k=
       - name: Production config gate refuses insecure settings
         run: |
           docker compose run --rm -e ENVIRONMENT=production -e API_PUBLIC_URL=http://x -e FRONTEND_ORIGIN=http://x api \

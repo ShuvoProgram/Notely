@@ -121,6 +121,15 @@ hallucination resistance) live in `apps/api/app/tests/evals/` and run against a 
 cd apps/api && AI_EVAL=1 AI_PROVIDER=litellm LITELLM_API_BASE=http://localhost:4000 uv run pytest -m eval app/tests/evals
 ```
 
+### Your own model (bring your own key)
+
+Settings → AI → **Your own model**: pick OpenAI, Anthropic, Google Gemini or any OpenAI-compatible
+endpoint (Ollama, LM Studio, OpenRouter, Groq…), type a model name, paste an API key and press
+**Test**. The key is encrypted with `ENCRYPTION_KEY`, never returned to the browser (only a
+`…last4` hint), and used only for that user's requests; the test runs a real one-token completion
+and reports categorised failures (rejected key, unknown model, unreachable endpoint). Untick "Use
+this model" to fall back to the workspace LiteLLM gateway without losing the key.
+
 ## Integrations
 
 Settings → Connections lists providers from the backend registry (`apps/api/app/integrations/registry.py`).
@@ -138,17 +147,25 @@ Its tools show up in the assistant; reads run automatically, writes ask for appr
 
 ### Vendor providers
 
-Slack, Notion, Todoist, Asana, Jira, Microsoft Teams, Outlook and Dropbox are adapters on the same
-contract (`apps/api/app/integrations/<provider>/`). Each one is listed in the marketplace but shown
-as *not available on this deployment* until you register an OAuth app with the vendor and set
-`OAUTH_<PROVIDER>_CLIENT_ID` / `OAUTH_<PROVIDER>_CLIENT_SECRET` (Teams and Outlook share
-`OAUTH_MICROSOFT_*`). Register this redirect URI with every vendor:
+Fifteen adapters share one contract (`apps/api/app/integrations/<provider>/`): Slack, Notion,
+Todoist, Asana, Jira, Microsoft Teams, Outlook, OneDrive, Gmail, Google Calendar, Google Drive,
+Linear, ClickUp, Trello and a generic MCP server. Every one passes the same end-to-end contract
+test against a mocked vendor API.
+
+**Two ways to connect.** OAuth ("Connect", the vendor's consent screen) needs an OAuth app
+registered on the deployment: `OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET` (Teams, Outlook and
+OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share `OAUTH_GOOGLE_*`). Where the
+vendor issues personal tokens — Slack, Notion, Todoist, Asana, Jira, Dropbox, Linear, ClickUp,
+Trello — users can instead paste one ("Connect with a token"): the detail page explains where to
+get it, the token is stored encrypted, and it works even when no OAuth app is configured. Register
+this redirect URI with every vendor you set up for OAuth:
 
 ```
 {API_PUBLIC_URL}/api/v1/oauth/{provider}/callback   # e.g. http://localhost:8000/api/v1/oauth/slack/callback
 ```
 
-Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`, `dropbox`.
+Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`,
+`onedrive`, `dropbox`, `gmail`, `google_calendar`, `google_drive`, `linear`, `clickup`, `trello`.
 Tokens are stored encrypted, refreshed by the worker and never reach the browser. Every adapter
 passes the same end-to-end test (`apps/api/app/tests/test_providers.py`) against a mocked vendor
 API: OAuth exchange in the vendor's own token style, identity, health test, unified search, one

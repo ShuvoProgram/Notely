@@ -15,6 +15,7 @@ from app.integrations.base.provider import (
     PermissionSpec,
     ProviderContext,
     ProviderManifest,
+    TokenAuthSpec,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
@@ -81,6 +82,15 @@ class NotionProvider(RestOAuthProvider):
         description="Search and read the pages you share with Notely; create pages with approval.",
         logo_url="https://cdn.simpleicons.org/notion",
         docs_url="https://developers.notion.com/docs/authorization",
+        token_auth=TokenAuthSpec(
+            label="Internal integration secret",
+            help=(
+                "Create an internal integration in Notion, copy its secret, then share the "
+                "pages you want Notely to see with that integration."
+            ),
+            help_url="https://www.notion.so/my-integrations",
+            placeholder="ntn_… or secret_…",
+        ),
         auth=AuthType.oauth2,
         capabilities=[Capability.search, Capability.read, Capability.create],
         # Notion grants access per page the user selects during consent; there are no scopes.

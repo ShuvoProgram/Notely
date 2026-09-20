@@ -22,10 +22,14 @@ from app.schemas.ai import (
     AuditEventOut,
     ChatRequest,
     MessageOut,
+    ModelTestOut,
     RunOut,
     ThreadDetailOut,
     ThreadOut,
+    UserModelIn,
+    UserModelOut,
 )
+from app.services.ai_settings_service import AISettingsService
 from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -135,6 +139,7 @@ async def get_ai_settings(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) ->
     prefs = (
         (ctx.user.preferences or {}).get("ai", {}) if isinstance(ctx.user.preferences, dict) else {}
     )
+    row = await AISettingsService(db, settings).get(ctx.user)
     return ok(
         AISettingsOut(
             provider=provider_name(settings),
@@ -143,6 +148,9 @@ async def get_ai_settings(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) ->
                 {"id": settings.ai_model_fast, "label": "Fast"},
             ],
             preferences=AIPreferences.model_validate(prefs or {}),
+            user_model=UserModelOut.model_validate(row, from_attributes=True) if row else None,
+            user_model_providers=AISettingsService.catalog(),
+            encryption_available=bool(settings.encryption_key),
             tools=[
                 {
                     "name": t.name,
@@ -170,6 +178,39 @@ async def update_ai_settings(
     ctx.user.preferences = prefs
     await db.commit()
     return ok(payload)
+
+
+@router.put("/settings/model", response_model=Envelope[UserModelOut])
+async def set_user_model(
+    payload: UserModelIn, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
+) -> dict[str, Any]:
+    """Save the user's own provider/model/API key (key is write-only, stored encrypted)."""
+    row = await AISettingsService(db, settings).upsert(
+        ctx.user,
+        provider=payload.provider,
+        model=payload.model,
+        base_url=payload.base_url,
+        api_key=payload.api_key,
+        enabled=payload.enabled,
+    )
+    return ok(UserModelOut.model_validate(row, from_attributes=True))
+
+
+@router.post(
+    "/settings/model/test",
+    response_model=Envelope[ModelTestOut],
+    dependencies=[Depends(ai_limit)],
+)
+async def test_user_model(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) -> dict[str, Any]:
+    """One tiny completion against the saved configuration; records verified_at/last_error."""
+    result = await AISettingsService(db, settings).test(ctx.user)
+    return ok(ModelTestOut(ok=result.ok, detail=result.detail, latency_ms=result.latency_ms))
+
+
+@router.delete("/settings/model", response_model=Envelope[dict[str, bool]])
+async def delete_user_model(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) -> dict[str, Any]:
+    await AISettingsService(db, settings).delete(ctx.user)
+    return ok({"deleted": True})
 
 
 @audit_router.get("", response_model=Envelope[list[AuditEventOut]])

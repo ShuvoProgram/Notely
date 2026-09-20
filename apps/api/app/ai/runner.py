@@ -52,6 +52,7 @@ from app.models.ai import (
     AIMessage as AIMessageRow,
 )
 from app.models.user import User
+from app.services.ai_settings_service import AISettingsService
 
 log = get_logger(__name__)
 
@@ -161,14 +162,15 @@ class AIRunner:
                 created_at=now,
             )
         )
-        model_alias = resolve_model_alias(self.settings, _pref(user, "model"))
+        byo = await AISettingsService(self.db, self.settings).resolve(user)
+        model_alias = byo.model if byo else resolve_model_alias(self.settings, _pref(user, "model"))
         run = AIRun(
             tenant_id=user.tenant_id,
             user_id=user.id,
             thread_id=thread.id,
             status=RunStatus.running,
             model=model_alias,
-            provider=provider_name(self.settings),
+            provider=byo.label if byo else provider_name(self.settings),
             created_at=now,
             started_at=now,
         )
@@ -261,7 +263,8 @@ class AIRunner:
             "thread_id": str(thread.id),
             "status": run.status.value,
         }
-        model = get_chat_model(run.model, settings=self.settings, script_key=str(user.id))
+        byo = await AISettingsService(self.db, self.settings).resolve(user)
+        model = get_chat_model(run.model, settings=self.settings, script_key=str(user.id), byo=byo)
         # Tool discovery is dynamic: built-ins plus whatever the user's connections offer today.
         from app.services.connection_service import ConnectionService
 

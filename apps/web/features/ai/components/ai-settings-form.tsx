@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { aiApi } from "@/features/ai/api";
+import { UserModelCard } from "@/features/ai/components/user-model-card";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import type { AIPreferences, RiskLevel } from "@/lib/api/types";
 
@@ -53,7 +54,7 @@ export function AISettingsForm() {
         <CardHeader>
           <CardTitle>Assistant</CardTitle>
           <CardDescription>
-            Requests go through the Notely model gateway ({data.provider}); your notes are never used to train models.
+            {data.user_model?.enabled ? `Requests go to your own ${data.user_model.provider} model (${data.user_model.model}).` : `Requests go through the Notely model gateway (${data.provider}).`} Your notes are never used to train models.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -110,6 +111,8 @@ export function AISettingsForm() {
           </form>
         </CardContent>
       </Card>
+
+      <UserModelCard key={data.user_model ? `${data.user_model.provider}:${data.user_model.model}:${data.user_model.enabled}:${data.user_model.key_hint}` : "none"} settings={data} />
 
       <Card>
         <CardHeader>

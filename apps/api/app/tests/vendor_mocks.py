@@ -52,7 +52,10 @@ class VendorMock:
         host = request.url.host or ""
         if self.fail_auth and "token" not in path and "oauth" not in path:
             return _json(401, {"error": "invalid_token"})
-        handler = getattr(self, f"_{self.provider}")
+        name = f"_{self.provider}"
+        if self.provider in ("gmail", "google_calendar", "google_drive"):
+            name = "_google"
+        handler = getattr(self, name)
         response: httpx.Response | None = handler(request, host, path)
         return response if response is not None else _json(404, {"error": f"unmocked {path}"})
 
@@ -212,7 +215,7 @@ class VendorMock:
             form = self._form(r)
             assert form.get("client_secret") == "test-secret"
             return _json(200, {"access_token": "td-token", "token_type": "Bearer"})
-        if r.headers.get("authorization") != "Bearer td-token":
+        if r.headers.get("authorization") not in ("Bearer td-token", "Bearer personal-token-123"):
             return _json(401, {})
         if path == "/rest/v2/projects":
             return _json(200, [{"id": "pr1", "name": "Inbox", "is_inbox_project": True}])
@@ -344,7 +347,10 @@ class VendorMock:
                     "scope": "read:jira-work read:jira-user offline_access",
                 },
             )
-        if r.headers.get("authorization") != "Bearer jira-token":
+        auth_header = r.headers.get("authorization", "")
+        if auth_header != "Bearer jira-token" and not (
+            host.endswith(".atlassian.net") and auth_header.startswith("Basic ")
+        ):
             return _json(401, {})
         if path == "/oauth/token/accessible-resources":
             return _json(
@@ -359,6 +365,12 @@ class VendorMock:
                 ],
             )
         base = "/ex/jira/cloud-1/rest/api/3"
+        if host.endswith(".atlassian.net"):
+            # API-token connections talk to the site directly with Basic auth.
+            auth = r.headers.get("authorization", "")
+            assert auth.startswith("Basic "), "API-token connections must use Basic auth"
+            self.state["jira_basic"] = base64.b64decode(auth[6:]).decode()
+            base = "/rest/api/3"
         if path == f"{base}/myself":
             return _json(200, {"accountId": "acc-1", "displayName": "Ada"})
         if path == f"{base}/project/search":
@@ -612,6 +624,373 @@ class VendorMock:
             )
         return None
 
+    # --- Google (Gmail / Calendar / Drive share the client; one handler dispatches) -----------
+
+    def _google(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if host == "oauth2.googleapis.com" and path == "/token":
+            form = self._form(r)
+            assert form.get("code_verifier"), "Google flow uses PKCE"
+            assert form.get("client_secret") == "test-secret"
+            return _json(
+                200, {"access_token": "g-token", "refresh_token": "g-refresh", "expires_in": 3599}
+            )
+        if r.headers.get("authorization") != "Bearer g-token":
+            return _json(401, {"error": {"code": 401}})
+        if path == "/oauth2/v2/userinfo":
+            return _json(200, {"id": "g1", "email": "ada@acme.io", "name": "Ada"})
+        handler = {
+            "gmail": self._gmail,
+            "google_calendar": self._google_calendar,
+            "google_drive": self._google_drive,
+        }[self.provider]
+        return handler(r, host, path)
+
+    def _gmail(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        base = "/gmail/v1/users/me"
+        if path == f"{base}/profile":
+            return _json(200, {"emailAddress": "ada@acme.io", "messagesTotal": 42})
+        if path == f"{base}/messages" and r.method == "GET":
+            return _json(200, {"messages": [{"id": "m1"}]})
+        if path == f"{base}/messages/m1":
+            return _json(
+                200,
+                {
+                    "id": "m1",
+                    "snippet": "Let's finalize pricing",
+                    "labelIds": ["INBOX"],
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Subject", "value": "Q4 Launch Pricing"},
+                            {"name": "From", "value": "Bob <bob@acme.io>"},
+                            {"name": "Date", "value": "Fri, 19 Sep 2026 10:00:00 +0000"},
+                        ],
+                        "body": {"data": "UGxlYXNlIGZpbmFsaXplIHByaWNpbmcgYnkgRnJpZGF5Lg"},
+                    },
+                },
+            )
+        if path == f"{base}/drafts" and r.method == "POST":
+            assert r_json(r)["message"]["raw"]
+            return _json(200, {"id": "d1", "message": {"id": "m9"}})
+        if path == f"{base}/drafts/d1":
+            return _json(200, {"id": "d1"})
+        if path == f"{base}/messages/send" and r.method == "POST":
+            return _json(200, {"id": "m9", "labelIds": ["SENT"]})
+        if path == f"{base}/messages/m9":
+            return _json(200, {"id": "m9", "labelIds": ["SENT"]})
+        return None
+
+    def _google_calendar(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        base = "/calendar/v3"
+        if path == f"{base}/calendars/primary":
+            return _json(200, {"id": "primary", "summary": "ada@acme.io"})
+        if path == f"{base}/calendars/primary/events" and r.method == "GET":
+            return _json(
+                200,
+                {
+                    "items": [
+                        {
+                            "id": "e1",
+                            "summary": "Pricing review",
+                            "start": {"dateTime": "2026-09-22T10:00:00Z"},
+                            "end": {"dateTime": "2026-09-22T10:30:00Z"},
+                            "htmlLink": "https://calendar.google.com/e1",
+                            "updated": "2026-09-19T00:00:00Z",
+                        }
+                    ]
+                },
+            )
+        if path == f"{base}/calendars/primary/events" and r.method == "POST":
+            self.state["gcal_summary"] = r_json(r)["summary"]
+            return _json(200, {"id": "e2", "htmlLink": "https://calendar.google.com/e2"})
+        if path == f"{base}/calendars/primary/events/e2":
+            return _json(
+                200, {"id": "e2", "status": "confirmed", "summary": self.state.get("gcal_summary")}
+            )
+        return None
+
+    def _google_drive(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if path == "/drive/v3/about":
+            return _json(200, {"user": {"emailAddress": "ada@acme.io"}})
+        if path == "/drive/v3/files" and r.method == "GET":
+            return _json(
+                200,
+                {
+                    "files": [
+                        {
+                            "id": "f1",
+                            "name": "Pricing plan",
+                            "mimeType": "application/vnd.google-apps.document",
+                            "modifiedTime": "2026-09-19T00:00:00Z",
+                            "webViewLink": "https://docs.google.com/f1",
+                        }
+                    ]
+                },
+            )
+        if path == "/drive/v3/files/f1" and r.url.params.get("alt") != "media":
+            return _json(
+                200,
+                {
+                    "id": "f1",
+                    "name": "Pricing plan",
+                    "mimeType": "application/vnd.google-apps.document",
+                    "webViewLink": "https://docs.google.com/f1",
+                },
+            )
+        if path == "/drive/v3/files/f1/export":
+            return httpx.Response(200, content=b"# Pricing plan\nFinalize by Friday.")
+        if host == "www.googleapis.com" and path == "/upload/drive/v3/files":
+            assert "multipart/related" in r.headers.get("content-type", "")
+            self.state["gdrive_name"] = json.loads(
+                r.content.split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
+            )["name"]
+            return _json(
+                200,
+                {
+                    "id": "f2",
+                    "name": self.state["gdrive_name"],
+                    "webViewLink": "https://drive.google.com/f2",
+                },
+            )
+        if path == "/drive/v3/files/f2":
+            return _json(200, {"id": "f2", "name": self.state.get("gdrive_name"), "trashed": False})
+        return None
+
+    # --- Linear (GraphQL) -------------------------------------------------------------------------
+
+    def _linear(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if host == "api.linear.app" and path == "/oauth/token":
+            form = self._form(r)
+            assert form.get("client_secret") == "test-secret"
+            return _json(
+                200, {"access_token": "lin-token", "token_type": "Bearer", "scope": "read,write"}
+            )
+        auth = r.headers.get("authorization", "")
+        if auth not in ("Bearer lin-token", "lin_api_personal"):
+            return _json(401, {"errors": [{"message": "Authentication required"}]})
+        if path != "/graphql":
+            return None
+        body = r_json(r)
+        query, variables = body.get("query", ""), body.get("variables", {})
+        issue = {
+            "id": "iss-1",
+            "identifier": "ENG-42",
+            "title": "Pricing page",
+            "description": "Finalize the pricing page.",
+            "url": "https://linear.app/acme/issue/ENG-42",
+            "priority": 2,
+            "updatedAt": "2026-09-19T00:00:00Z",
+            "state": {"name": "Todo", "type": "unstarted"},
+            "assignee": {"name": "Ada"},
+            "team": {"id": "team-1", "key": "ENG", "name": "Engineering"},
+        }
+        if "viewer {" in query and "assignedIssues" not in query:
+            return _json(
+                200,
+                {
+                    "data": {
+                        "viewer": {
+                            "id": "u1",
+                            "name": "Ada",
+                            "email": "ada@acme.io",
+                            "organization": {"name": "Acme"},
+                        }
+                    }
+                },
+            )
+        if query.strip().startswith("{ teams"):
+            return _json(
+                200,
+                {
+                    "data": {
+                        "teams": {"nodes": [{"id": "team-1", "key": "ENG", "name": "Engineering"}]}
+                    }
+                },
+            )
+        if "issues(filter" in query:
+            return _json(200, {"data": {"issues": {"nodes": [issue]}}})
+        if "assignedIssues" in query:
+            return _json(200, {"data": {"viewer": {"assignedIssues": {"nodes": [issue]}}}})
+        if "teams(filter" in query:
+            return _json(200, {"data": {"teams": {"nodes": [{"id": "team-1", "key": "ENG"}]}}})
+        if "issueCreate" in query:
+            self.state["linear_title"] = variables["input"]["title"]
+            created = {
+                **issue,
+                "id": "iss-2",
+                "identifier": "ENG-43",
+                "title": self.state["linear_title"],
+            }
+            return _json(200, {"data": {"issueCreate": {"success": True, "issue": created}}})
+        if "commentCreate" in query:
+            return _json(
+                200,
+                {
+                    "data": {
+                        "commentCreate": {
+                            "success": True,
+                            "comment": {"id": "c1", "url": "https://linear.app/c1"},
+                        }
+                    }
+                },
+            )
+        if "comment(id" in query:
+            return _json(200, {"data": {"comment": {"id": "c1"}}})
+        if "issue(id" in query:
+            ref = variables.get("id")
+            if ref in ("iss-2", "ENG-43"):
+                return _json(
+                    200,
+                    {
+                        "data": {
+                            "issue": {
+                                **issue,
+                                "id": "iss-2",
+                                "identifier": "ENG-43",
+                                "title": self.state.get("linear_title"),
+                            }
+                        }
+                    },
+                )
+            return _json(200, {"data": {"issue": issue}})
+        return _json(200, {"errors": [{"message": f"unmocked query {query[:40]}"}]})
+
+    # --- ClickUp ----------------------------------------------------------------------------------
+
+    def _clickup(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if path == "/api/v2/oauth/token":
+            return _json(200, {"access_token": "cu-token", "token_type": "Bearer"})
+        if r.headers.get("authorization") not in ("cu-token", "pk_personal"):
+            return _json(401, {"err": "Token invalid", "ECODE": "OAUTH_019"})
+        base = "/api/v2"
+        task = {
+            "id": "task-1",
+            "name": "Finalize pricing",
+            "description": "Pricing page",
+            "status": {"status": "to do"},
+            "list": {"id": "list-1", "name": "Launch"},
+            "url": "https://app.clickup.com/t/task-1",
+        }
+        if path == f"{base}/user":
+            return _json(200, {"user": {"id": 7, "username": "ada", "email": "ada@acme.io"}})
+        if path == f"{base}/team":
+            return _json(200, {"teams": [{"id": "9", "name": "Acme"}]})
+        if path == f"{base}/team/9/space":
+            return _json(200, {"spaces": [{"id": "sp-1", "name": "Product"}]})
+        if path == f"{base}/space/sp-1/list":
+            return _json(200, {"lists": [{"id": "list-1", "name": "Launch"}]})
+        if path == f"{base}/space/sp-1/folder":
+            return _json(200, {"folders": []})
+        if path == f"{base}/team/9/task":
+            return _json(200, {"tasks": [task]})
+        if path == f"{base}/task/task-1" and r.method == "GET":
+            return _json(200, {**task, "status": {"status": self.state.get("cu_status", "to do")}})
+        if path == f"{base}/task/task-1" and r.method == "PUT":
+            self.state["cu_status"] = r_json(r).get("status", "to do")
+            return _json(200, {**task, "status": {"status": self.state["cu_status"]}})
+        if path == f"{base}/list/list-1/task" and r.method == "POST":
+            self.state["cu_name"] = r_json(r)["name"]
+            return _json(
+                200,
+                {
+                    "id": "task-2",
+                    "name": self.state["cu_name"],
+                    "url": "https://app.clickup.com/t/task-2",
+                },
+            )
+        if path == f"{base}/task/task-2":
+            return _json(
+                200,
+                {"id": "task-2", "name": self.state.get("cu_name"), "status": {"status": "to do"}},
+            )
+        return None
+
+    # --- Trello (key + token as query params) -----------------------------------------------------
+
+    def _trello(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        params = r.url.params
+        if params.get("key") != "trello-key" or params.get("token") != "trello-token":
+            return httpx.Response(401, text="invalid key")
+        card = {
+            "id": "card-1",
+            "name": "Finalize pricing",
+            "desc": "Pricing page",
+            "shortUrl": "https://trello.com/c/card-1",
+            "dateLastActivity": "2026-09-19T00:00:00Z",
+            "closed": False,
+        }
+        if path == "/1/members/me":
+            return _json(200, {"id": "me-1", "fullName": "Ada Lovelace", "username": "ada"})
+        if path == "/1/members/me/boards":
+            return _json(
+                200, [{"id": "b1", "name": "Launch", "lists": [{"id": "l1", "name": "To do"}]}]
+            )
+        if path == "/1/search":
+            return _json(200, {"cards": [card]})
+        if path == "/1/cards/card-1":
+            return _json(200, card)
+        if path == "/1/cards" and r.method == "POST":
+            self.state["trello_name"] = params.get("name")
+            return _json(200, {"id": "card-2", "shortUrl": "https://trello.com/c/card-2"})
+        if path == "/1/cards/card-2":
+            return _json(
+                200, {"id": "card-2", "name": self.state.get("trello_name"), "closed": False}
+            )
+        return None
+
+    # --- OneDrive (Graph) -------------------------------------------------------------------------
+
+    def _onedrive(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        common = self._microsoft(r, host, path)
+        if common is not None:
+            return common
+        if path == "/v1.0/me/drive":
+            return _json(200, {"id": "drv", "driveType": "personal"})
+        if path.startswith("/v1.0/me/drive/root/search("):
+            return _json(
+                200,
+                {
+                    "value": [
+                        {
+                            "id": "it-1",
+                            "name": "pricing.md",
+                            "size": 12,
+                            "file": {},
+                            "webUrl": "https://onedrive.live.com/it-1",
+                            "lastModifiedDateTime": "2026-09-19T00:00:00Z",
+                            "parentReference": {"path": "/drive/root:/Docs"},
+                        }
+                    ]
+                },
+            )
+        if path == "/v1.0/me/drive/root/children":
+            return _json(200, {"value": [{"id": "it-1", "name": "pricing.md", "file": {}}]})
+        if path == "/v1.0/me/drive/items/it-1":
+            return _json(
+                200,
+                {
+                    "id": "it-1",
+                    "name": "pricing.md",
+                    "webUrl": "https://onedrive.live.com/it-1",
+                    "file": {},
+                },
+            )
+        if path == "/v1.0/me/drive/items/it-1/content":
+            return httpx.Response(200, content=b"# Pricing\nFinalize by Friday.")
+        if (
+            path.startswith("/v1.0/me/drive/root:/")
+            and path.endswith(":/content")
+            and r.method == "PUT"
+        ):
+            self.state["od_size"] = len(r.content)
+            return _json(
+                201,
+                {"id": "it-2", "webUrl": "https://onedrive.live.com/it-2", "size": len(r.content)},
+            )
+        if path == "/v1.0/me/drive/items/it-2":
+            return _json(200, {"id": "it-2", "size": self.state.get("od_size")})
+        return None
+
 
 def combined_transport(mocks: dict[str, VendorMock]) -> httpx.MockTransport:
     """Route token-endpoint traffic (which has no provider id) to the right vendor by host."""
@@ -623,16 +1002,30 @@ def combined_transport(mocks: dict[str, VendorMock]) -> httpx.MockTransport:
         "app.asana.com": "asana",
         "auth.atlassian.com": "jira",
         "api.atlassian.com": "jira",
+        "acme.atlassian.net": "jira",
         "login.microsoftonline.com": "microsoft",
         "graph.microsoft.com": "microsoft",
         "api.dropboxapi.com": "dropbox",
         "content.dropboxapi.com": "dropbox",
+        "accounts.google.com": "google",
+        "oauth2.googleapis.com": "google",
+        "www.googleapis.com": "google",
+        "gmail.googleapis.com": "google",
+        "linear.app": "linear",
+        "api.linear.app": "linear",
+        "app.clickup.com": "clickup",
+        "api.clickup.com": "clickup",
+        "api.trello.com": "trello",
+    }
+    families = {
+        "microsoft": ("microsoft_teams", "outlook", "onedrive"),
+        "google": ("gmail", "google_calendar", "google_drive"),
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
         vendor = hosts.get(request.url.host or "")
-        if vendor == "microsoft":
-            mock = mocks.get("microsoft_teams") or mocks.get("outlook")
+        if vendor in families:
+            mock = next((mocks[p] for p in families[vendor] if p in mocks), None)
         else:
             mock = mocks.get(vendor or "")
         if mock is None:

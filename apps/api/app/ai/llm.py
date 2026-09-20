@@ -18,6 +18,7 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 
+from app.ai.byo import BYOModel, build_model
 from app.core.config import Settings, get_settings
 
 # Every prompt the fake model received, for assertions about what reached the model.
@@ -62,12 +63,19 @@ def get_chat_model(
     settings: Settings | None = None,
     temperature: float = 0.2,
     script_key: str | None = None,
+    byo: BYOModel | None = None,
 ) -> BaseChatModel:
+    """The model to run with: the scripted model in tests/dev, else the user's own provider
+    (`byo`) when they configured one, else the workspace LiteLLM gateway."""
     settings = settings or get_settings()
     if settings.ai_provider == "fake":
         if settings.is_production:
             raise RuntimeError("fake AI provider is not permitted in production")
         return ScriptedChatModel(responses=_script_for(script_key))
+    if byo is not None:
+        return build_model(
+            byo, temperature=temperature, timeout=settings.ai_request_timeout_seconds
+        )
     return ChatOpenAI(
         model=model or settings.ai_model_default,
         base_url=settings.litellm_api_base.rstrip("/"),

@@ -119,19 +119,37 @@ test("a wrong token yields a categorised error and an error status", async ({ pa
   await expect(page.getByText("Connection error")).toBeVisible();
 });
 
-test("marketplace shows the MVP providers grouped by category, unavailable until configured", async ({ page }) => {
+test("marketplace lists every provider; OAuth-less deployments still offer a personal-token path", async ({ page }) => {
   await signup(page);
   await page.goto("/app/settings/connections");
-  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "MCP server"]) {
+  for (const name of ["Slack", "Notion", "Todoist", "Asana", "Jira", "Microsoft Teams", "Outlook", "Dropbox", "Gmail", "Google Calendar", "Google Drive", "OneDrive", "Linear", "ClickUp", "Trello", "MCP server"]) {
     await expect(page.getByRole("link", { name: new RegExp(`^${name}\\b`) })).toBeVisible();
   }
   for (const heading of ["Communication", "Notes & Knowledge", "Tasks", "Project management", "Email & Calendar", "Storage", "Developer"]) {
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
   }
-  const slack = page.getByRole("link", { name: /^Slack\b/ });
-  await expect(slack.getByText("Not available on this deployment")).toBeVisible();
-  await slack.click();
-  await expect(page.getByText(/isn't configured on this Notely deployment yet/)).toBeVisible();
+  // No vendor OAuth app is registered locally: Teams/Outlook/Gmail have no way in yet ...
+  await expect(page.getByRole("link", { name: /^Microsoft Teams\b/ }).getByText("Not available on this deployment")).toBeVisible();
+  // ... but Todoist offers its API token.
+  const todoist = page.getByRole("link", { name: /^Todoist\b/ });
+  await expect(todoist.getByText("Connect with an api token")).toBeVisible();
+  await todoist.click();
+  await expect(page.getByText(/you can connect with an api token in a minute/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Search messages")).toBeVisible(); // permissions are still explained
+  await page.getByRole("button", { name: "Connect with a token" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Where to get an api token")).toBeVisible();
+  await expect(dialog.getByText(/Settings → Integrations → Developer/)).toBeVisible();
+  await expect(dialog.getByRole("link", { name: /Open Todoist settings/ })).toHaveAttribute("href", /todoist\.com/);
+  // Submitting without a token is caught before anything leaves the browser's tab.
+  await dialog.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Required");
+  await page.keyboard.press("Escape");
+
+  // Jira's token path needs a site URL and account email as well.
+  await page.goto("/app/settings/connections/jira");
+  await page.getByRole("button", { name: "Connect with a token" }).click();
+  await expect(page.getByRole("dialog").getByLabel("Site URL")).toBeVisible();
+  await expect(page.getByRole("dialog").getByLabel("Atlassian account email")).toBeVisible();
+  await expect(page.getByRole("dialog").getByLabel("API token")).toBeVisible();
 });

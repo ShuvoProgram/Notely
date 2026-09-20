@@ -9,6 +9,13 @@ export const PROVIDER_LABELS: Record<string, string> = {
   microsoft_teams: "Teams",
   outlook: "Outlook",
   dropbox: "Dropbox",
+  gmail: "Gmail",
+  google_calendar: "Google Calendar",
+  google_drive: "Google Drive",
+  onedrive: "OneDrive",
+  linear: "Linear",
+  clickup: "ClickUp",
+  trello: "Trello",
   mcp_server: "MCP server",
 };
 

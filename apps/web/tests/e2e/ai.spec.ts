@@ -176,3 +176,30 @@ test("cross-app request: plan is shown and ticked off, writes are verified after
   await expect(page.getByText("Checked: create_task")).toBeVisible();
   await expect(page.getByText("verified", { exact: true })).toBeVisible();
 });
+
+test("AI settings: bring your own model is saved encrypted, tested for real, and switched off again", async ({ page }) => {
+  await signup(page);
+  await page.goto("/app/settings/ai");
+  await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
+
+  await page.getByLabel("Provider").selectOption("openai_compatible");
+  await expect(page.getByLabel("Base URL")).toHaveValue("http://localhost:11434/v1");
+  await page.getByLabel("Base URL").fill("http://127.0.0.1:1/v1"); // nothing listens here
+  await page.locator("#byo-model").fill("llama3.1");
+  await page.getByLabel("API key").fill("sk-local-test-key-9876");
+  await page.getByRole("button", { name: "Save model" }).click();
+  await expect(page.getByText("In use")).toBeVisible();
+  await expect(page.getByText(/key …9876/)).toBeVisible();
+  await expect(page.getByText(/Requests go to your own openai_compatible model \(llama3\.1\)/)).toBeVisible();
+  // The key never comes back: the field is empty and only the hint is shown.
+  await expect(page.getByLabel("API key")).toHaveValue("");
+  await expect(page.getByLabel("API key")).toHaveAttribute("placeholder", /Stored \(…9876\)/);
+
+  // A real test against a dead endpoint fails with a categorised message, not a stack trace.
+  await page.getByRole("button", { name: "Test" }).click();
+  await expect(page.getByRole("status")).toContainText(/Failed: Could not reach the provider/, { timeout: 30_000 });
+  await expect(page.getByText("Last test failed")).toBeVisible();
+
+  await page.getByRole("button", { name: "Remove key" }).click();
+  await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
+});

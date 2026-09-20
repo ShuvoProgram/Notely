@@ -184,6 +184,27 @@ All vendor content returned to the model goes through `untrusted()`; list-style 
 too. Auth failures (401 / `invalid_auth`) mark the connection `expired`, hide its tools, and are
 surfaced per source in search.
 
+**Personal-token connect.** `ProviderManifest.token_auth: TokenAuthSpec` (label, help,
+help URL, extra non-secret fields) declares that a vendor accepts user-issued tokens.
+`IntegrationProvider.connect_methods(settings)` returns `oauth` / `token` / `config` for the
+deployment, the marketplace and detail page render accordingly, and
+`ConnectionService.connect_with_config` stores the token (auth_type `token`, all permissions
+assumed granted, no refresh). `RestOAuthProvider.token_scheme` (`bearer` | `raw` | `basic`)
+decides how the token is sent; Jira's basic scheme also switches the API base to the user's
+site. Adapters with token support: Slack, Notion, Todoist, Asana, Jira, Dropbox, Linear,
+ClickUp; Trello is token-only.
+
+**More adapters.** Gmail / Google Calendar / Google Drive (`integrations/google/`, one Google
+client, per-product scopes), OneDrive (Graph base), Linear (GraphQL through `_gql`, the PRD's
+"GraphQL provider" shape), ClickUp (bare-token auth), Trello (key + token as query params via a
+small `ProviderHttpClient` subclass). All follow the same read/verify/write pattern.
+
+**Bring your own model.** `user_ai_settings` (0007) holds a user's provider, model, base URL and
+Fernet-encrypted key; `AISettingsService.resolve()` turns it into a `BYOModel` and
+`get_chat_model(byo=…)` builds a vendor client (`app/ai/byo.py`: OpenAI/compatible, Anthropic,
+Gemini). Runs record `provider="byo:<vendor>"`. `/ai/settings/model` (PUT/DELETE) and
+`/ai/settings/model/test` (real tiny completion, categorised errors) back the settings card.
+
 **Unified search** (`app/services/search_service.py`): `/api/v1/search` queries notes first, then
 every usable connection concurrently with a 6 s per-provider timeout. Results carry `source`,
 `kind`, `id`, `url`; the response also lists `sources` with `ok`/`count`/`error` so the UI can show

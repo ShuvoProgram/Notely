@@ -100,11 +100,42 @@ class AIPreferences(BaseModel):
     confirm_reads: bool = False
 
 
+class UserModelOut(BaseModel):
+    """The user's own model configuration. The key itself is never included."""
+
+    provider: str
+    model: str
+    base_url: str | None
+    key_hint: str
+    enabled: bool
+    verified_at: datetime | None
+    last_error: str | None
+
+
+class UserModelIn(BaseModel):
+    provider: str = Field(max_length=40)
+    model: str = Field(min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, max_length=500)
+    # Write-only. Omit (or send empty) to keep the stored key.
+    api_key: str | None = Field(default=None, max_length=500)
+    enabled: bool = True
+
+
+class ModelTestOut(BaseModel):
+    ok: bool
+    detail: str
+    latency_ms: int | None
+
+
 class AISettingsOut(BaseModel):
     provider: str
     models: list[dict[str, str]]
     preferences: AIPreferences
     tools: list[dict[str, str]]
+    # Bring your own key
+    user_model: UserModelOut | None = None
+    user_model_providers: list[dict[str, Any]] = Field(default_factory=list)
+    encryption_available: bool = True
 
 
 class AuditEventOut(BaseModel):

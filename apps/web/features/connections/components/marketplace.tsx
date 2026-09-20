@@ -101,6 +101,10 @@ export function Marketplace() {
   );
 }
 
+function aOrAn(label: string) {
+  return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label.toLowerCase()}`;
+}
+
 function ProviderCard({ provider }: { provider: Provider }) {
   const conn = provider.connection;
   return (
@@ -114,8 +118,10 @@ function ProviderCard({ provider }: { provider: Provider }) {
           <p className="truncate text-sm font-medium">{provider.name}</p>
           <p className="truncate text-xs text-muted-foreground">{provider.description}</p>
           <div className="mt-2">
-            {!provider.configured ? (
+            {provider.connect_methods.length === 0 ? (
               <p className="text-xs text-muted-foreground">Not available on this deployment</p>
+            ) : provider.auth === "oauth2" && !provider.configured && !conn ? (
+              <p className="text-xs text-muted-foreground">Connect with {provider.token_auth ? aOrAn(provider.token_auth.label) : "a token"}</p>
             ) : (
               <ConnectionStatusBadge status={conn?.status ?? "none"} lastChecked={conn?.last_checked_at} lastError={conn?.last_error} />
             )}

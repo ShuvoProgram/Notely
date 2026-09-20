@@ -51,6 +51,9 @@ class RestOAuthProvider(IntegrationProvider):
     api_base: str = ""
     api_headers: dict[str, str] = {}
     token_parser: Callable[[dict[str, Any]], OAuthTokens] | None = None
+    # How a user-issued token is sent: "bearer" (Authorization: Bearer), "raw" (Authorization:
+    # <token>, e.g. Linear/ClickUp) or "basic" (adapter supplies the username via `basic_user`).
+    token_scheme: str = "bearer"
 
     # --- configuration ----------------------------------------------------------------------
 
@@ -82,16 +85,34 @@ class RestOAuthProvider(IntegrationProvider):
     # --- HTTP -----------------------------------------------------------------------------------
 
     def http(self, ctx: ProviderContext, base_url: str | None = None) -> ProviderHttpClient:
-        if not ctx.credentials.access_token:
+        token = ctx.credentials.access_token
+        if not token:
             raise ProviderError(
                 ProviderErrorKind.expired, "no access token", provider=self.manifest.id
             )
+        headers = dict(self.api_headers)
+        bearer: str | None = token
+        basic: tuple[str, str] | None = None
+        if self.is_token_connection(ctx):
+            if self.token_scheme == "raw":
+                bearer, headers["Authorization"] = None, token
+            elif self.token_scheme == "basic":
+                bearer, basic = None, (self.basic_user(ctx), token)
         return ProviderHttpClient(
             provider=self.manifest.id,
             base_url=base_url or self.api_base,
-            bearer_token=ctx.credentials.access_token,
-            headers=self.api_headers,
+            bearer_token=bearer,
+            basic_auth=basic,
+            headers=headers,
         )
+
+    @staticmethod
+    def is_token_connection(ctx: ProviderContext) -> bool:
+        return ctx.connection.auth_type == "token"
+
+    def basic_user(self, ctx: ProviderContext) -> str:  # noqa: ARG002
+        """Username for `token_scheme = "basic"` (e.g. the Atlassian account email)."""
+        raise NotImplementedError
 
     # --- lifecycle ------------------------------------------------------------------------------
 

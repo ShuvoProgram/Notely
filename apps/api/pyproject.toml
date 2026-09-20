@@ -30,6 +30,8 @@ dependencies = [
   "mcp>=1.10",
   "jsonschema>=4.23",
   "prometheus-client>=0.20",
+  "langchain-anthropic>=0.3",
+  "langchain-google-genai>=2.1",
 ]
 
 [dependency-groups]

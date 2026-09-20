@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     oauth_jira_client_secret: str = ""
     oauth_dropbox_client_id: str = ""
     oauth_dropbox_client_secret: str = ""
+    # Gmail / Google Calendar / Google Drive reuse the Google sign-in client (oauth_google_*).
+    oauth_linear_client_id: str = ""
+    oauth_linear_client_secret: str = ""
+    oauth_clickup_client_id: str = ""
+    oauth_clickup_client_secret: str = ""
 
     # AI. The application only ever talks to the LiteLLM gateway (OpenAI-compatible).
     ai_provider: Literal["litellm", "fake"] = "litellm"  # "fake" = scripted, dev/test only

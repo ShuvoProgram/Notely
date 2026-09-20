@@ -5,7 +5,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, Index, Numeric, String, Text, Uuid
+from sqlalchemy import (
+    Boolean,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
@@ -185,6 +195,23 @@ class AIApproval(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
 
     run: Mapped[AIRun] = relationship(back_populates="approvals")
+
+
+class UserAISetting(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
+    """A user's own model provider + API key (bring your own key). One row per user; the key is
+    Fernet-encrypted with ENCRYPTION_KEY and only a hint is ever shown."""
+
+    __tablename__ = "user_ai_settings"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_ai_settings_user"),)
+
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_hint: Mapped[str] = mapped_column(String(12), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    verified_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AuditEvent(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):

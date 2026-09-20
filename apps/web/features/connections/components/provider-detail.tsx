@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ExternalLink, Loader2, RefreshCw, Stethoscope, Unplug, XCircle } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, KeyRound, Loader2, RefreshCw, Stethoscope, Unplug, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -17,7 +17,7 @@ import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
 import { ConnectionStatusBadge, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
-import type { ConnectionTestResult } from "@/lib/api/types";
+import type { ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
 
 const CALLBACK_ERRORS: Record<string, string> = {
   OAUTH_STATE_INVALID: "The sign-in request expired or was tampered with. Please try again.",
@@ -30,7 +30,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   const params = useSearchParams();
   const queryClient = useQueryClient();
   const detail = useQuery({ queryKey: ["integrations", "provider", providerId], queryFn: () => connectionsApi.provider(providerId) });
-  const [connectOpen, setConnectOpen] = React.useState(false);
+  const [connectMethod, setConnectMethod] = React.useState<ConnectMethod | null>(null);
   const [disconnectStep, setDisconnectStep] = React.useState<0 | 1 | 2>(0);
   const [purge, setPurge] = React.useState(false);
   const [testResult, setTestResult] = React.useState<ConnectionTestResult | null>(null);
@@ -79,6 +79,10 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   }
   const p = detail.data;
   const conn = p.connection && p.connection.status !== "disconnected" ? p.connection : null;
+  const canOAuth = p.connect_methods.includes("oauth");
+  const canToken = p.connect_methods.includes("token");
+  const canConfig = p.connect_methods.includes("config");
+  const aOrAn = (label: string) => `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label.toLowerCase()}`;
   const attention = conn && (conn.status === "expired" || conn.status === "needs_attention" || conn.status === "error");
 
   return (
@@ -103,19 +107,33 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
             ) : null}
           </p>
           <div className="mt-3">
-            {!p.configured ? (
-              <p className="text-sm text-muted-foreground">{p.name} isn&apos;t configured on this Notely deployment yet.</p>
+            {conn ? (
+              <ConnectionStatusBadge status={conn.status} lastChecked={conn.last_checked_at} lastError={conn.last_error} />
+            ) : canOAuth || canConfig || (canToken && p.auth !== "oauth2") ? (
+              <ConnectionStatusBadge status="none" lastChecked={null} lastError={null} />
+            ) : canToken ? (
+              <p className="text-sm text-muted-foreground">
+                Sign-in with {p.name} isn&apos;t set up on this Notely deployment, but you can connect with {aOrAn(p.token_auth?.label ?? "token")} in a minute.
+              </p>
             ) : (
-              <ConnectionStatusBadge status={conn?.status ?? "none"} lastChecked={conn?.last_checked_at} lastError={conn?.last_error} />
+              <p className="text-sm text-muted-foreground">
+                {p.name} isn&apos;t configured on this Notely deployment yet. An administrator needs to register an OAuth app and set its client id and secret.
+              </p>
             )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!conn && p.configured ? <Button onClick={() => setConnectOpen(true)}>Connect</Button> : null}
+          {!conn && p.auth !== "oauth2" && (canToken || canConfig) ? <Button onClick={() => setConnectMethod(canToken ? "token" : "config")}>Connect</Button> : null}
+          {!conn && p.auth === "oauth2" && canOAuth ? <Button onClick={() => setConnectMethod("oauth")}>Connect</Button> : null}
+          {!conn && p.auth === "oauth2" && canToken ? (
+            <Button variant={canOAuth ? "outline" : "default"} onClick={() => setConnectMethod("token")}>
+              <KeyRound aria-hidden /> {canOAuth ? `Use ${aOrAn(p.token_auth?.label ?? "token")}` : "Connect with a token"}
+            </Button>
+          ) : null}
           {conn ? (
             <>
               {attention ? (
-                <Button onClick={() => setConnectOpen(true)}>
+                <Button onClick={() => setConnectMethod(conn.auth_type === "token" ? "token" : canOAuth ? "oauth" : canToken ? "token" : "config")}>
                   <RefreshCw aria-hidden /> {conn.status === "expired" ? "Reconnect" : "Fix"}
                 </Button>
               ) : null}
@@ -247,7 +265,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
         ) : null}
       </div>
 
-      {p.configured ? <ConnectDialog key={connectOpen ? "open" : "closed"} provider={p} open={connectOpen} onOpenChange={setConnectOpen} reconnect={Boolean(conn)} /> : null}
+      {connectMethod ? <ConnectDialog key={connectMethod} provider={p} method={connectMethod} open onOpenChange={(o) => !o && setConnectMethod(null)} reconnect={Boolean(conn)} /> : null}
 
       <Dialog open={disconnectStep === 1} onOpenChange={(o) => !o && setDisconnectStep(0)}>
         <DialogContent>
