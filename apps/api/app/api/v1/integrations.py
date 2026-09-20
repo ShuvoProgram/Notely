@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse
@@ -258,7 +259,11 @@ async def oauth_callback(
         page = exc.details.get("provider_id") if isinstance(exc.details, dict) else None
         if page:
             target = f"{settings.frontend_origin}/app/settings/connections/{page}"
-        return RedirectResponse(f"{target}?error={exc.code}", status_code=status.HTTP_302_FOUND)
+        reason = exc.details.get("reason") if isinstance(exc.details, dict) else None
+        suffix = f"&reason={quote(str(reason))}" if reason else ""
+        return RedirectResponse(
+            f"{target}?error={exc.code}{suffix}", status_code=status.HTTP_302_FOUND
+        )
     target = f"{settings.frontend_origin}/app/settings/connections/{conn.provider}"
     return RedirectResponse(f"{target}?connected=1", status_code=status.HTTP_302_FOUND)
 

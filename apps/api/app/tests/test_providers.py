@@ -431,3 +431,25 @@ def test_vendor_payload_shapes() -> None:
 
     with pytest.raises(OAuthExchangeFailed):
         parse_slack_tokens({"ok": False, "error": "invalid_code"})
+
+
+@pytest.mark.parametrize("vendor", ["gmail"], indirect=True)
+async def test_google_access_denied_explains_testing_mode(client: Any, vendor: VendorMock) -> None:
+    """Google's consent screen in *Testing* status sends non-test users back with
+    `access_denied` (the "has not completed the Google verification process" page). The
+    connection records why, and the redirect carries the vendor reason, so the user isn't left
+    retrying something only the operator can fix (publishing the app)."""
+    await signup(client)
+    start = (await client.get("/api/v1/oauth/gmail/start-url")).json()["data"]["authorize_url"]
+    state = parse_qs(urlparse(start).query)["state"][0]
+    resp = await client.get(
+        "/api/v1/oauth/google/callback", params={"error": "access_denied", "state": state}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == (
+        "http://localhost:3000/app/settings/connections/gmail"
+        "?error=PROVIDER_AUTH_FAILED&reason=access_denied"
+    )
+    conn = (await client.get("/api/v1/integrations/providers/gmail")).json()["data"]["connection"]
+    assert conn["status"] == "error" and conn["last_error_code"] == "auth_failed"
+    assert "testing mode" in conn["last_error"] and "publish" in conn["last_error"]

@@ -81,6 +81,26 @@ def status_from_error(error: ProviderError) -> ConnectionStatus:
 MCP_AUTH = "mcp"
 
 
+def denial_message(provider: IntegrationProvider, error: str | None) -> str:
+    """What to record when the vendor sends the user back without a code. Google (and Microsoft)
+    return the same `access_denied` whether the user pressed Cancel or the deployment's app is
+    still in *Testing* on the vendor's console — say so, because only an operator can fix the
+    latter and the user would otherwise keep retrying."""
+    vendor = callback_slot(provider)
+    if error == "access_denied" and vendor in ("google", "microsoft"):
+        console = "Google Cloud Console" if vendor == "google" else "the Microsoft Entra portal"
+        return (
+            f"{provider.manifest.name} refused the request (access_denied). If you cancelled, "
+            "just try again. If you saw “Access blocked: Notely has not completed the "
+            f"verification process”, this deployment's app is still in testing mode on {console}"
+            " and only listed test users can connect — the administrator needs to publish it "
+            "(docs/oauth-setup.md)."
+        )
+    if error == "access_denied":
+        return "Access wasn't granted on the vendor's screen."
+    return f"The vendor returned {error or 'no authorization code'}."
+
+
 class ConnectionService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self.db = db
@@ -412,7 +432,14 @@ class ConnectionService:
                 ),
                 status=ConnectionStatus.error,
             )
-            raise ProviderError(ProviderErrorKind.auth_failed, provider=provider_id).as_api_error()
+            conn.last_error = denial_message(provider, error)
+            await self.db.commit()
+            api_error = ProviderError(
+                ProviderErrorKind.auth_failed, provider=provider_id
+            ).as_api_error()
+            # The vendor's own error code rides along so the page can say what actually happened.
+            api_error.details["reason"] = error or "denied"
+            raise api_error
         try:
             tokens = await client.exchange_code(code, record.get("verifier"))
         except Exception:

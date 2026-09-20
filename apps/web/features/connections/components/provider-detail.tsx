@@ -41,7 +41,11 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
     const connected = params.get("connected");
     if (!error && !connected) return;
     if (connected) toast.success("Connected");
-    if (error) toast.error(CALLBACK_ERRORS[error] ?? "This action couldn't be completed. Review the details and try again.");
+    if (error === "PROVIDER_AUTH_FAILED" && params.get("reason") === "access_denied" && /^(gmail|google_|teams|outlook|onedrive)/.test(providerId)) {
+      // Google/Microsoft send the same code for "user cancelled" and "app still in testing mode
+      // on the vendor console"; the server stored the full explanation on the connection.
+      toast.error("Access was refused by the vendor. If you saw “Access blocked … verification process”, this deployment's app is still in testing mode — see the status below.", { duration: 12_000 });
+    } else if (error) toast.error(CALLBACK_ERRORS[error] ?? "This action couldn't be completed. Review the details and try again.");
     queryClient.invalidateQueries({ queryKey: ["integrations"] });
     router.replace(`/app/settings/connections/${providerId}`);
   }, [params, providerId, queryClient, router]);

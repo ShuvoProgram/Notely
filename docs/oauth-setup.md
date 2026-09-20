@@ -68,6 +68,27 @@ None of this is code: Notely's requests are already shaped for a published app (
 `access_type=offline` + `prompt=consent` for refresh tokens, `include_granted_scopes`, minimal
 per-connector scopes chosen by the user on the consent card).
 
+### "Access blocked: Notely has not completed the Google verification process" (403 access_denied)
+
+This is not produced by Notely; it is Google's **Testing** publishing status. Only accounts on
+the consent screen's test-user list may authorize an app in Testing. Fix it on the console,
+never in code:
+
+1. Google Auth Platform → **Audience** (older UI: OAuth consent screen): User type *External*,
+   then **Publish app** → *Confirm*. Status becomes **In production**.
+2. Any Google account can now authorize sign-in immediately. For connectors, users will see the
+   *"Google hasn't verified this app"* interstitial until verification passes (they can still
+   continue via *Advanced → Go to Notely*), with the 100-user cap described above.
+3. Google Auth Platform → **Verification Center** → *Prepare for verification*: confirm branding
+   (privacy policy on the authorized domain, homepage describing the app), justify each
+   sensitive/restricted scope with a screen recording of the flow, and submit. Restricted Gmail
+   and Drive scopes additionally trigger the CASA security assessment.
+4. Leave the test-user list empty in production. Use it only on the **development** client,
+   whose consent screen may stay in Testing.
+
+Notely records this outcome on the connection ("… app is still in testing mode …") and shows it
+on the connector page, so users know to contact the operator instead of retrying.
+
 ## Microsoft (Entra ID) in brief
 
 App registrations → New registration → *Accounts in any organizational directory and personal
