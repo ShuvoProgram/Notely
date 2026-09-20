@@ -80,6 +80,10 @@ class ProviderManifest(BaseModel):
     # Optional second way in for OAuth providers: a user-issued token. Lets people connect on
     # deployments that have no vendor OAuth app registered (self-hosted, trials).
     token_auth: TokenAuthSpec | None = None
+    # The vendor's official remote MCP server. Connecting through it needs no per-deployment
+    # OAuth app: the server's authorization server registers Notely dynamically (RFC 7591) and
+    # the user just clicks Connect. Tools then come from the MCP server instead of the adapter.
+    mcp_server_url: str | None = None
     supports_webhooks: bool = False
     supports_sync: bool = False
 
@@ -147,6 +151,8 @@ class IntegrationProvider(ABC):
         methods: list[str] = []
         if self.manifest.auth == AuthType.oauth2 and self.oauth_config(settings) is not None:
             methods.append("oauth")
+        if self.manifest.mcp_server_url:
+            methods.append("mcp")
         if self.manifest.auth == AuthType.token or self.manifest.token_auth is not None:
             methods.append("token")
         if self.manifest.auth == AuthType.none:

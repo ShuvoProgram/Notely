@@ -82,17 +82,12 @@ class ProviderError(Exception):
         return title, body.format(provider=self.provider.title())
 
     def as_api_error(self) -> APIError:
+        """The same categorised envelope the global handler produces (one mapping, see
+        `app.core.exceptions.PROVIDER_STATUS`)."""
+        from app.core.exceptions import PROVIDER_STATUS
+
         title, body = self.user_message()
-        status = {
-            ProviderErrorKind.auth_failed: 401,
-            ProviderErrorKind.expired: 401,
-            ProviderErrorKind.permission_denied: 403,
-            ProviderErrorKind.admin_approval_required: 403,
-            ProviderErrorKind.rate_limited: 429,
-            ProviderErrorKind.unavailable: 502,
-            ProviderErrorKind.not_found: 404,
-            ProviderErrorKind.misconfigured: 404,
-        }.get(self.kind, 400)
+        status = PROVIDER_STATUS.get(self.kind.value, 502)
         return APIError(
             body,
             code=f"PROVIDER_{self.kind.value.upper()}",

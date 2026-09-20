@@ -87,6 +87,7 @@ class ClickUpProvider(RestOAuthProvider):
                 capability=Capability.read,
             ),
         ],
+        mcp_server_url="https://mcp.clickup.com/mcp",
         token_auth=TokenAuthSpec(
             label="Personal API token",
             help="ClickUp → your avatar → Settings → Apps → API Token → Generate.",

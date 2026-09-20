@@ -11,6 +11,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.ai.tools.base import ToolContext, ToolSpec, untrusted
+from app.core.config import Settings
+from app.core.oauth import OAuthClient, OAuthTokens
 from app.integrations.base.capabilities import Capability, risk_for
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
@@ -84,11 +86,19 @@ class MCPServerProvider(IntegrationProvider):
         ],
     )
 
+    def connect_methods(self, settings: Settings) -> list[str]:
+        if self.manifest.id == "mcp_server":
+            # Custom server: the user types a URL, Notely discovers OAuth (or none) — or a token.
+            return ["mcp", "token"]
+        return super().connect_methods(settings)
+
     # --- helpers --------------------------------------------------------------------------------
 
     @staticmethod
     def _url(ctx: ProviderContext) -> str:
-        url = str(ctx.connection.config.get("server_url", "")).strip()
+        url = str(
+            ctx.connection.metadata_.get("mcp_url") or ctx.connection.config.get("server_url", "")
+        ).strip()
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ProviderError(
@@ -164,13 +174,40 @@ class MCPServerProvider(IntegrationProvider):
 
     # --- tools ----------------------------------------------------------------------------------
 
+    def tool_prefix(self, ctx: ProviderContext) -> str:
+        if self.manifest.id != "mcp_server":
+            return self.manifest.id  # a known vendor: tools read as notion__search etc.
+        return f"mcp_{_slug(str(ctx.connection.external_account_name or ctx.connection.id))}"
+
+    async def refresh_credentials(self, ctx: ProviderContext) -> OAuthTokens | None:
+        """Tokens issued by the server's authorization server refresh through the client this
+        deployment registered there; token-based connections have nothing to refresh."""
+        if not ctx.credentials.refresh_token:
+            return None
+        from app.mcp import oauth as mcp_oauth
+
+        auth = await mcp_oauth.discover(self._url(ctx))
+        if auth is None:
+            return None
+        redirect = (
+            f"{ctx.settings.api_public_url.rstrip('/')}{ctx.settings.api_prefix}"
+            f"/oauth/{self.manifest.id}/callback"
+        )
+        config = await mcp_oauth.dynamic_client(
+            ctx.db, ctx.settings, auth, redirect, self.manifest.id
+        )
+        try:
+            return await OAuthClient(config, redirect).refresh(ctx.credentials.refresh_token)
+        except Exception as exc:  # noqa: BLE001 — refresh failures always mean re-consent
+            raise ProviderError(ProviderErrorKind.expired, provider=self.manifest.id) from exc
+
     async def tools(self, ctx: ProviderContext) -> list[ToolSpec]:
         cached = ctx.connection.metadata_.get("tools")
         if not isinstance(cached, list):
             return []
         url = self._url(ctx)
         connection_id = ctx.connection.id
-        prefix = f"mcp_{_slug(str(ctx.connection.external_account_name or connection_id))}"
+        prefix = self.tool_prefix(ctx)
         specs: list[ToolSpec] = []
         # Tool schemas need a live listing; cached metadata only tells us names/hints.
         async with mcp_client.connect(
@@ -191,7 +228,7 @@ class MCPServerProvider(IntegrationProvider):
                     json_schema=info.input_schema,
                     risk=risk,
                     capability=capability.value,
-                    provider="mcp_server",
+                    provider=self.manifest.id,
                     connection_id=connection_id,
                     handler=_make_handler(url, info.name),
                     summarize=_make_summary(
@@ -200,6 +237,16 @@ class MCPServerProvider(IntegrationProvider):
                 )
             )
         return specs
+
+
+class MCPModeAdapter(MCPServerProvider):
+    """A vendor connection made through the vendor's official MCP server (one-click OAuth).
+
+    Wraps the vendor's manifest so ids, labels and audit rows still say "notion"/"linear",
+    while connect/test/tools/refresh go through MCP and the dynamically registered client."""
+
+    def __init__(self, manifest: ProviderManifest) -> None:
+        self.manifest = manifest
 
 
 def _slug(value: str) -> str:

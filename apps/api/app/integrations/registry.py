@@ -45,7 +45,14 @@ PROVIDER_CLASSES: dict[str, type[IntegrationProvider]] = {
 
 @lru_cache
 def get_providers() -> dict[str, IntegrationProvider]:
-    return {pid: cls() for pid, cls in PROVIDER_CLASSES.items()}
+    from app.integrations.remote_mcp.providers import build_remote_mcp_providers
+
+    providers: dict[str, IntegrationProvider] = {
+        pid: cls() for pid, cls in PROVIDER_CLASSES.items() if pid != "mcp_server"
+    }
+    providers.update(build_remote_mcp_providers())
+    providers["mcp_server"] = MCPServerProvider()  # the custom-URL entry stays last
+    return providers
 
 
 def get_provider(provider_id: str) -> IntegrationProvider | None:

@@ -43,6 +43,10 @@ def set_http_transport(transport: httpx.AsyncBaseTransport | None) -> None:
     _http_transport = transport
 
 
+def transport() -> httpx.AsyncBaseTransport | None:
+    return _http_transport
+
+
 @dataclass(frozen=True)
 class OAuthEndpoints:
     authorize_url: str
@@ -57,6 +61,8 @@ class OAuthEndpoints:
     # Some providers (Slack) require the scope list under a different query parameter.
     scope_param: str = "scope"
     scope_separator: str = " "
+    # Sent with every token request (e.g. RFC 8707 `resource` for MCP servers).
+    extra_token_params: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -87,6 +93,23 @@ def _b64url(data: bytes) -> str:
 
 def _state_key(provider_id: str, state: str) -> str:
     return f"oauth:state:{provider_id}:{state}"
+
+
+async def consume_oauth_state(
+    provider_id: str, state: str | None, redirect_uri: str
+) -> dict[str, Any]:
+    """Validate and delete a state record (single use). Raises on mismatch/expiry."""
+    if not state:
+        raise InvalidOAuthState()
+    key = _state_key(provider_id, state)
+    raw = await kv.get(key)
+    if raw is None:
+        raise InvalidOAuthState()
+    await kv.delete(key)
+    record: dict[str, Any] = json.loads(raw)
+    if record.get("redirect_uri") != redirect_uri:
+        raise InvalidOAuthState()
+    return record
 
 
 class OAuthClient:
@@ -131,17 +154,7 @@ class OAuthClient:
 
     async def consume_state(self, state: str | None) -> dict[str, Any]:
         """Validate and delete the state record (single use). Raises on mismatch/expiry."""
-        if not state:
-            raise InvalidOAuthState()
-        key = _state_key(self.config.provider_id, state)
-        raw = await kv.get(key)
-        if raw is None:
-            raise InvalidOAuthState()
-        await kv.delete(key)
-        record: dict[str, Any] = json.loads(raw)
-        if record.get("redirect_uri") != self.redirect_uri:
-            raise InvalidOAuthState()
-        return record
+        return await consume_oauth_state(self.config.provider_id, state, self.redirect_uri)
 
     async def exchange_code(self, code: str, verifier: str | None) -> OAuthTokens:
         data = {
@@ -165,14 +178,14 @@ class OAuthClient:
         ep = self.config.endpoints
         headers = {"Accept": "application/json"}
         auth: httpx.BasicAuth | httpx._client.UseClientDefault = httpx.USE_CLIENT_DEFAULT
-        if ep.token_auth == "basic":
+        data = {**data, **ep.extra_token_params}
+        if ep.token_auth == "basic" and self.config.client_secret:
             auth = httpx.BasicAuth(self.config.client_id, self.config.client_secret)
         else:
-            data = {
-                **data,
-                "client_id": self.config.client_id,
-                "client_secret": self.config.client_secret,
-            }
+            # Public clients (dynamically registered, PKCE-only) send no secret at all.
+            data = {**data, "client_id": self.config.client_id}
+            if self.config.client_secret:
+                data["client_secret"] = self.config.client_secret
         try:
             async with httpx.AsyncClient(timeout=15, transport=_http_transport) as http:
                 if ep.token_format == "json":

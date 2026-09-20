@@ -24,11 +24,18 @@ async function script(page: Page, replies: unknown[]) {
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
-async function connectMcp(page: Page) {
+async function openMcpDialog(page: Page, url: string) {
   await page.goto("/app/settings/connections/mcp_server");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Server URL").fill(MCP_URL);
+  // The one-click path asks the server how to sign in; this demo server wants a token instead.
+  await dialog.getByLabel("Server URL").fill(url);
+  await dialog.getByRole("button", { name: "Show other options" }).click();
+  return dialog;
+}
+
+async function connectMcp(page: Page) {
+  const dialog = await openMcpDialog(page, MCP_URL);
   await dialog.getByLabel(/Access token/).fill(MCP_TOKEN);
   await dialog.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByText("Connected", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
@@ -108,10 +115,7 @@ test("connect an MCP server, test it, use its tools with approval, then disconne
 
 test("a wrong token yields a categorised error and an error status", async ({ page }) => {
   await signup(page);
-  await page.goto("/app/settings/connections/mcp_server");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Server URL").fill(MCP_URL);
+  const dialog = await openMcpDialog(page, MCP_URL);
   await dialog.getByLabel(/Access token/).fill("not-the-token");
   await dialog.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByText(/Your access wasn't granted/).first()).toBeVisible({ timeout: 15_000 });
@@ -138,7 +142,7 @@ test("marketplace lists every provider; OAuth-less deployments still offer a per
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Connect with a token" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Where to get an api token")).toBeVisible();
+  await expect(dialog.getByText("Connect with an api token")).toBeVisible();
   await expect(dialog.getByText(/Settings → Integrations → Developer/)).toBeVisible();
   await expect(dialog.getByRole("link", { name: /Open Todoist settings/ })).toHaveAttribute("href", /todoist\.com/);
   // Submitting without a token is caught before anything leaves the browser's tab.
@@ -146,9 +150,22 @@ test("marketplace lists every provider; OAuth-less deployments still offer a per
   await expect(dialog.getByRole("alert")).toHaveText("Required");
   await page.keyboard.press("Escape");
 
+  // Vendors with an official MCP server connect with one click, ChatGPT-style: consent → vendor.
+  await page.goto("/app/settings/connections/notion");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  const consent = page.getByRole("dialog");
+  await expect(consent.getByText("You're in control")).toBeVisible();
+  await expect(consent.getByText("Data shared with this app")).toBeVisible();
+  await expect(consent.getByRole("button", { name: "Continue with Notely" })).toBeVisible();
+  await expect(consent.getByLabel("Internal integration secret")).toHaveCount(0); // tokens are hidden until asked for
+  await consent.getByRole("button", { name: "Show other options" }).click();
+  await expect(consent.getByLabel("Internal integration secret")).toBeVisible();
+  await page.keyboard.press("Escape");
+
   // Jira's token path needs a site URL and account email as well.
   await page.goto("/app/settings/connections/jira");
-  await page.getByRole("button", { name: "Connect with a token" }).click();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Show other options" }).click();
   await expect(page.getByRole("dialog").getByLabel("Site URL")).toBeVisible();
   await expect(page.getByRole("dialog").getByLabel("Atlassian account email")).toBeVisible();
   await expect(page.getByRole("dialog").getByLabel("API token")).toBeVisible();

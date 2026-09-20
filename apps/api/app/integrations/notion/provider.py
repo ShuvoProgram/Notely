@@ -82,6 +82,7 @@ class NotionProvider(RestOAuthProvider):
         description="Search and read the pages you share with Notely; create pages with approval.",
         logo_url="https://cdn.simpleicons.org/notion",
         docs_url="https://developers.notion.com/docs/authorization",
+        mcp_server_url="https://mcp.notion.com/mcp",
         token_auth=TokenAuthSpec(
             label="Internal integration secret",
             help=(

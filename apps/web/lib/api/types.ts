@@ -406,7 +406,7 @@ export type ConnectionStatus =
 export interface Connection {
   id: string;
   provider: string;
-  auth_type: "oauth2" | "token" | "none";
+  auth_type: "oauth2" | "mcp" | "token" | "none";
   status: ConnectionStatus;
   external_account_id: string | null;
   external_account_name: string | null;
@@ -448,7 +448,7 @@ export interface TokenAuthSpec {
   fields: ConfigField[];
 }
 
-export type ConnectMethod = "oauth" | "token" | "config";
+export type ConnectMethod = "oauth" | "mcp" | "token" | "config";
 
 export interface Provider {
   id: string;
@@ -462,6 +462,8 @@ export interface Provider {
   permissions: PermissionSpec[];
   config_fields: ConfigField[];
   token_auth: TokenAuthSpec | null;
+  /** The vendor's official remote MCP server (one-click OAuth without a per-deployment app). */
+  mcp_server_url: string | null;
   /** How this user can connect on this deployment. Empty → nothing is possible yet. */
   connect_methods: ConnectMethod[];
   supports_webhooks: boolean;

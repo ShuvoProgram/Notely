@@ -94,6 +94,7 @@ class JiraProvider(RestOAuthProvider):
         description="Search and read issues; create issues and comments with approval.",
         logo_url="https://cdn.simpleicons.org/jira",
         docs_url="https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/",
+        mcp_server_url="https://mcp.atlassian.com/v1/mcp",
         token_auth=TokenAuthSpec(
             label="API token",
             help=(

@@ -183,9 +183,13 @@ async def oauth_start(
     ctx: CurrentAuth,
     service: ServiceDep,
     scopes: Annotated[str | None, Query(description="Comma-separated optional scopes")] = None,
+    method: Annotated[str | None, Query(description="oauth | mcp")] = None,
+    server_url: Annotated[str | None, Query(description="Generic MCP server URL")] = None,
 ) -> RedirectResponse:
     selected = [s for s in (scopes or "").replace(" ", ",").split(",") if s]
-    url = await service.start_oauth(ctx.user, provider_id, selected_scopes=selected)
+    url = await service.start_oauth(
+        ctx.user, provider_id, selected_scopes=selected, method=method, server_url=server_url
+    )
     return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
 
 
@@ -195,12 +199,21 @@ async def oauth_start_url(
     ctx: CurrentAuth,
     service: ServiceDep,
     scopes: Annotated[str | None, Query()] = None,
+    method: Annotated[str | None, Query(description="oauth | mcp")] = None,
+    server_url: Annotated[str | None, Query(description="Generic MCP server URL")] = None,
 ) -> dict[str, Any]:
-    """Same as /start but returns the URL (for clients that want to navigate themselves)."""
+    """Same as /start but returns the URL (for clients that want to navigate themselves).
+    A public MCP server needs no consent: the URL then points straight back to the app."""
     selected = [s for s in (scopes or "").replace(" ", ",").split(",") if s]
     return ok(
         OAuthStartOut(
-            authorize_url=await service.start_oauth(ctx.user, provider_id, selected_scopes=selected)
+            authorize_url=await service.start_oauth(
+                ctx.user,
+                provider_id,
+                selected_scopes=selected,
+                method=method,
+                server_url=server_url,
+            )
         )
     )
 

@@ -12,6 +12,9 @@ import { ConnectionStatusBadge } from "@/features/connections/components/connect
 import type { Provider } from "@/lib/api/types";
 
 export const CATEGORY_LABELS: Record<string, string> = {
+  payments: "Payments",
+  design: "Design",
+  automation: "Automation",
   communication: "Communication",
   email_calendar: "Email & Calendar",
   notes: "Notes & Knowledge",
@@ -120,8 +123,8 @@ function ProviderCard({ provider }: { provider: Provider }) {
           <div className="mt-2">
             {provider.connect_methods.length === 0 ? (
               <p className="text-xs text-muted-foreground">Not available on this deployment</p>
-            ) : provider.auth === "oauth2" && !provider.configured && !conn ? (
-              <p className="text-xs text-muted-foreground">Connect with {provider.token_auth ? aOrAn(provider.token_auth.label) : "a token"}</p>
+            ) : !conn && !provider.connect_methods.includes("oauth") && !provider.connect_methods.includes("mcp") ? (
+              <p className="text-xs text-muted-foreground">Connect with {provider.token_auth ? aOrAn(provider.token_auth.label) : "your own settings"}</p>
             ) : (
               <ConnectionStatusBadge status={conn?.status ?? "none"} lastChecked={conn?.last_checked_at} lastError={conn?.last_error} />
             )}

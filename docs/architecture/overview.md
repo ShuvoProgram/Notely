@@ -194,6 +194,19 @@ decides how the token is sent; Jira's basic scheme also switches the API base to
 site. Adapters with token support: Slack, Notion, Todoist, Asana, Jira, Dropbox, Linear,
 ClickUp; Trello is token-only.
 
+**One-click OAuth through official MCP servers (`app/mcp/oauth.py`).** `discover(url)` probes
+the server, follows `WWW-Authenticate: resource_metadata` / the RFC 9728 well-known URLs to the
+protected-resource metadata, then RFC 8414 / OIDC discovery to the authorization server.
+`dynamic_client()` registers Notely there (RFC 7591, `token_endpoint_auth_method=none`, PKCE)
+and caches the client in `oauth_dynamic_clients` (one row per issuer, deployment-wide). The
+normal `OAuthClient` then runs the consent flow with `resource=` (RFC 8707) on both requests.
+Connections made this way have `auth_type="mcp"` and `metadata.mcp_url`;
+`ConnectionService.adapter(conn)` swaps the REST adapter for an `MCPModeAdapter` that keeps the
+vendor's identity (ids `notion__…`, labels, audit) while tools, health checks and refresh go
+through MCP. `ProviderManifest.mcp_server_url` opts a REST adapter into this door (Notion,
+Linear, Jira, ClickUp); `integrations/remote_mcp/providers.py` lists vendors that exist only as
+MCP servers. `connect_methods` orders the doors: `oauth` (own app) → `mcp` → `token`/`config`.
+
 **More adapters.** Gmail / Google Calendar / Google Drive (`integrations/google/`, one Google
 client, per-product scopes), OneDrive (Graph base), Linear (GraphQL through `_gql`, the PRD's
 "GraphQL provider" shape), ClickUp (bare-token auth), Trello (key + token as query params via a

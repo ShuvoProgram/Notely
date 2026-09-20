@@ -20,7 +20,7 @@ from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import NotFound, ValidationFailed
 from app.core.logging import get_logger
-from app.core.oauth import OAuthClient, OAuthTokens
+from app.core.oauth import OAuthClient, OAuthTokens, consume_oauth_state
 from app.db.base import utcnow
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
@@ -30,6 +30,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     TestStep,
 )
+from app.integrations.mcp_server.provider import MCPModeAdapter, MCPServerProvider
 from app.integrations.registry import get_provider, get_providers
 from app.models.ai import RiskLevel
 from app.models.integration import ConnectionStatus, ExternalItem, Integration, UserConnection
@@ -63,6 +64,10 @@ def status_from_error(error: ProviderError) -> ConnectionStatus:
     if error.kind in (ProviderErrorKind.invalid_request, ProviderErrorKind.misconfigured):
         return ConnectionStatus.needs_attention
     return ConnectionStatus.error
+
+
+# auth_type of connections made through a vendor's official MCP server
+MCP_AUTH = "mcp"
 
 
 class ConnectionService:
@@ -128,6 +133,21 @@ class ConnectionService:
         if provider is None:
             raise NotFound("Unknown integration.")
         return provider
+
+    def adapter(self, conn: UserConnection) -> IntegrationProvider:
+        """The object that talks to the vendor for this connection: the REST adapter, or — for
+        connections made through the vendor's official MCP server — an MCP-mode adapter that
+        keeps the vendor's identity (ids, labels, audit) but speaks MCP."""
+        provider = self.provider_or_404(conn.provider)
+        if conn.auth_type == MCP_AUTH and not isinstance(provider, MCPServerProvider):
+            return MCPModeAdapter(provider.manifest)
+        return provider
+
+    def _redirect_uri(self, provider_id: str) -> str:
+        return (
+            f"{self.settings.api_public_url.rstrip('/')}{self.settings.api_prefix}"
+            f"/oauth/{provider_id}/callback"
+        )
 
     async def _integration_row(self, provider_id: str) -> Integration:
         row = await self.db.scalar(select(Integration).where(Integration.provider == provider_id))
@@ -214,19 +234,87 @@ class ConnectionService:
         return OAuthClient(config, redirect)
 
     async def start_oauth(
-        self, user: User, provider_id: str, *, selected_scopes: list[str] | None
+        self,
+        user: User,
+        provider_id: str,
+        *,
+        selected_scopes: list[str] | None,
+        method: str | None = None,
+        server_url: str | None = None,
     ) -> str:
+        """Begin a browser OAuth flow and return the URL to send the user to.
+
+        `method` picks the door: `oauth` (the deployment's own vendor app) or `mcp` (the
+        vendor's official MCP server, or `server_url` for the generic MCP entry, with a
+        dynamically registered client). Default: own app when configured, else MCP."""
         provider = self.provider_or_404(provider_id)
-        if provider.manifest.auth != AuthType.oauth2:
-            raise ValidationFailed("This integration does not use OAuth.")
+        methods = provider.connect_methods(self.settings)
+        if method is None:
+            method = "oauth" if "oauth" in methods else "mcp" if "mcp" in methods else ""
+        if method == "mcp" or (server_url and isinstance(provider, MCPServerProvider)):
+            return await self._start_mcp_oauth(user, provider, server_url)
+        if method != "oauth" or "oauth" not in methods:
+            raise ValidationFailed("This integration cannot connect with OAuth here.")
         scopes = provider.scopes_for(selected_scopes)
         conn = await self._get_or_create(user, provider)
         if conn.status == ConnectionStatus.disconnected or conn.status == ConnectionStatus.pending:
             conn.status = ConnectionStatus.connecting
         conn.scopes = scopes
+        conn.auth_type = AuthType.oauth2.value
         await self.db.commit()
         client = self._oauth_client(provider, scopes)
-        return await client.begin(context={"user_id": str(user.id), "connection_id": str(conn.id)})
+        return await client.begin(
+            context={"user_id": str(user.id), "connection_id": str(conn.id), "mode": "oauth"}
+        )
+
+    async def _start_mcp_oauth(
+        self, user: User, provider: IntegrationProvider, server_url: str | None
+    ) -> str:
+        from app.mcp import oauth as mcp_oauth
+
+        url = (server_url or provider.manifest.mcp_server_url or "").strip()
+        if not url.startswith("https://") and not (
+            url.startswith("http://") and not self.settings.is_production
+        ):
+            raise ValidationFailed(
+                "Enter the server's https URL.", details={"fields": {"server_url": ["Invalid"]}}
+            )
+        conn = await self._get_or_create(user, provider)
+        conn.auth_type = MCP_AUTH
+        conn.metadata_ = {**conn.metadata_, "mcp_url": url}
+        if isinstance(provider, MCPServerProvider):
+            conn.config = {**conn.config, "server_url": url}
+        conn.status = ConnectionStatus.connecting
+        await self.db.commit()
+        try:
+            auth = await mcp_oauth.discover(url)
+        except ProviderError as exc:
+            await self._fail(conn, exc, status=ConnectionStatus.error)
+            raise exc.as_api_error() from exc
+        if auth is None:
+            # Public server: nothing to authorise; connect right away.
+            self.vault.store_token(conn, None)
+            await self._finish_connect(user, self.adapter(conn), conn)
+            base = f"{self.settings.frontend_origin}/app/settings/connections"
+            return f"{base}/{conn.provider}?connected=1"
+        try:
+            config = await mcp_oauth.dynamic_client(
+                self.db, self.settings, auth, self._redirect_uri(conn.provider), conn.provider
+            )
+        except ProviderError as exc:
+            await self._fail(conn, exc, status=ConnectionStatus.error)
+            raise exc.as_api_error() from exc
+        conn.scopes = list(auth.scopes)
+        await self.db.commit()
+        client = OAuthClient(config, self._redirect_uri(conn.provider))
+        return await client.begin(
+            context={
+                "user_id": str(user.id),
+                "connection_id": str(conn.id),
+                "mode": "mcp",
+                "server_url": url,
+            }
+        )
 
     async def complete_oauth(
         self,
@@ -238,14 +326,34 @@ class ConnectionService:
         error: str | None,
     ) -> UserConnection:
         provider = self.provider_or_404(provider_id)
-        client = self._oauth_client(provider)
-        record = await client.consume_state(state)
+        record = await consume_oauth_state(provider_id, state, self._redirect_uri(provider_id))
         ctx_info = record.get("context") or {}
         if ctx_info.get("user_id") != str(user.id):
             from app.core.exceptions import InvalidOAuthState
 
             raise InvalidOAuthState()
         conn = await self._get_or_create(user, provider)
+        if ctx_info.get("mode") == "mcp":
+            from app.mcp import oauth as mcp_oauth
+
+            url = str(ctx_info.get("server_url") or conn.metadata_.get("mcp_url") or "")
+            auth = await mcp_oauth.discover(url)
+            if auth is None:
+                raise ProviderError(
+                    ProviderErrorKind.misconfigured,
+                    "server no longer requires auth",
+                    provider=provider_id,
+                ).as_api_error()
+            client = OAuthClient(
+                await mcp_oauth.dynamic_client(
+                    self.db, self.settings, auth, self._redirect_uri(provider_id), provider_id
+                ),
+                self._redirect_uri(provider_id),
+            )
+            conn.auth_type = MCP_AUTH
+            conn.metadata_ = {**conn.metadata_, "mcp_url": url}
+        else:
+            client = self._oauth_client(provider)
         if error or not code:
             metrics.oauth_failures.labels(provider_id, "authorize").inc()
             await self._fail(
@@ -267,16 +375,16 @@ class ConnectionService:
         )
         if tokens.scope:
             conn.scopes = tokens.scope.replace(",", " ").split()
-        await self._finish_connect(user, provider, conn)
+        await self._finish_connect(user, self.adapter(conn), conn)
         return conn
 
     async def refresh_if_needed(self, user: User, conn: UserConnection) -> None:
         """Refresh an OAuth token nearing expiry. Marks the connection expired if that fails."""
-        if conn.auth_type != AuthType.oauth2.value or conn.token_expires_at is None:
+        if conn.auth_type not in (AuthType.oauth2.value, MCP_AUTH) or conn.token_expires_at is None:
             return
         if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
             return
-        provider = self.provider_or_404(conn.provider)
+        provider = self.adapter(conn)
         try:
             tokens = await provider.refresh_credentials(self.context(user, conn))
         except ProviderError as exc:
@@ -370,7 +478,7 @@ class ConnectionService:
     # --- health ----------------------------------------------------------------------------------
 
     async def test(self, user: User, conn: UserConnection) -> ConnectionTest:
-        provider = self.provider_or_404(conn.provider)
+        provider = self.adapter(conn)
         if conn.status == ConnectionStatus.disconnected:
             return ConnectionTest([TestStep("Connection", False, "Not connected")])
         try:
@@ -477,9 +585,9 @@ class ConnectionService:
     async def tools_for_user(self, user: User) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
         for conn in await self.list_usable(user):
-            provider = get_provider(conn.provider)
-            if provider is None:
+            if get_provider(conn.provider) is None:
                 continue
+            provider = self.adapter(conn)
             try:
                 await self.refresh_if_needed(user, conn)
                 specs.extend(await provider.tools(self.context(user, conn)))

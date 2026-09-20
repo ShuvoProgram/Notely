@@ -19,6 +19,7 @@ from app.models.integration import (
     ConnectionStatus,
     ExternalItem,
     Integration,
+    OAuthDynamicClient,
     UserConnection,
     WebhookEvent,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "Base",
     "ConnectionStatus",
     "ExternalItem",
+    "OAuthDynamicClient",
     "Folder",
     "Integration",
     "MessageRole",

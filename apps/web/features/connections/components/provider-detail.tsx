@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ExternalLink, KeyRound, Loader2, RefreshCw, Stethoscope, Unplug, XCircle } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, KeyRound, Loader2, RefreshCw, Sparkles, Stethoscope, Unplug, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -80,6 +80,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   const p = detail.data;
   const conn = p.connection && p.connection.status !== "disconnected" ? p.connection : null;
   const canOAuth = p.connect_methods.includes("oauth");
+  const canMcp = p.connect_methods.includes("mcp");
   const canToken = p.connect_methods.includes("token");
   const canConfig = p.connect_methods.includes("config");
   const aOrAn = (label: string) => `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label.toLowerCase()}`;
@@ -109,7 +110,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           <div className="mt-3">
             {conn ? (
               <ConnectionStatusBadge status={conn.status} lastChecked={conn.last_checked_at} lastError={conn.last_error} />
-            ) : canOAuth || canConfig || (canToken && p.auth !== "oauth2") ? (
+            ) : canOAuth || canMcp || canConfig || (canToken && p.auth !== "oauth2") ? (
               <ConnectionStatusBadge status="none" lastChecked={null} lastError={null} />
             ) : canToken ? (
               <p className="text-sm text-muted-foreground">
@@ -123,17 +124,16 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!conn && p.auth !== "oauth2" && (canToken || canConfig) ? <Button onClick={() => setConnectMethod(canToken ? "token" : "config")}>Connect</Button> : null}
-          {!conn && p.auth === "oauth2" && canOAuth ? <Button onClick={() => setConnectMethod("oauth")}>Connect</Button> : null}
-          {!conn && p.auth === "oauth2" && canToken ? (
-            <Button variant={canOAuth ? "outline" : "default"} onClick={() => setConnectMethod("token")}>
-              <KeyRound aria-hidden /> {canOAuth ? `Use ${aOrAn(p.token_auth?.label ?? "token")}` : "Connect with a token"}
+          {!conn && (canOAuth || canMcp || canConfig || canToken) ? (
+            <Button onClick={() => setConnectMethod(canOAuth ? "oauth" : canMcp ? "mcp" : canToken ? "token" : "config")}>
+              {canOAuth || canMcp ? <Sparkles aria-hidden /> : <KeyRound aria-hidden />}
+              {canOAuth || canMcp ? "Connect" : "Connect with a token"}
             </Button>
           ) : null}
           {conn ? (
             <>
               {attention ? (
-                <Button onClick={() => setConnectMethod(conn.auth_type === "token" ? "token" : canOAuth ? "oauth" : canToken ? "token" : "config")}>
+                <Button onClick={() => setConnectMethod(conn.auth_type === "token" ? "token" : canOAuth ? "oauth" : canMcp ? "mcp" : canToken ? "token" : "config")}>
                   <RefreshCw aria-hidden /> {conn.status === "expired" ? "Reconnect" : "Fix"}
                 </Button>
               ) : null}
@@ -189,6 +189,8 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                 <dd>{conn.last_sync_at ? relativeTime(conn.last_sync_at) : p.supports_sync ? "not yet" : "on-demand only"}</dd>
                 <dt>Local data</dt>
                 <dd>{p.local_item_count} indexed item{p.local_item_count === 1 ? "" : "s"}</dd>
+                <dt>Connected via</dt>
+                <dd>{conn.auth_type === "mcp" ? `${p.name}'s official MCP server` : conn.auth_type === "token" ? "personal token" : "OAuth"}</dd>
               </dl>
               {Object.keys(conn.config).length ? (
                 <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -265,7 +267,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
         ) : null}
       </div>
 
-      {connectMethod ? <ConnectDialog key={connectMethod} provider={p} method={connectMethod} open onOpenChange={(o) => !o && setConnectMethod(null)} reconnect={Boolean(conn)} /> : null}
+      {connectMethod ? <ConnectDialog key={connectMethod} provider={p} initialMethod={connectMethod} open onOpenChange={(o) => !o && setConnectMethod(null)} reconnect={Boolean(conn)} /> : null}
 
       <Dialog open={disconnectStep === 1} onOpenChange={(o) => !o && setDisconnectStep(0)}>
         <DialogContent>

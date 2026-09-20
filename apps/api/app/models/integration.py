@@ -109,6 +109,24 @@ class ExternalItem(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base)
     indexed_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
 
 
+class OAuthDynamicClient(UUIDPrimaryKeyMixin, Base):
+    """A client this deployment registered with an OAuth authorization server via RFC 7591
+    (remote MCP servers). One row per issuer; shared by every user of the deployment."""
+
+    __tablename__ = "oauth_dynamic_clients"
+
+    issuer: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    server_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    client_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    client_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONType, nullable=False, default=dict
+    )
+    registered_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+
+
 class WebhookEvent(UUIDPrimaryKeyMixin, Base):
     """Inbound provider webhook, stored before processing so handling is idempotent."""
 

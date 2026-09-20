@@ -96,6 +96,7 @@ class LinearProvider(RestOAuthProvider):
                 capability=Capability.create,
             ),
         ],
+        mcp_server_url="https://mcp.linear.app/mcp",
         token_auth=TokenAuthSpec(
             label="Personal API key",
             help="Linear → Settings → Security & access → Personal API keys → Create key.",

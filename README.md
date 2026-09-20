@@ -152,17 +152,21 @@ Todoist, Asana, Jira, Microsoft Teams, Outlook, OneDrive, Gmail, Google Calendar
 Linear, ClickUp, Trello and a generic MCP server. Every one passes the same end-to-end contract
 test against a mocked vendor API.
 
-**Two ways to connect.** OAuth ("Connect", the vendor's consent screen) needs an OAuth app
-registered on the deployment: `OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET` (Teams, Outlook and
-OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share `OAUTH_GOOGLE_*`). Where the
-vendor issues personal tokens — Slack, Notion, Todoist, Asana, Jira, Dropbox, Linear, ClickUp,
-Trello — users can instead paste one ("Connect with a token"): the detail page explains where to
-get it, the token is stored encrypted, and it works even when no OAuth app is configured. Register
-this redirect URI with every vendor you set up for OAuth:
+**Connecting is one click.** Press *Connect*, read the consent card (what Notely can do, the
+risks, what the vendor receives), press *Continue with Notely* and approve on the vendor's own
+screen. Three doors, tried in this order:
 
-```
-{API_PUBLIC_URL}/api/v1/oauth/{provider}/callback   # e.g. http://localhost:8000/api/v1/oauth/slack/callback
-```
+1. **The deployment's OAuth app** — `OAUTH_<PROVIDER>_CLIENT_ID` / `_SECRET` (Teams, Outlook and
+   OneDrive share `OAUTH_MICROSOFT_*`; Gmail, Calendar and Drive share `OAUTH_GOOGLE_*`).
+   Redirect URI: `{API_PUBLIC_URL}/api/v1/oauth/{provider}/callback`.
+2. **The vendor's official MCP server** — no app registration at all. Notely discovers the
+   server's authorization server (RFC 9728/8414), registers itself once per deployment (RFC 7591
+   dynamic client registration) and runs a PKCE flow. This is how Notion, Linear, Jira/Atlassian,
+   ClickUp, Sentry, Stripe, Supabase, Vercel, Figma, Canva, Intercom, PayPal, Zapier, monday.com,
+   Box and Hugging Face connect out of the box; public servers (Cloudflare Docs) connect
+   instantly. Any custom MCP server URL goes through the same discovery.
+3. **A personal token** — under *Show other options* for vendors that issue them (Slack, Notion,
+   Todoist, Asana, Jira, Dropbox, Linear, ClickUp, Trello, Hugging Face).
 
 Provider ids: `slack`, `notion`, `todoist`, `asana`, `jira`, `microsoft_teams`, `outlook`,
 `onedrive`, `dropbox`, `gmail`, `google_calendar`, `google_drive`, `linear`, `clickup`, `trello`.
