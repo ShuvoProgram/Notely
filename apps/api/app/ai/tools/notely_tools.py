@@ -1,14 +1,17 @@
-"""Internal Notely tools: notes and tasks. Read tools return untrusted-wrapped content."""
+"""Internal Notely tools: notes, tasks, planning and cross-app search.
+
+Read tools return untrusted-wrapped content. Write tools declare a `verify` read-back so the
+framework can confirm the change actually landed before the assistant reports it."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.ai.tools.base import ToolContext, ToolRegistry, ToolSpec, untrusted
+from app.ai.tools.base import ToolContext, ToolRegistry, ToolSpec, Verification, untrusted
 from app.models.ai import RiskLevel
 from app.models.task import TaskPriority, TaskSource, TaskStatus
 from app.schemas.notes import NoteCreate, NoteListQuery
@@ -73,6 +76,33 @@ class CompleteTaskArgs(BaseModel):
     """Mark a task as done."""
 
     task_id: uuid.UUID
+
+
+class SearchEverythingArgs(BaseModel):
+    """Search the user's notes AND every connected app (Slack, Notion, Jira, ...) in one call.
+    Use this first for requests that may involve several sources."""
+
+    query: str = Field(min_length=1, max_length=200, description="Keywords to search for")
+    limit: int = Field(default=8, ge=1, le=20, description="Max results per source")
+
+
+class PlanStep(BaseModel):
+    title: str = Field(min_length=1, max_length=120, description="What this step achieves")
+    kind: Literal["read", "propose", "verify", "answer"] = Field(
+        description="read = look things up; propose = suggest changes for approval; "
+        "verify = confirm changes landed; answer = summarise for the user"
+    )
+    tools: list[str] = Field(
+        default_factory=list, max_length=6, description="Tool names this step will use"
+    )
+
+
+class PlanStepsArgs(BaseModel):
+    """Declare a short plan before a multi-step or cross-app request. The user sees the plan as
+    a progress checklist. Call this once, before reading anything."""
+
+    goal: str = Field(min_length=1, max_length=200)
+    steps: list[PlanStep] = Field(min_length=1, max_length=8)
 
 
 # --- handlers -----------------------------------------------------------------------------------
@@ -193,6 +223,80 @@ async def complete_task(ctx: ToolContext, args: CompleteTaskArgs) -> dict[str, A
     return {"task_id": str(task.id), "status": task.status.value}
 
 
+async def search_everything(ctx: ToolContext, args: SearchEverythingArgs) -> dict[str, Any]:
+    from app.core.config import get_settings
+    from app.services.search_service import UnifiedSearchService
+
+    result = await UnifiedSearchService(ctx.db, get_settings()).search(
+        ctx.user, args.query, args.limit
+    )
+    return {
+        "results": [
+            {
+                "source": h.source,
+                "kind": h.kind,
+                "id": h.id,
+                "title": untrusted(h.title, source=f"{h.source}:{h.id}"),
+                "snippet": untrusted(h.snippet, source=f"{h.source}:{h.id}"),
+                "url": h.url,
+            }
+            for h in result.hits
+        ],
+        "sources_searched": [
+            {"source": s.source, "ok": s.ok, "count": s.count, "error": s.error}
+            for s in result.sources
+        ],
+        "sources": [
+            {"provider": h.source, "object_id": h.id, "title": h.title, "url": h.url}
+            for h in result.hits
+        ],
+    }
+
+
+async def plan_steps(ctx: ToolContext, args: PlanStepsArgs) -> dict[str, Any]:
+    # The framework records and streams the plan; the model just gets an acknowledgement.
+    return {
+        "plan": {
+            "goal": args.goal,
+            "steps": [
+                {"title": s.title, "kind": s.kind, "tools": s.tools, "status": "pending"}
+                for s in args.steps
+            ],
+        },
+        "message": "Plan recorded. Proceed with the steps.",
+    }
+
+
+# --- verifiers (read-back after a write) -------------------------------------------------------
+
+
+async def verify_note_created(
+    ctx: ToolContext, args: CreateNoteArgs, result: dict[str, Any]
+) -> Verification:
+    note = await NoteService(ctx.db).get_note(ctx.user, uuid.UUID(str(result["note_id"])))
+    if note.title != args.title:
+        return Verification.failed("Note exists but its title differs from what was requested")
+    return Verification.verified(f"Note “{note.title}” exists in your workspace")
+
+
+async def verify_task_created(
+    ctx: ToolContext, args: CreateTaskArgs, result: dict[str, Any]
+) -> Verification:
+    task = await TaskService(ctx.db).get(ctx.user, uuid.UUID(str(result["task_id"])))
+    if task.title != args.title or task.status != TaskStatus.open:
+        return Verification.failed("Task exists but does not match what was requested")
+    return Verification.verified(f"Task “{task.title}” is in your task list")
+
+
+async def verify_task_completed(
+    ctx: ToolContext, args: CompleteTaskArgs, result: dict[str, Any]
+) -> Verification:
+    task = await TaskService(ctx.db).get(ctx.user, args.task_id)
+    if task.status != TaskStatus.done:
+        return Verification.failed("Task is still open")
+    return Verification.verified(f"Task “{task.title}” is marked done")
+
+
 # --- registry -----------------------------------------------------------------------------------
 
 
@@ -239,6 +343,7 @@ def register_notely_tools(registry: ToolRegistry) -> None:
             capability="create",
             handler=create_note,
             summarize=lambda a: f"Create note “{a.title}”",
+            verify=verify_note_created,
         )
     )
     registry.register(
@@ -263,6 +368,7 @@ def register_notely_tools(registry: ToolRegistry) -> None:
             summarize=lambda a: (
                 f"Create task “{a.title}”" + (f" due {a.due_date}" if a.due_date else "")
             ),
+            verify=verify_task_created,
         )
     )
     registry.register(
@@ -274,5 +380,35 @@ def register_notely_tools(registry: ToolRegistry) -> None:
             capability="update",
             handler=complete_task,
             summarize=lambda a: "Mark a task as done",
+            verify=verify_task_completed,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_everything",
+            description=(
+                "Search notes and every connected app at once. Results say which app they came "
+                "from; use the matching app's read tool for details."
+            ),
+            args_schema=SearchEverythingArgs,
+            risk=RiskLevel.read,
+            capability="search",
+            handler=search_everything,
+            summarize=lambda a: f"Search everything for “{a.query}”",
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="plan_steps",
+            description=(
+                "Declare a short plan (goal + 2-8 steps) before a multi-step or cross-app "
+                "request. Call once, first. Not needed for simple questions."
+            ),
+            args_schema=PlanStepsArgs,
+            risk=RiskLevel.read,
+            capability="plan",
+            handler=plan_steps,
+            summarize=lambda a: f"Plan: {a.goal}",
+            tags=("plan",),
         )
     )

@@ -7,8 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -16,7 +18,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 
 class ListTasksArgs(BaseModel):
@@ -156,8 +158,32 @@ class TodoistProvider(RestOAuthProvider):
                 await http.post(f"/tasks/{a.task_id}/close")
             return {"task_id": a.task_id, "completed": True}
 
+        async def verify_create_task(
+            ctx: ProviderContext, a: CreateTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                task = (await http.get(f"/tasks/{result['task_id']}")).json()
+            if task.get("content") != a.content:
+                return Verification.failed("Task exists but its content differs")
+            return Verification.verified("Task is in Todoist")
+
+        async def verify_complete_task(
+            ctx: ProviderContext, a: CompleteTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            # Todoist drops completed tasks from the active-task endpoint (404) or flags them.
+            try:
+                async with self.http(ctx) as http:
+                    task = (await http.get(f"/tasks/{a.task_id}")).json()
+            except ProviderError as exc:
+                if exc.kind == ProviderErrorKind.not_found:
+                    return Verification.verified("Task is no longer active in Todoist")
+                raise
+            if task.get("is_completed"):
+                return Verification.verified("Task is completed in Todoist")
+            return Verification.failed("Task is still open in Todoist")
+
         return [
-            (
+            ProviderTool(
                 "list_tasks",
                 "List open Todoist tasks.",
                 ListTasksArgs,
@@ -165,7 +191,7 @@ class TodoistProvider(RestOAuthProvider):
                 list_tasks,
                 lambda a: "List Todoist tasks",
             ),
-            (
+            ProviderTool(
                 "list_projects",
                 "List Todoist projects.",
                 ListProjectsArgs,
@@ -173,20 +199,22 @@ class TodoistProvider(RestOAuthProvider):
                 list_projects,
                 lambda a: "List Todoist projects",
             ),
-            (
+            ProviderTool(
                 "create_task",
                 "Create a Todoist task.",
                 CreateTaskArgs,
                 Capability.create,
                 create_task,
                 lambda a: f"Create Todoist task “{a.content}”",
+                verify=verify_create_task,
             ),
-            (
+            ProviderTool(
                 "complete_task",
                 "Complete a Todoist task.",
                 CompleteTaskArgs,
                 Capability.update,
                 complete_task,
                 lambda a: f"Complete Todoist task {a.task_id}",
+                verify=verify_complete_task,
             ),
         ]

@@ -10,19 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { useSearch } from "@/features/notes/hooks";
-
-export const SOURCE_LABELS: Record<string, string> = {
-  notely: "Notely",
-  slack: "Slack",
-  notion: "Notion",
-  todoist: "Todoist",
-  asana: "Asana",
-  jira: "Jira",
-  microsoft_teams: "Teams",
-  outlook: "Outlook",
-  dropbox: "Dropbox",
-  mcp_server: "MCP server",
-};
+import { PROVIDER_LABELS as SOURCE_LABELS } from "@/lib/providers";
 
 const KIND_ICON: Record<string, typeof FileText> = {
   note: FileText,

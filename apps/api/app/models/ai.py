@@ -109,6 +109,11 @@ class AIRun(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONType, nullable=False, default=list)
+    # Declared by the agent via the `plan_steps` tool for multi-step / cross-app requests:
+    # {"goal": str, "steps": [{"title", "kind", "tools", "status"}]}
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSONType, nullable=True)
+    # Source attribution accumulated across the whole run (survives approval pauses).
+    sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONType, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
@@ -147,6 +152,8 @@ class AIToolCall(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
         default=ToolCallStatus.proposed,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Post-execution check for write tools: {"status": verified|unverified|failed, "detail"}
+    verification: Mapped[dict[str, Any] | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
     executed_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
 

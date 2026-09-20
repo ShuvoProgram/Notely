@@ -5,15 +5,9 @@ import * as React from "react";
 
 import { aiApi } from "@/features/ai/api";
 import { ApiError } from "@/lib/api/client";
-import type { AIChatEvent, AIMessage, AIProposal, AISource, RunStatus } from "@/lib/api/types";
+import type { AIChatEvent, AIMessage, AIPlan, AIProposal, AISource, AIStep, PlanStep, RunStatus } from "@/lib/api/types";
 
-export interface StepState {
-  call_id: string;
-  tool: string;
-  label: string;
-  status: "running" | "completed" | "failed";
-  result_preview?: string;
-}
+export type StepState = AIStep;
 
 export interface PendingApproval {
   approval_id: string;
@@ -26,7 +20,10 @@ export interface LiveAssistant {
   text: string;
   steps: StepState[];
   sources: AISource[];
+  plan: AIPlan | null;
 }
+
+const emptyLive = (): LiveAssistant => ({ text: "", steps: [], sources: [], plan: null });
 
 export interface ChatState {
   threadId: string | null;
@@ -99,7 +96,14 @@ export function useChat(initialThreadId: string | null) {
               : null,
           live:
             run && run.status === "waiting_for_approval"
-              ? { text: "", steps: run.steps.filter((st) => st.call_id).map((st) => ({ call_id: st.call_id!, tool: st.tool ?? "", label: st.label ?? "", status: (st.status as StepState["status"]) ?? "completed" })), sources: [] }
+              ? {
+                  text: "",
+                  steps: run.steps
+                    .filter((st) => st.call_id)
+                    .map((st) => ({ call_id: st.call_id!, tool: st.tool ?? "", label: st.label ?? "", status: (st.status as StepState["status"]) ?? "completed", verification: st.verification })),
+                  sources: run.sources ?? [],
+                  plan: run.plan ?? null,
+                }
               : null,
         }));
       })
@@ -119,16 +123,28 @@ export function useChat(initialThreadId: string | null) {
             ownedThreadRef.current = event.thread_id;
             return { ...s, threadId: event.thread_id, runId: event.run_id, runStatus: event.status };
           case "token":
-            return { ...s, live: { ...(s.live ?? { text: "", steps: [], sources: [] }), text: (s.live?.text ?? "") + event.text } };
+            return { ...s, live: { ...(s.live ?? emptyLive()), text: (s.live?.text ?? "") + event.text } };
           case "step": {
-            const live = s.live ?? { text: "", steps: [], sources: [] };
+            const live = s.live ?? emptyLive();
             const existing = live.steps.findIndex((st) => st.call_id === event.call_id);
-            const step: StepState = { call_id: event.call_id, tool: event.tool, label: event.label, status: event.status, result_preview: event.result_preview };
+            const step: StepState = { ...(existing >= 0 ? live.steps[existing] : {}), call_id: event.call_id, tool: event.tool, label: event.label, status: event.status, result_preview: event.result_preview };
             const steps = existing >= 0 ? live.steps.map((st, i) => (i === existing ? step : st)) : [...live.steps, step];
-            return { ...s, live: { ...live, steps } };
+            return { ...s, live: { ...live, steps, plan: advancePlan(live.plan, event.tool, event.status === "running" ? "active" : event.status === "completed" ? "done" : null) } };
+          }
+          case "plan":
+            return { ...s, live: { ...(s.live ?? emptyLive()), plan: { goal: event.goal, steps: event.steps } } };
+          case "verification": {
+            const live = s.live ?? emptyLive();
+            const steps = live.steps.map((st) => (st.call_id === event.call_id ? { ...st, verification: { status: event.status, detail: event.detail } } : st));
+            return { ...s, live: { ...live, steps, plan: markPlanKind(live.plan, "verify", "done") } };
           }
           case "approval_required":
-            return { ...s, approval: { approval_id: event.approval_id, run_id: event.run_id, proposals: event.proposals }, runStatus: "waiting_for_approval" };
+            return {
+              ...s,
+              approval: { approval_id: event.approval_id, run_id: event.run_id, proposals: event.proposals },
+              runStatus: "waiting_for_approval",
+              live: { ...(s.live ?? emptyLive()), plan: markPlanKind(s.live?.plan ?? null, "propose", "waiting") },
+            };
           case "message": {
             const message: AIMessage = {
               id: event.message_id,
@@ -138,6 +154,7 @@ export function useChat(initialThreadId: string | null) {
               run_id: s.runId,
               created_at: new Date().toISOString(),
               steps: s.live?.steps.length ? s.live.steps : undefined,
+              plan: s.live?.plan ? closePlan(s.live.plan) : null,
             };
             return { ...s, messages: [...s.messages, message], live: null };
           }
@@ -179,7 +196,7 @@ export function useChat(initialThreadId: string | null) {
       const trimmed = text.trim();
       if (!trimmed) return;
       const optimistic: AIMessage = { id: `local-${Date.now()}`, role: "user", content: trimmed, sources: null, run_id: null, created_at: new Date().toISOString() };
-      setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: { text: "", steps: [], sources: [] }, approval: null }));
+      setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: emptyLive(), approval: null }));
       void runStream((signal) => aiApi.chat({ message: trimmed, thread_id: state.threadId, note_id: noteId ?? null }, handleEvent, signal));
     },
     [handleEvent, runStream, state.threadId],
@@ -189,7 +206,7 @@ export function useChat(initialThreadId: string | null) {
     (approvedCallIds: string[]) => {
       const approval = state.approval;
       if (!approval) return;
-      setState((s) => ({ ...s, approval: null, live: s.live ?? { text: "", steps: [], sources: [] } }));
+      setState((s) => ({ ...s, approval: null, live: s.live ?? emptyLive() }));
       void runStream((signal) =>
         aiApi.approve(
           { run_id: approval.run_id, approval_id: approval.approval_id, approved_call_ids: approvedCallIds, reject_all: approvedCallIds.length === 0 },
@@ -218,6 +235,30 @@ export function useChat(initialThreadId: string | null) {
   return { state, send, decide, stop };
 }
 
+/** Mirrors the server's plan bookkeeping so the checklist moves as steps stream in. */
+function advancePlan(plan: AIPlan | null, tool: string, status: "active" | "done" | null): AIPlan | null {
+  if (!plan || !status) return plan;
+  return markPlan(plan, (step) => step.tools.includes(tool), status);
+}
+
+function markPlanKind(plan: AIPlan | null, kind: PlanStep["kind"], status: PlanStep["status"]): AIPlan | null {
+  if (!plan) return plan;
+  return markPlan(plan, (step) => step.kind === kind, status);
+}
+
+function markPlan(plan: AIPlan, matches: (step: PlanStep) => boolean, status: PlanStep["status"]): AIPlan {
+  const steps = plan.steps.map((s) => ({ ...s }));
+  const index = steps.findIndex((s) => s.status !== "done" && s.status !== "skipped" && matches(s));
+  if (index < 0) return plan;
+  steps[index]!.status = status;
+  for (let i = 0; i < index; i++) if (steps[i]!.status !== "done" && steps[i]!.status !== "skipped") steps[i]!.status = "done";
+  return { ...plan, steps };
+}
+
+function closePlan(plan: AIPlan): AIPlan {
+  return { ...plan, steps: plan.steps.map((s) => (s.status === "done" ? s : { ...s, status: s.kind === "answer" ? "done" : "skipped" })) };
+}
+
 export function summarizeToolCall(tool: string, args: Record<string, unknown>): string {
   const title = typeof args.title === "string" ? `“${args.title}”` : "";
   switch (tool) {
@@ -229,6 +270,10 @@ export function summarizeToolCall(tool: string, args: Record<string, unknown>): 
       return "Mark a task as done";
     case "search_notes":
       return `Search notes for “${String(args.query ?? "")}”`;
+    case "search_everything":
+      return `Search everything for “${String(args.query ?? "")}”`;
+    case "plan_steps":
+      return `Plan: ${String(args.goal ?? "")}`;
     default:
       return tool.replace(/_/g, " ");
   }

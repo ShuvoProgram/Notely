@@ -4,6 +4,11 @@
                              │
                              └─ interrupt() when any call needs human approval
 
+The PRD pipeline (discover → plan → read → propose → approve → execute → verify) maps onto
+this loop: tool discovery is the per-run registry, planning is the `plan_steps` tool, proposals
+are the interrupt payload, and verification is the read-back the framework runs after every
+approved write (`ToolSpec.verify`).
+
 Nodes receive a `Runtime[AgentContext]`; the context carries the DB session, user and run id
 and is *not* checkpointed. State (messages, sources) is checkpointed per thread so a run can
 pause for approval and resume later.
@@ -26,11 +31,13 @@ from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.cancel import cancel_key
 from app.ai.policy import ToolPolicyEngine, ValidatedCall
 from app.ai.prompts import assistant_system_prompt
-from app.ai.tools.base import ToolContext, ToolRegistry, args_to_dict
+from app.ai.tools.base import ToolContext, ToolRegistry, Verification, args_to_dict
 from app.core.config import get_settings
 from app.core.exceptions import APIError
+from app.core.kv import kv
 from app.core.logging import get_logger
 from app.db.base import utcnow
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
@@ -166,8 +173,22 @@ async def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict[
     for call in accepted:
         if call.call_id not in approved_ids:
             continue
+        if await kv.get(cancel_key(ctx.run_id)):
+            # The user pressed Stop while earlier calls ran: nothing further may execute,
+            # especially approved writes.
+            outputs.append(
+                ToolMessage(
+                    content=json.dumps({"cancelled": True, "message": "The user stopped the run."}),
+                    tool_call_id=call.call_id,
+                    name=call.spec.name,
+                )
+            )
+            continue
         result = await _execute(ctx, call, writer)
-        sources.extend(result.pop("sources", []) or [])
+        retrieved_at = utcnow().isoformat()
+        sources.extend(
+            {**src, "retrieved_at": retrieved_at} for src in (result.pop("sources", []) or [])
+        )
         outputs.append(
             ToolMessage(
                 content=json.dumps(result, default=str),
@@ -208,6 +229,8 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
             tool_ctx.credential = connections.vault.load(connection).access_token
         result = await spec.handler(tool_ctx, call.args)
         status = "completed"
+        if "plan" in spec.tags and isinstance(result.get("plan"), dict):
+            writer({"type": "plan", "call_id": call.call_id, **result["plan"]})
     except ProviderError as exc:
         title, body = exc.user_message()
         result = {"error": body, "code": f"PROVIDER_{exc.kind.value.upper()}", "title": title}
@@ -247,7 +270,43 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
             "executed_at": utcnow().isoformat(),
         }
     )
+    if status == "completed" and spec.verify is not None and spec.risk != RiskLevel.read:
+        verification = await _verify(ctx, call, tool_ctx, result)
+        result["verification"] = verification.to_dict()
+        writer({"type": "verification", "call_id": call.call_id, **verification.to_dict()})
     return result
+
+
+async def _verify(
+    ctx: AgentContext, call: ValidatedCall, tool_ctx: ToolContext, result: dict[str, Any]
+) -> Verification:
+    """Read back a write. Never raises: an unreachable provider yields `unverified`, a read-back
+    that contradicts the write yields `failed`. Audited like any other external access."""
+    spec = call.spec
+    assert spec.verify is not None
+    try:
+        verification = await spec.verify(tool_ctx, call.args, result)
+    except ProviderError as exc:
+        verification = Verification.unverified(
+            f"Could not confirm with {spec.provider}: {exc.user_message()[1]}"
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("tool_verification_failed", extra={"tool": spec.name})
+        verification = Verification.unverified("Could not confirm the change")
+    await AuditService(ctx.db).record(
+        ctx.user,
+        provider=spec.provider,
+        action="verify",
+        tool_name=spec.name,
+        risk_level=RiskLevel.read,
+        status=verification.status,
+        run_id=ctx.run_id,
+        connection_id=spec.connection_id,
+        request_metadata={"call_id": call.call_id},
+        result_metadata={"detail": verification.detail[:200]},
+    )
+    await ctx.db.commit()
+    return verification
 
 
 def _preview(result: dict[str, Any]) -> str:
@@ -261,6 +320,8 @@ def _preview(result: dict[str, Any]) -> str:
         return f"{len(result['tasks'])} task(s)"
     if "title" in result:
         return str(result["title"])
+    if "plan" in result:
+        return f"{len(result['plan'].get('steps', []))} step(s)"
     return "done"
 
 

@@ -4,11 +4,12 @@ class handles client configuration, token refresh, the HTTP client and the stand
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
 
-from app.ai.tools.base import ToolContext, ToolSpec, untrusted
+from app.ai.tools.base import ToolContext, ToolSpec, Verification, untrusted
 from app.core.config import Settings
 from app.core.oauth import OAuthClient, OAuthClientConfig, OAuthEndpoints, OAuthTokens
 from app.integrations.base.capabilities import Capability, risk_for
@@ -23,6 +24,21 @@ from app.integrations.base.provider import (
 )
 
 Handler = Callable[[ProviderContext, Any], Awaitable[dict[str, Any]]]
+Verifier = Callable[[ProviderContext, Any, dict[str, Any]], Awaitable[Verification]]
+
+
+@dataclass(frozen=True)
+class ProviderTool:
+    """One tool an adapter exposes. `verify` (write tools) reads the object back after the
+    write so the assistant can say "created and verified" rather than assuming."""
+
+    name: str
+    description: str
+    args_model: type[BaseModel]
+    capability: Capability
+    handler: Handler
+    summarize: Callable[[Any], str]
+    verify: Verifier | None = None
 
 
 class RestOAuthProvider(IntegrationProvider):
@@ -130,57 +146,66 @@ class RestOAuthProvider(IntegrationProvider):
         """A harmless read that proves the API is reachable. Returns a short human detail."""
         raise NotImplementedError
 
-    def build_tools(
-        self,
-    ) -> list[tuple[str, str, type[BaseModel], Capability, Handler, Callable[[Any], str]]]:
-        """(name, description, args model, capability, handler, summarizer) per tool."""
+    def build_tools(self) -> list[ProviderTool]:
         raise NotImplementedError
 
     async def tools(self, ctx: ProviderContext) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
-        for name, description, args_model, capability, handler, summarize in self.build_tools():
+        for tool in self.build_tools():
             specs.append(
                 ToolSpec(
-                    name=f"{self.manifest.id}__{name}",
-                    description=f"[{self.manifest.name}] {description}",
-                    args_schema=args_model,
-                    risk=risk_for(capability),
-                    capability=capability.value,
+                    name=f"{self.manifest.id}__{tool.name}",
+                    description=f"[{self.manifest.name}] {tool.description}",
+                    args_schema=tool.args_model,
+                    risk=risk_for(tool.capability),
+                    capability=tool.capability.value,
                     provider=self.manifest.id,
                     connection_id=ctx.connection.id,
-                    handler=self._bind(handler),
-                    summarize=summarize,
+                    handler=self._bind(tool.handler),
+                    summarize=tool.summarize,
+                    verify=self._bind_verifier(tool.verify) if tool.verify else None,
                 )
             )
         return specs
 
+    async def _provider_context(self, tool_ctx: ToolContext) -> ProviderContext:
+        """Rebuild a ProviderContext from the tool context: the framework already resolved the
+        connection and decrypted the credential (ToolContext.credential)."""
+        from app.core.config import get_settings
+        from app.integrations.base.provider import ProviderCredentials
+        from app.services.connection_service import ConnectionService
+
+        settings = get_settings()
+        connections = ConnectionService(tool_ctx.db, settings)
+        spec_conn = next(
+            (
+                conn
+                for conn in await connections.list_usable(tool_ctx.user)
+                if conn.provider == self.manifest.id
+            ),
+            None,
+        )
+        if spec_conn is None:
+            raise ProviderError(ProviderErrorKind.expired, provider=self.manifest.id)
+        return ProviderContext(
+            user=tool_ctx.user,
+            db=tool_ctx.db,
+            connection=spec_conn,
+            credentials=ProviderCredentials(access_token=tool_ctx.credential),
+            settings=settings,
+        )
+
     def _bind(self, handler: Handler) -> Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]:
-        provider = self
-
         async def run(tool_ctx: ToolContext, args: Any) -> dict[str, Any]:
-            # Rebuild a ProviderContext from the tool context: the framework already resolved the
-            # connection and decrypted the credential (ToolContext.credential).
-            from app.core.config import get_settings
-            from app.integrations.base.provider import ProviderCredentials
-            from app.services.connection_service import ConnectionService
+            return await handler(await self._provider_context(tool_ctx), args)
 
-            settings = get_settings()
-            spec_conn = None
-            connections = ConnectionService(tool_ctx.db, settings)
-            for conn in await connections.list_usable(tool_ctx.user):
-                if conn.provider == provider.manifest.id:
-                    spec_conn = conn
-                    break
-            if spec_conn is None:
-                raise ProviderError(ProviderErrorKind.expired, provider=provider.manifest.id)
-            ctx = ProviderContext(
-                user=tool_ctx.user,
-                db=tool_ctx.db,
-                connection=spec_conn,
-                credentials=ProviderCredentials(access_token=tool_ctx.credential),
-                settings=settings,
-            )
-            return await handler(ctx, args)
+        return run
+
+    def _bind_verifier(
+        self, verifier: Verifier
+    ) -> Callable[[ToolContext, Any, dict[str, Any]], Awaitable[Verification]]:
+        async def run(tool_ctx: ToolContext, args: Any, result: dict[str, Any]) -> Verification:
+            return await verifier(await self._provider_context(tool_ctx), args, result)
 
         return run
 

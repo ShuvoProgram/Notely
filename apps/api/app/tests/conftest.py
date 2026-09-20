@@ -16,7 +16,11 @@ os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # intentionally unr
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-0123456789")
 os.environ.setdefault("FRONTEND_ORIGIN", "http://localhost:3000")
 os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "10"  # tests assert the production default
-os.environ["AI_PROVIDER"] = "fake"
+# Scripted model by default; the opt-in agent evals (AI_EVAL=1) keep whatever provider is set.
+if os.environ.get("AI_EVAL") == "1":
+    os.environ.setdefault("AI_PROVIDER", "litellm")
+else:
+    os.environ["AI_PROVIDER"] = "fake"
 os.environ["AI_CHECKPOINTER"] = "memory"
 # Deterministic Fernet key so encrypted-at-rest assertions are stable.
 os.environ["ENCRYPTION_KEY"] = "8bVJ7u2Q9mJmZcJ3b8lZ5G3Q0eVfG2Yg2b8nQx4bY9k="

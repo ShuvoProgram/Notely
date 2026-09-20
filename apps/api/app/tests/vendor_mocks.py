@@ -25,6 +25,10 @@ class Captured:
         return json.loads(req.content.decode() or "null")
 
 
+def r_json(request: httpx.Request) -> Any:
+    return json.loads(request.content or b"{}")
+
+
 def _json(status: int, body: Any) -> httpx.Response:
     return httpx.Response(status, json=body)
 
@@ -33,6 +37,8 @@ class VendorMock:
     """One handler serves both the token endpoint and the API for a provider id."""
 
     def __init__(self, provider: str) -> None:
+        # Minimal per-mock state so read-backs after writes see what was written.
+        self.state: dict[str, Any] = {}
         self.provider = provider
         self.captured = Captured()
         self.fail_auth = False
@@ -102,9 +108,8 @@ class VendorMock:
                 },
             )
         if path == "/api/conversations.history":
-            return _json(
-                200, {"ok": True, "messages": [{"ts": "1.0", "user": "U2", "text": "hello"}]}
-            )
+            ts = self._form(r).get("latest") or "1.0"
+            return _json(200, {"ok": True, "messages": [{"ts": ts, "user": "U2", "text": "hello"}]})
         if path == "/api/chat.postMessage":
             return _json(200, {"ok": True, "ts": "2.0", "channel": self._form(r).get("channel")})
         return None
@@ -180,7 +185,24 @@ class VendorMock:
                 },
             )
         if path == "/v1/pages" and r.method == "POST":
+            self.state["notion_title"] = r_json(r)["properties"]["title"]["title"][0]["text"][
+                "content"
+            ]
             return _json(200, {"id": "p2", "url": "https://notion.so/p2"})
+        if path == "/v1/pages/p2" and r.method == "GET":
+            return _json(
+                200,
+                {
+                    "id": "p2",
+                    "archived": False,
+                    "properties": {
+                        "title": {
+                            "type": "title",
+                            "title": [{"plain_text": self.state.get("notion_title", "")}],
+                        }
+                    },
+                },
+            )
         return None
 
     # --- Todoist --------------------------------------------------------------------------------
@@ -210,9 +232,23 @@ class VendorMock:
                 ],
             )
         if path == "/rest/v2/tasks" and r.method == "POST":
+            self.state["todoist_content"] = r_json(r)["content"]
             return _json(200, {"id": "t2", "url": "https://todoist.com/t2"})
+        if path == "/rest/v2/tasks/t2" and r.method == "GET":
+            # Test knobs: simulate a contradicting or unavailable read-back.
+            if self.state.get("todoist_readback_status"):
+                return _json(int(self.state["todoist_readback_status"]), {"error": "down"})
+            content = self.state.get("todoist_readback_content") or self.state.get(
+                "todoist_content"
+            )
+            return _json(200, {"id": "t2", "content": content})
         if path == "/rest/v2/tasks/t1/close":
+            self.state["todoist_t1_closed"] = True
             return httpx.Response(204)
+        if path == "/rest/v2/tasks/t1" and r.method == "GET":
+            if self.state.get("todoist_t1_closed"):
+                return _json(404, {"error": "not found"})
+            return _json(200, {"id": "t1", "content": "Finalize pricing", "is_completed": False})
         return None
 
     # --- Asana ----------------------------------------------------------------------------------
@@ -270,9 +306,24 @@ class VendorMock:
                 },
             )
         if path == "/api/1.0/tasks" and r.method == "POST":
+            self.state["asana_name"] = r_json(r)["data"]["name"]
             return _json(201, {"data": {"gid": "t2", "permalink_url": "https://app.asana.com/t2"}})
+        if path == "/api/1.0/tasks/t2" and r.method == "GET":
+            return _json(200, {"data": {"gid": "t2", "name": self.state.get("asana_name")}})
         if path == "/api/1.0/tasks/t1" and r.method == "PUT":
+            self.state["asana_t1_completed"] = True
             return _json(200, {"data": {"gid": "t1", "completed": True}})
+        if path == "/api/1.0/tasks/t1" and r.method == "GET":
+            return _json(
+                200,
+                {
+                    "data": {
+                        "gid": "t1",
+                        "name": "Launch pricing page",
+                        "completed": bool(self.state.get("asana_t1_completed")),
+                    }
+                },
+            )
         return None
 
     # --- Jira -----------------------------------------------------------------------------------
@@ -352,9 +403,16 @@ class VendorMock:
                 },
             )
         if path == f"{base}/issue" and r.method == "POST":
+            self.state["jira_summary"] = r_json(r)["fields"]["summary"]
             return _json(201, {"id": "10001", "key": "PROJ-500"})
+        if path == f"{base}/issue/PROJ-500" and r.method == "GET":
+            return _json(
+                200, {"key": "PROJ-500", "fields": {"summary": self.state.get("jira_summary")}}
+            )
         if path == f"{base}/issue/PROJ-482/comment" and r.method == "POST":
             return _json(201, {"id": "c1"})
+        if path == f"{base}/issue/PROJ-482/comment/c1" and r.method == "GET":
+            return _json(200, {"id": "c1"})
         return None
 
     # --- Microsoft (Teams + Outlook) ------------------------------------------------------------
@@ -399,6 +457,8 @@ class VendorMock:
             )
         if path == "/v1.0/teams/team-1/channels/chan-1/messages" and r.method == "POST":
             return _json(201, {"id": "msg-2", "webUrl": "https://teams.microsoft.com/m2"})
+        if path == "/v1.0/teams/team-1/channels/chan-1/messages/msg-2" and r.method == "GET":
+            return _json(200, {"id": "msg-2", "deletedDateTime": None})
         if path == "/v1.0/me/messages" and r.method == "GET":
             return _json(
                 200,
@@ -432,8 +492,23 @@ class VendorMock:
             )
         if path == "/v1.0/me/messages" and r.method == "POST":
             return _json(201, {"id": "draft-1", "webLink": "https://outlook.office.com/draft-1"})
+        if path == "/v1.0/me/messages/draft-1" and r.method == "GET":
+            return _json(200, {"id": "draft-1", "isDraft": True, "subject": "Draft"})
         if path == "/v1.0/me/sendMail":
+            self.state.setdefault("sent", []).append(r_json(r)["message"]["subject"])
             return httpx.Response(202)
+        if path == "/v1.0/me/mailFolders/sentitems/messages":
+            return _json(
+                200,
+                {
+                    "value": [
+                        {"id": f"s{i}", "subject": s}
+                        for i, s in enumerate(self.state.get("sent", []))
+                    ]
+                },
+            )
+        if path == "/v1.0/me/events/ev-2" and r.method == "GET":
+            return _json(200, {"id": "ev-2", "subject": "Follow-up", "isCancelled": False})
         if path == "/v1.0/me/calendarView":
             return _json(
                 200,
@@ -518,7 +593,23 @@ class VendorMock:
             return httpx.Response(200, content=f"# Plan\nfor {arg['path']}".encode())
         if host == "content.dropboxapi.com" and path == "/2/files/upload":
             arg = json.loads(r.headers["dropbox-api-arg"])
+            self.state.setdefault("dropbox_files", {})[arg["path"]] = bytes(r.content)
             return _json(200, {"id": "id:2", "path_display": arg["path"], "size": len(r.content)})
+        if path == "/2/files/get_metadata":
+            from app.integrations.dropbox.provider import dropbox_content_hash
+
+            wanted = r_json(r)["path"]
+            files = self.state.get("dropbox_files", {})
+            if wanted not in files:
+                return _json(409, {"error_summary": "path/not_found/"})
+            return _json(
+                200,
+                {
+                    ".tag": "file",
+                    "path_display": wanted,
+                    "content_hash": dropbox_content_hash(files[wanted]),
+                },
+            )
         return None
 
 

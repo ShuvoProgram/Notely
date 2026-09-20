@@ -4,6 +4,8 @@ Event types yielded (each a dict with a `type`):
   run                → {run_id, thread_id, status}
   token              → {text}                       streamed assistant text
   step               → {call_id, tool, label, status, result_preview?}
+  plan               → {goal, steps[{title, kind, tools, status}]}  declared by the agent
+  verification       → {call_id, status, detail}   read-back after an approved write
   approval_required  → {approval_id, proposals[]}   run paused; client must call /ai/approve
   message            → {message_id, content, sources[]}  final assistant message
   done               → {run_id, status, usage}
@@ -12,6 +14,7 @@ Event types yielded (each a dict with a `type`):
 
 from __future__ import annotations
 
+import copy
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, cast
@@ -23,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.agent import AgentContext, build_graph
+from app.ai.cancel import CANCEL_TTL, cancel_key
 from app.ai.checkpoint import get_checkpointer
 from app.ai.llm import get_chat_model, provider_name, resolve_model_alias
 from app.ai.policy import ToolPolicyEngine
@@ -49,12 +53,6 @@ from app.models.ai import (
 from app.models.user import User
 
 log = get_logger(__name__)
-
-CANCEL_TTL = 3600
-
-
-def cancel_key(run_id: uuid.UUID) -> str:
-    return f"ai:cancel:{run_id}"
 
 
 class AIThreadService:
@@ -297,18 +295,22 @@ class AIRunner:
             )
             async for part in stream:
                 mode, data = cast(tuple[str, Any], part)
-                if await kv.get(cancel_key(run.id)):
-                    raise _Cancelled()
+                may_stop = mode == "updates"
                 if mode == "messages":
                     chunk, meta = cast(tuple[Any, dict[str, Any]], data)
                     if isinstance(chunk, AIMessageChunk) and meta.get("langgraph_node") == "agent":
+                        may_stop = True  # between streamed tokens: nothing to record yet
                         text = _text_of(chunk.content)
                         if text:
                             text_parts.append(text)
                             yield {"type": "token", "text": text}
                 elif mode == "custom":
                     # A node is still executing here, so never touch the DB session: buffer.
-                    if isinstance(data, dict) and data.get("type") == "step":
+                    if isinstance(data, dict) and data.get("type") in (
+                        "step",
+                        "plan",
+                        "verification",
+                    ):
                         pending_steps.append(data)
                         yield data
                 elif mode == "updates":
@@ -335,9 +337,16 @@ class AIRunner:
                                     _accumulate_usage(usage, m)
                         elif node == "tools" and isinstance(update, dict):
                             sources.extend(update.get("sources") or [])
+                            run.sources = _merge_sources(run.sources, update.get("sources") or [])
                             await self._mark_executed(run, update)
                 if interrupted:
                     break
+                # Checked at node boundaries (and between streamed tokens), after bookkeeping,
+                # so a node that already ran is recorded (executed tool calls, audit) before the
+                # run stops and the next node never starts. Custom/tool-message events arrive
+                # while a node is still executing, so they are not a safe place to stop.
+                if may_stop and await kv.get(cancel_key(run.id)):
+                    raise _Cancelled()
         except _Cancelled:
             await self._finish(run, RunStatus.cancelled)
             yield {"type": "done", "run_id": str(run.id), "status": "cancelled", "usage": usage}
@@ -357,6 +366,8 @@ class AIRunner:
         if interrupted:
             run.status = RunStatus.waiting_for_approval
             run.token_usage = {**run.token_usage, **usage} if usage else run.token_usage
+            if run.plan:
+                _mark_plan(run, kind="propose", status="waiting")
             await self.db.commit()
             yield {
                 "type": "done",
@@ -376,18 +387,19 @@ class AIRunner:
             run_id=run.id,
             role=MessageRole.assistant,
             content=content,
-            sources=sources or None,
+            sources=run.sources or None,
             created_at=utcnow(),
         )
         self.db.add(message)
         thread.updated_at = utcnow()
         run.token_usage = {**run.token_usage, **usage} if usage else run.token_usage
+        self._close_plan(run)
         await self._finish(run, RunStatus.completed)
         yield {
             "type": "message",
             "message_id": str(message.id),
             "content": content,
-            "sources": sources,
+            "sources": run.sources,
         }
         yield {
             "type": "done",
@@ -431,19 +443,52 @@ class AIRunner:
         await self.db.refresh(run, attribute_names=["tool_calls", "approvals"])
         return approval
 
-    def _record_steps(self, run: AIRun, steps: list[dict[str, Any]]) -> None:
-        """Fold buffered step events into run.steps (committed with the next node update)."""
-        recorded = list(run.steps)
-        for step in steps:
-            if step.get("status") == "running":
+    def _record_steps(self, run: AIRun, events: list[dict[str, Any]]) -> None:
+        """Fold buffered step/plan/verification events into the run (committed with the next
+        node update)."""
+        # Deep copies throughout: SQLAlchemy only emits an UPDATE for a JSON column when the new
+        # value compares unequal to the loaded one, so in-place mutation would be lost.
+        recorded = copy.deepcopy(list(run.steps))
+        for event in events:
+            kind = event.get("type")
+            if kind == "plan":
+                run.plan = {"goal": event.get("goal", ""), "steps": list(event.get("steps", []))}
+                continue
+            if kind == "verification":
+                for s in recorded:
+                    if s.get("call_id") == event.get("call_id"):
+                        s["verification"] = {
+                            "status": event.get("status"),
+                            "detail": event.get("detail"),
+                        }
+                if run.plan:
+                    _mark_plan(run, kind="verify", status="done")
+                continue
+            if event.get("status") == "running":
                 recorded.append(
-                    {k: step[k] for k in ("call_id", "tool", "label", "status") if k in step}
+                    {k: event[k] for k in ("call_id", "tool", "label", "status") if k in event}
                 )
+                if run.plan:
+                    _mark_plan(run, tool=str(event.get("tool")), status="active")
             else:
                 for s in recorded:
-                    if s.get("call_id") == step.get("call_id"):
-                        s["status"] = step.get("status")
+                    if s.get("call_id") == event.get("call_id"):
+                        s["status"] = event.get("status")
+                if run.plan and event.get("status") == "completed":
+                    _mark_plan(run, tool=str(event.get("tool")), status="done")
         run.steps = recorded
+
+    def _close_plan(self, run: AIRun) -> None:
+        """Plan progress is derived from execution metadata, never from model claims: a step is
+        done when one of its tools completed; whatever is left when the run finishes is marked
+        done for the `answer` step and skipped otherwise."""
+        if not run.plan:
+            return
+        steps = [dict(step) for step in run.plan.get("steps", [])]
+        for step in steps:
+            if step.get("status") != "done":
+                step["status"] = "done" if step.get("kind") == "answer" else "skipped"
+        run.plan = {**run.plan, "steps": steps}
 
     async def _mark_executed(self, run: AIRun, update: dict[str, Any]) -> None:
         """Reflect tool outcomes on persisted tool-call rows (approved ones only exist as rows)."""
@@ -453,16 +498,21 @@ class AIRunner:
             tc = by_call.get(getattr(m, "tool_call_id", ""))
             if tc is None or tc.status not in (ToolCallStatus.approved,):
                 continue
-            tc.executed_at = utcnow()
             try:
                 import json
 
                 body = json.loads(m.content) if isinstance(m.content, str) else {}
             except ValueError:
                 body = {}
+            if body.get("cancelled"):
+                tc.error = "Stopped before execution"  # stays `approved`: it never ran
+                continue
+            tc.executed_at = utcnow()
             tc.status = ToolCallStatus.failed if "error" in body else ToolCallStatus.executed
             tc.result = {"preview": str(body)[:500]}
             tc.error = body.get("error")
+            if isinstance(body.get("verification"), dict):
+                tc.verification = body["verification"]
         await self.db.commit()
 
     async def _finish(self, run: AIRun, status: RunStatus, *, error: str | None = None) -> None:
@@ -474,6 +524,45 @@ class AIRunner:
 
 class _Cancelled(Exception):
     pass
+
+
+def _mark_plan(
+    run: AIRun, *, status: str, tool: str | None = None, kind: str | None = None
+) -> None:
+    """Mark the first pending plan step that matches a completed tool (or a step kind)."""
+    plan = run.plan
+    if not plan:
+        return
+    steps = copy.deepcopy(list(plan.get("steps", [])))
+    for step in steps:
+        if step.get("status") in ("done", "skipped"):
+            continue
+        matches = (tool is not None and tool in (step.get("tools") or [])) or (
+            kind is not None and step.get("kind") == kind
+        )
+        if matches:
+            step["status"] = status
+            # Everything before a completed step is implicitly done (the model may skip tools).
+            for earlier in steps:
+                if earlier is step:
+                    break
+                if earlier.get("status") in ("pending", "active", "waiting"):
+                    earlier["status"] = "done"
+            break
+    run.plan = {**plan, "steps": steps}
+
+
+def _merge_sources(
+    existing: list[dict[str, Any]], new: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    seen = {(s.get("provider"), s.get("object_id")) for s in existing}
+    merged = copy.deepcopy(list(existing))
+    for src in new:
+        key = (src.get("provider"), src.get("object_id"))
+        if key not in seen:
+            seen.add(key)
+            merged.append(dict(src))
+    return merged
 
 
 def _text_of(content: Any) -> str:

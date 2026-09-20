@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
@@ -16,9 +17,20 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 CONTENT = "https://content.dropboxapi.com/2"
+BLOCK = 4 * 1024 * 1024
+
+
+def dropbox_content_hash(data: bytes) -> str:
+    """Dropbox's content_hash: sha256 of the concatenated sha256s of 4 MiB blocks."""
+    import hashlib
+
+    blocks = [data[i : i + BLOCK] for i in range(0, len(data), BLOCK)] or [b""]
+    return hashlib.sha256(b"".join(hashlib.sha256(b).digest() for b in blocks)).hexdigest()
+
+
 TEXT_EXTENSIONS = (".txt", ".md", ".markdown", ".csv", ".json", ".paper")
 MAX_TEXT_BYTES = 200_000
 
@@ -205,8 +217,20 @@ class DropboxProvider(RestOAuthProvider):
                 "size": meta.get("size"),
             }
 
+        async def verify_upload_text_file(
+            ctx: ProviderContext, a: UploadTextFileArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                meta = (
+                    await http.post("/files/get_metadata", json={"path": result["path"]})
+                ).json()
+            expected = dropbox_content_hash(a.content.encode("utf-8"))
+            if meta.get("content_hash") and meta["content_hash"] != expected:
+                return Verification.failed("File exists but its content differs")
+            return Verification.verified("File is in Dropbox with the expected content")
+
         return [
-            (
+            ProviderTool(
                 "search_files",
                 "Search Dropbox files.",
                 SearchFilesArgs,
@@ -214,7 +238,7 @@ class DropboxProvider(RestOAuthProvider):
                 search_files,
                 lambda a: f"Search Dropbox for “{a.query}”",
             ),
-            (
+            ProviderTool(
                 "list_folder",
                 "List a Dropbox folder.",
                 ListFolderArgs,
@@ -222,7 +246,7 @@ class DropboxProvider(RestOAuthProvider):
                 list_folder,
                 lambda a: f"List Dropbox folder {a.path or '/'}",
             ),
-            (
+            ProviderTool(
                 "read_text_file",
                 "Read a text file from Dropbox.",
                 ReadTextFileArgs,
@@ -230,12 +254,13 @@ class DropboxProvider(RestOAuthProvider):
                 read_text_file,
                 lambda a: f"Read Dropbox file {a.path}",
             ),
-            (
+            ProviderTool(
                 "upload_text_file",
                 "Save a text file to Dropbox.",
                 UploadTextFileArgs,
                 Capability.create,
                 upload_text_file,
                 lambda a: f"Save Dropbox file {a.path}",
+                verify=verify_upload_text_file,
             ),
         ]

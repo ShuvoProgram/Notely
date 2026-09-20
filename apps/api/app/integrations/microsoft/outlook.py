@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
@@ -15,6 +16,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
+from app.integrations.base.rest import ProviderTool
 from app.integrations.microsoft.base import MicrosoftGraphProvider
 
 
@@ -275,8 +277,52 @@ class OutlookProvider(MicrosoftGraphProvider):
                 "subject": a.subject,
             }
 
+        async def verify_draft_mail(
+            ctx: ProviderContext, a: DraftMailArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                msg = (
+                    await http.get(
+                        f"/me/messages/{result['draft_id']}", params={"$select": "isDraft,subject"}
+                    )
+                ).json()
+            if msg.get("isDraft") is False:
+                return Verification.failed("The message is not a draft any more")
+            return Verification.verified("Draft is in your Outlook drafts")
+
+        async def verify_send_mail(
+            ctx: ProviderContext, a: SendMailArgs, result: dict[str, Any]
+        ) -> Verification:
+            # sendMail returns nothing to read back; look for the message in Sent Items.
+            async with self.http(ctx) as http:
+                sent = (
+                    await http.get(
+                        "/me/mailFolders/sentitems/messages",
+                        params={"$top": 10, "$select": "subject", "$orderby": "sentDateTime desc"},
+                    )
+                ).json()
+            if any(m.get("subject") == a.subject for m in sent.get("value", [])):
+                return Verification.verified("Message is in Sent Items")
+            return Verification.unverified(
+                "Message not in Sent Items yet (it may still be sending)"
+            )
+
+        async def verify_create_event(
+            ctx: ProviderContext, a: CreateEventArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                event = (
+                    await http.get(
+                        f"/me/events/{result['event_id']}",
+                        params={"$select": "subject,isCancelled"},
+                    )
+                ).json()
+            if event.get("isCancelled"):
+                return Verification.failed("The event is cancelled")
+            return Verification.verified("Event is on your calendar")
+
         return [
-            (
+            ProviderTool(
                 "search_mail",
                 "Search your Outlook mail.",
                 SearchMailArgs,
@@ -284,7 +330,7 @@ class OutlookProvider(MicrosoftGraphProvider):
                 search_mail,
                 lambda a: f"Search Outlook mail for “{a.query}”",
             ),
-            (
+            ProviderTool(
                 "read_mail",
                 "Read an email.",
                 ReadMailArgs,
@@ -292,23 +338,25 @@ class OutlookProvider(MicrosoftGraphProvider):
                 read_mail,
                 lambda a: "Read an Outlook email",
             ),
-            (
+            ProviderTool(
                 "draft_mail",
                 "Create an email draft.",
                 DraftMailArgs,
                 Capability.draft,
                 draft_mail,
                 lambda a: f"Draft email to {', '.join(a.to)}: “{a.subject}”",
+                verify=verify_draft_mail,
             ),
-            (
+            ProviderTool(
                 "send_mail",
                 "Send an email now.",
                 SendMailArgs,
                 Capability.send,
                 send_mail,
                 lambda a: f"Send email to {', '.join(a.to)}: “{a.subject}”",
+                verify=verify_send_mail,
             ),
-            (
+            ProviderTool(
                 "list_events",
                 "List calendar events.",
                 ListEventsArgs,
@@ -316,12 +364,13 @@ class OutlookProvider(MicrosoftGraphProvider):
                 list_events,
                 lambda a: "List Outlook calendar events",
             ),
-            (
+            ProviderTool(
                 "create_event",
                 "Create a calendar event.",
                 CreateEventArgs,
                 Capability.schedule,
                 create_event,
                 lambda a: f"Create event “{a.subject}” at {a.start.isoformat(timespec='minutes')}",
+                verify=verify_create_event,
             ),
         ]

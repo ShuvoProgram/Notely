@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
@@ -15,7 +16,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 NOTION_VERSION = "2022-06-28"
 
@@ -179,8 +180,20 @@ class NotionProvider(RestOAuthProvider):
                 page = (await http.post("/pages", json=payload)).json()
             return {"page_id": page.get("id"), "url": page.get("url"), "title": a.title}
 
+        async def verify_create_page(
+            ctx: ProviderContext, a: CreatePageArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                page = (await http.get(f"/pages/{result['page_id']}")).json()
+            if page.get("archived") or page.get("in_trash"):
+                return Verification.failed("The page exists but is archived")
+            title = _title_of(page)
+            if title and title != a.title:
+                return Verification.failed(f"Page title is “{title}”, not what was requested")
+            return Verification.verified("Page exists in Notion")
+
         return [
-            (
+            ProviderTool(
                 "search_pages",
                 "Search Notion pages.",
                 SearchPagesArgs,
@@ -188,7 +201,7 @@ class NotionProvider(RestOAuthProvider):
                 search_pages,
                 lambda a: f"Search Notion for “{a.query}”",
             ),
-            (
+            ProviderTool(
                 "read_page",
                 "Read a Notion page.",
                 ReadPageArgs,
@@ -196,12 +209,13 @@ class NotionProvider(RestOAuthProvider):
                 read_page,
                 lambda a: "Read a Notion page",
             ),
-            (
+            ProviderTool(
                 "create_page",
                 "Create a Notion page under a parent page.",
                 CreatePageArgs,
                 Capability.create,
                 create_page,
                 lambda a: f"Create Notion page “{a.title}”",
+                verify=verify_create_page,
             ),
         ]

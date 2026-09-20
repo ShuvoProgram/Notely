@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
     AuthType,
@@ -14,6 +15,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
+from app.integrations.base.rest import ProviderTool
 from app.integrations.microsoft.base import MicrosoftGraphProvider
 
 
@@ -141,8 +143,22 @@ class TeamsProvider(MicrosoftGraphProvider):
                 ).json()
             return {"message_id": msg.get("id"), "web_url": msg.get("webUrl")}
 
+        async def verify_send_channel_message(
+            ctx: ProviderContext, a: SendChannelMessageArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                msg = (
+                    await http.get(
+                        f"/teams/{a.team_id}/channels/{a.channel_id}/messages/"
+                        f"{result['message_id']}"
+                    )
+                ).json()
+            if msg.get("deletedDateTime"):
+                return Verification.failed("The message was deleted")
+            return Verification.verified("Message is visible in the channel")
+
         return [
-            (
+            ProviderTool(
                 "list_teams",
                 "List your teams and channels.",
                 ListTeamsArgs,
@@ -150,7 +166,7 @@ class TeamsProvider(MicrosoftGraphProvider):
                 list_teams,
                 lambda a: "List Teams channels",
             ),
-            (
+            ProviderTool(
                 "read_channel",
                 "Read recent channel messages.",
                 ReadChannelArgs,
@@ -158,12 +174,13 @@ class TeamsProvider(MicrosoftGraphProvider):
                 read_channel,
                 lambda a: "Read a Teams channel",
             ),
-            (
+            ProviderTool(
                 "send_channel_message",
                 "Post a channel message as you.",
                 SendChannelMessageArgs,
                 Capability.send,
                 send_channel_message,
                 lambda a: f"Post to Teams channel: “{a.text[:60]}”",
+                verify=verify_send_channel_message,
             ),
         ]

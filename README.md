@@ -5,12 +5,14 @@ Capture thoughts. Connect your work. Let AI move things forward.
 Notely is an AI-first notes workspace: a calm note-taking app with a powerful AI layer that can
 read and act across your productivity tools — always with review before anything changes.
 
-**Status:** Phases 1–5 complete — foundation, Notes, AI (LiteLLM gateway, LangGraph agent with
+**Status:** Phases 1–6 complete — foundation, Notes, AI (LiteLLM gateway, LangGraph agent with
 tool policy + human approval, streaming chat, note actions, tasks, audit log), the integration
 framework (provider contract, OAuth/PKCE, encrypted credentials, connection status, capability
-registry, MCP client, marketplace UI) and the MVP providers: **Slack, Notion, Todoist, Asana, Jira,
-Microsoft Teams, Outlook, Dropbox** plus a generic **MCP server**. Search spans notes and every
-connected app. Phase 6 (cross-app AI workflows) is next.
+registry, MCP client, marketplace UI), the MVP providers (**Slack, Notion, Todoist, Asana, Jira,
+Microsoft Teams, Outlook, Dropbox** plus a generic **MCP server**), unified search, and cross-app
+AI: the agent plans multi-step work, reads across notes and connected apps, proposes every change
+for one review, and **verifies each approved write with a read-back** before reporting it.
+Phase 7 (production hardening) is next.
 See [docs/architecture/overview.md](docs/architecture/overview.md) for what exists and what is next.
 
 ## Stack
@@ -99,6 +101,23 @@ Every tool execution is recorded at `/app/settings/activity` → `GET /api/v1/au
 
 > Windows dev: the Postgres checkpointer needs a selector event loop — run uvicorn with
 > `--reload` (as `.claude/launch.json` does) or use Docker.
+
+### Cross-app workflows
+
+Ask for something that spans apps ("Prepare the follow-up from my launch plan") and the assistant
+declares a plan (`plan_steps`), searches notes and every connected app at once
+(`search_everything`), reads what it needs, and proposes all changes together. After you approve,
+each write is **read back** from the app (task exists, page exists, message is in the channel…)
+and the result is shown as *Verified*, *Unverified* (the app gave nothing to read back) or
+*Check failed* — the model is told the same outcome and cannot claim otherwise. Every source the
+answer relied on is listed with the app it came from and when it was fetched.
+
+Agent behaviour evals (tool/provider selection, approval enforcement, prompt-injection and
+hallucination resistance) live in `apps/api/app/tests/evals/` and run against a live model:
+
+```bash
+cd apps/api && AI_EVAL=1 AI_PROVIDER=litellm LITELLM_API_BASE=http://localhost:4000 uv run pytest -m eval app/tests/evals
+```
 
 ## Integrations
 

@@ -96,14 +96,14 @@ async def test_chat_read_tool_runs_without_approval_and_cites_sources(client: As
     assert steps[-1]["status"] == "completed" and steps[-1]["result_preview"] == "1 result(s)"
     message = next(e for e in events if e["type"] == "message")
     assert "pricing page by Friday" in message["content"]
-    assert message["sources"] == [
-        {
-            "provider": "notely",
-            "object_id": note["id"],
-            "title": "Launch plan",
-            "url": f"/app/notes/{note['id']}",
-        }
-    ]
+    (source,) = message["sources"]
+    assert source["retrieved_at"]  # PRD 26: every source records when it was fetched
+    assert {k: v for k, v in source.items() if k != "retrieved_at"} == {
+        "provider": "notely",
+        "object_id": note["id"],
+        "title": "Launch plan",
+        "url": f"/app/notes/{note['id']}",
+    }
     assert events[-1]["type"] == "done" and events[-1]["status"] == "completed"
 
     # Tool results reached the model wrapped as untrusted data.
@@ -200,8 +200,12 @@ async def test_write_tool_requires_approval_then_executes(client: AsyncClient) -
     assert again.status_code == 200
     assert (await read_sse(again))[0]["code"] == "RUN_NOT_WAITING"
 
+    # The write and its read-back verification are both audited.
     audit = (await client.get("/api/v1/audit")).json()["data"]
-    assert [(a["tool_name"], a["status"]) for a in audit] == [("create_task", "completed")]
+    assert {(a["tool_name"], a["action"], a["status"]) for a in audit} == {
+        ("create_task", "verify", "verified"),
+        ("create_task", "create", "completed"),
+    }
 
 
 async def test_reject_all_writes_nothing(client: AsyncClient) -> None:

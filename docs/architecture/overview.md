@@ -195,8 +195,45 @@ token-endpoint shape and PKCE verifier), and `app/tests/test_providers.py` runs 
 end-to-end scenario per provider: OAuth → identity → health test → search → auto read tool →
 approval-gated write tool (nothing reaches the vendor before approval) → audit entries.
 
-## What Phase 6+ adds
+## Cross-app AI (Phase 6)
 
-Cross-app AI workflows (planning across sources, multi-step execution with a single approval
-surface, verification of results), selective indexing into `external_items`, and hardening.
-Each phase reuses the foundations above rather than adding parallel mechanisms.
+The PRD pipeline — tool discovery → plan → read → propose → approve → execute → verify — is
+realised inside the existing `agent ⇄ tools` graph rather than as a second orchestrator:
+
+| Stage | Mechanism |
+|---|---|
+| Tool discovery | Per-run registry: built-ins + tools from the user's usable connections (`ConnectionService.tools_for_user`). |
+| Plan | Built-in `plan_steps` tool (risk `read`, tag `plan`). The model calls it first for multi-step / cross-app requests; the framework streams a `plan` event and stores it on `ai_runs.plan`. |
+| Read | `search_everything` (wraps `UnifiedSearchService`: notes + every connected app, per-source status) plus each app's read tools. All content is `untrusted()`-wrapped. |
+| Propose / approve | Unchanged: `interrupt()` with every proposal; the prompt asks the model to batch changes so the user reviews once. |
+| Execute | Unchanged, plus a cooperative cancel check between approved calls: after *Stop*, remaining approved writes are skipped (`"cancelled"` tool result; tool-call row stays `approved` with `error="Stopped before execution"`). |
+| Verify | `ToolSpec.verify` — a read-back the framework runs after every successful non-read tool. Result `{status: verified | unverified | failed, detail}` is streamed (`verification` event), stored on `ai_tool_calls.verification` and `ai_runs.steps[].verification`, audited (`action="verify"`), and appended to the tool result so the model reports it honestly. |
+
+**Plan progress is derived from execution, never from the model.** `_mark_plan` in
+`app/ai/runner.py` moves a step to `active`/`done` when one of its declared tools runs, to
+`waiting` on an approval pause (`kind=propose`), to `done` on a verification (`kind=verify`), and
+closes the plan when the run finishes (`answer` → done, anything left → skipped). The web client
+mirrors the same rules while streaming (`features/ai/use-chat.ts`).
+
+**Verifiers.** Internal tools re-read the row (`verify_task_created`, …). Each vendor adapter
+declares `ProviderTool(..., verify=...)`: Slack `conversations.history` at the posted `ts`, Notion
+`GET /pages/{id}`, Todoist/Asana `GET /tasks/{id}` (Todoist completion = 404 or `is_completed`),
+Jira `GET /issue/{key}` and `/comment/{id}`, Teams `GET .../messages/{id}`, Outlook `GET
+/me/messages/{id}` (draft), Sent Items lookup (send → `unverified` if not yet there), `GET
+/me/events/{id}`, Dropbox `files/get_metadata` with a content-hash comparison. A read-back that
+throws a `ProviderError` yields `unverified`, never a failed run.
+
+**Source attribution.** Every source now carries `retrieved_at` (PRD 26); sources accumulate on
+`ai_runs.sources` across approval pauses so the final message cites what was read before the pause.
+
+**Evals (PRD 52).** `app/tests/evals/test_agent_evals.py` runs the real pipeline against a live
+model (opt in with `AI_EVAL=1`; skipped otherwise) and grades deterministically from what the
+pipeline did: tool/provider selection, approval enforcement, injection resistance, hallucination
+resistance, planning before writes, honest verification reporting. Vendor APIs stay mocked.
+
+## What Phase 7 adds
+
+Production hardening: security review, rate-limit coverage, observability (tracing/metrics),
+error-handling passes, performance, broader E2E, deployment. Selective indexing into
+`external_items` remains post-MVP. Each phase reuses the foundations above rather than adding
+parallel mechanisms.

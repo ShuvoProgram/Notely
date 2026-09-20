@@ -45,6 +45,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["app/tests"]
+markers = ["eval: agent behaviour evals against a live model (opt in with AI_EVAL=1)"]
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.ruff]

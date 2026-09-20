@@ -133,6 +133,17 @@ CASES: dict[str, dict[str, Any]] = {
 }
 
 
+def write_capability(provider_id: str, tool_name: str) -> str:
+    from app.integrations.registry import get_provider
+
+    provider = get_provider(provider_id)
+    assert provider is not None
+    for tool in provider.build_tools():  # type: ignore[attr-defined]
+        if f"{provider_id}__{tool.name}" == tool_name:
+            return str(tool.capability.value)
+    raise AssertionError(tool_name)
+
+
 @pytest.fixture
 def vendor(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Iterator[VendorMock]:
     provider_id: str = request.param
@@ -263,9 +274,21 @@ async def test_provider_end_to_end(client: Any, vendor: VendorMock) -> None:
     sent = vendor.captured.find(method, path_part)
     assert sent is not None, [f"{r.method} {r.url}" for r in vendor.captured.requests]
 
+    # Phase 6: every provider write is read back and the outcome streamed + persisted.
+    verification = next(e for e in resumed if e["type"] == "verification")
+    assert verification["status"] == "verified", verification
+    run = (await client.get(f"/api/v1/ai/runs/{approval['run_id']}")).json()["data"]
+    written = next(tc for tc in run["tool_calls"] if tc["call_id"] == "c2")
+    assert written["status"] == "executed"
+    assert written["verification"]["status"] == "verified"
+
     audit = (await client.get("/api/v1/audit")).json()["data"]
     assert {a["tool_name"] for a in audit if a["tool_name"]} == {read_name, write_name}
     assert all(a["provider"] == provider_id for a in audit)
+    assert {(a["action"], a["status"]) for a in audit if a["tool_name"] == write_name} == {
+        (write_capability(provider_id, write_name), "completed"),
+        ("verify", "verified"),
+    }
 
 
 @pytest.mark.parametrize("vendor", ["slack", "jira"], indirect=True)

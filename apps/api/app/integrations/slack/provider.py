@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.exceptions import OAuthExchangeFailed
 from app.core.oauth import OAuthEndpoints, OAuthTokens
 from app.integrations.base.capabilities import Capability
@@ -17,7 +18,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 USER_SCOPES = ("search:read", "channels:read", "channels:history", "users:read")
 OPTIONAL_SCOPES = ("chat:write",)
@@ -208,8 +209,26 @@ class SlackProvider(RestOAuthProvider):
             body = await self._call(ctx, "chat.postMessage", channel=a.channel_id, text=a.text)
             return {"ts": body.get("ts"), "channel": body.get("channel")}
 
+        async def verify_post_message(
+            ctx: ProviderContext, a: PostMessageArgs, result: dict[str, Any]
+        ) -> Verification:
+            ts = str(result.get("ts") or "")
+            body = await self._call(
+                ctx,
+                "conversations.history",
+                channel=a.channel_id,
+                latest=ts,
+                oldest=ts,
+                inclusive="true",
+                limit=1,
+            )
+            found = [m for m in body.get("messages", []) if str(m.get("ts")) == ts]
+            if not found:
+                return Verification.failed("The message is not in the channel history")
+            return Verification.verified("Message is visible in the channel")
+
         return [
-            (
+            ProviderTool(
                 "search_messages",
                 "Search Slack messages.",
                 SearchMessagesArgs,
@@ -217,7 +236,7 @@ class SlackProvider(RestOAuthProvider):
                 search_messages,
                 lambda a: f"Search Slack for “{a.query}”",
             ),
-            (
+            ProviderTool(
                 "list_channels",
                 "List public channels.",
                 ListChannelsArgs,
@@ -225,7 +244,7 @@ class SlackProvider(RestOAuthProvider):
                 list_channels,
                 lambda a: "List Slack channels",
             ),
-            (
+            ProviderTool(
                 "read_channel",
                 "Read recent messages in a channel.",
                 ReadChannelArgs,
@@ -233,12 +252,13 @@ class SlackProvider(RestOAuthProvider):
                 read_channel,
                 lambda a: f"Read Slack channel {a.channel_id}",
             ),
-            (
+            ProviderTool(
                 "post_message",
                 "Post a message to a channel as you.",
                 PostMessageArgs,
                 Capability.send,
                 post_message,
                 lambda a: f"Post to Slack channel {a.channel_id}: “{a.text[:60]}”",
+                verify=verify_post_message,
             ),
         ]

@@ -73,6 +73,49 @@ describe("useChat", () => {
     expect(result.current.state.messages.at(-1)?.content).toBe("Created.");
   });
 
+  it("tracks the agent's plan from execution events and keeps verification on the step", async () => {
+    const plan = [
+      { title: "Find launch material", kind: "read" as const, tools: ["search_everything"], status: "pending" as const },
+      { title: "Propose tasks", kind: "propose" as const, tools: ["create_task"], status: "pending" as const },
+      { title: "Confirm they exist", kind: "verify" as const, tools: [], status: "pending" as const },
+      { title: "Summarise", kind: "answer" as const, tools: [], status: "pending" as const },
+    ];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        sse([
+          { type: "run", run_id: "r1", thread_id: "t1", status: "running" },
+          { type: "step", call_id: "p1", tool: "plan_steps", label: "Plan: follow-up", status: "running" },
+          { type: "plan", call_id: "p1", goal: "Prepare the follow-up", steps: plan },
+          { type: "step", call_id: "p1", tool: "plan_steps", label: "Plan: follow-up", status: "completed" },
+          { type: "step", call_id: "c1", tool: "search_everything", label: "Search everything for “pricing”", status: "running" },
+          { type: "step", call_id: "c1", tool: "search_everything", label: "Search everything for “pricing”", status: "completed", result_preview: "3 result(s)" },
+          { type: "approval_required", approval_id: "a1", run_id: "r1", proposals: [{ call_id: "c2", tool_name: "create_task", provider: "notely", risk: "write", summary: "Create task “A”", arguments: { title: "A" } }] },
+          { type: "done", run_id: "r1", status: "waiting_for_approval", usage: {} },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        sse([
+          { type: "run", run_id: "r1", thread_id: "t1", status: "running" },
+          { type: "step", call_id: "c2", tool: "create_task", label: "Create task “A”", status: "running" },
+          { type: "step", call_id: "c2", tool: "create_task", label: "Create task “A”", status: "completed" },
+          { type: "verification", call_id: "c2", status: "verified", detail: "Task “A” is in your task list" },
+          { type: "message", message_id: "m2", content: "Done and verified.", sources: [{ provider: "notely", object_id: "n1", title: "N", url: "/app/notes/n1", retrieved_at: "2026-09-20T00:00:00Z" }] },
+          { type: "done", run_id: "r1", status: "completed", usage: {} },
+        ]),
+      );
+    const { result } = renderHook(() => useChat(null), { wrapper });
+    act(() => result.current.send("prepare the follow-up"));
+    await waitFor(() => expect(result.current.state.approval?.approval_id).toBe("a1"));
+    expect(result.current.state.live?.plan?.steps.map((s) => s.status)).toEqual(["done", "waiting", "pending", "pending"]);
+
+    act(() => result.current.decide(["c2"]));
+    await waitFor(() => expect(result.current.state.runStatus).toBe("completed"));
+    const message = result.current.state.messages.at(-1)!;
+    expect(message.plan?.steps.map((s) => s.status)).toEqual(["done", "done", "done", "done"]);
+    expect(message.steps?.find((s) => s.call_id === "c2")?.verification).toEqual({ status: "verified", detail: "Task “A” is in your task list" });
+    expect(message.sources?.[0]?.retrieved_at).toBe("2026-09-20T00:00:00Z");
+  });
+
   it("surfaces stream errors without leaving the UI busy", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([{ type: "error", code: "AI_RUN_FAILED", message: "The assistant ran into a problem." }]));
     const { result } = renderHook(() => useChat(null), { wrapper });

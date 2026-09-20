@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
@@ -17,7 +18,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 GATEWAY = "https://api.atlassian.com"
 
@@ -246,8 +247,31 @@ class JiraProvider(RestOAuthProvider):
                 ).json()
             return {"comment_id": comment.get("id"), "issue_key": a.issue_key}
 
+        async def verify_create_issue(
+            ctx: ProviderContext, a: CreateIssueArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx, self._base(ctx)) as http:
+                issue = (
+                    await http.get(f"/issue/{result['key']}", params={"fields": "summary"})
+                ).json()
+            summary = (issue.get("fields") or {}).get("summary")
+            if summary not in (None, a.summary):
+                return Verification.failed("Issue exists but its summary differs")
+            return Verification.verified(f"Issue {issue.get('key', result['key'])} exists in Jira")
+
+        async def verify_add_comment(
+            ctx: ProviderContext, a: AddCommentArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx, self._base(ctx)) as http:
+                comment = (
+                    await http.get(f"/issue/{a.issue_key}/comment/{result['comment_id']}")
+                ).json()
+            if str(comment.get("id")) != str(result["comment_id"]):
+                return Verification.failed("Comment was not found on the issue")
+            return Verification.verified(f"Comment is on {a.issue_key}")
+
         return [
-            (
+            ProviderTool(
                 "search_issues",
                 "Search Jira issues with JQL.",
                 SearchIssuesArgs,
@@ -255,7 +279,7 @@ class JiraProvider(RestOAuthProvider):
                 search_issues,
                 lambda a: f"Search Jira: {a.jql[:60]}",
             ),
-            (
+            ProviderTool(
                 "read_issue",
                 "Read a Jira issue.",
                 ReadIssueArgs,
@@ -263,20 +287,22 @@ class JiraProvider(RestOAuthProvider):
                 read_issue,
                 lambda a: f"Read Jira issue {a.issue_key}",
             ),
-            (
+            ProviderTool(
                 "create_issue",
                 "Create a Jira issue.",
                 CreateIssueArgs,
                 Capability.create,
                 create_issue,
                 lambda a: f"Create Jira issue in {a.project_key}: “{a.summary}”",
+                verify=verify_create_issue,
             ),
-            (
+            ProviderTool(
                 "add_comment",
                 "Comment on a Jira issue (visible to others).",
                 AddCommentArgs,
                 Capability.comment,
                 add_comment,
                 lambda a: f"Comment on Jira issue {a.issue_key}",
+                verify=verify_add_comment,
             ),
         ]

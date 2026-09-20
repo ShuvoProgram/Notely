@@ -126,3 +126,53 @@ test("extract tasks offers a checklist and adds the chosen ones", async ({ page 
   await expect(page.getByText("Send the invoice")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "From note" })).toBeVisible();
 });
+
+test("cross-app request: plan is shown and ticked off, writes are verified after approval", async ({ page }) => {
+  await signup(page);
+  await createNote(page, "Launch plan", "Finalize the pricing page by Friday.");
+  await script(page, [
+    {
+      tool_calls: [
+        {
+          name: "plan_steps",
+          args: {
+            goal: "Prepare the launch follow-up",
+            steps: [
+              { title: "Find launch material", kind: "read", tools: ["search_everything"] },
+              { title: "Propose follow-up tasks", kind: "propose", tools: ["create_task"] },
+              { title: "Confirm the tasks exist", kind: "verify", tools: [] },
+              { title: "Summarise for you", kind: "answer", tools: [] },
+            ],
+          },
+          id: "p1",
+        },
+        { name: "search_everything", args: { query: "pricing" }, id: "c1" },
+      ],
+    },
+    { tool_calls: [{ name: "create_task", args: { title: "Finalize pricing" }, id: "c2" }] },
+  ]);
+  await page.goto("/app/ai");
+  await page.getByLabel("Ask anything").fill("Prepare the follow-up from my launch plan");
+  await page.getByLabel("Ask anything").press("Enter");
+
+  const plan = page.getByRole("region", { name: "Plan" });
+  await expect(plan).toBeVisible();
+  await expect(plan.getByText("Prepare the launch follow-up")).toBeVisible();
+  const card = page.getByRole("region", { name: "Ready to execute" });
+  await expect(card).toBeVisible();
+  await expect(plan.getByText("needs your approval")).toBeVisible();
+  await expect(plan.locator('li[data-status="done"]')).toHaveCount(1); // the read step
+
+  await script(page, [{ content: "Created the task and verified it exists." }]);
+  await card.getByRole("button", { name: /Approve/ }).click();
+  await expect(page.getByText("Created the task and verified it exists.")).toBeVisible();
+  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Plan" }).locator('li[data-status="done"]')).toHaveCount(4);
+  await expect(page.getByLabel("Sources")).toContainText("Based on 1 source");
+  await expect(page.getByLabel("Sources").getByRole("link", { name: "Launch plan" })).toBeVisible();
+
+  // The read-back is part of the audit trail, not hidden.
+  await page.goto("/app/settings/activity");
+  await expect(page.getByText("Checked: create_task")).toBeVisible();
+  await expect(page.getByText("verified", { exact: true })).toBeVisible();
+});

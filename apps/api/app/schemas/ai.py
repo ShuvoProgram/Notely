@@ -54,6 +54,7 @@ class ToolCallOut(BaseModel):
     arguments: dict[str, Any]
     status: ToolCallStatus
     error: str | None
+    verification: dict[str, Any] | None = None
     executed_at: datetime | None
 
 
@@ -77,6 +78,8 @@ class RunOut(BaseModel):
     provider: str | None
     token_usage: dict[str, Any]
     steps: list[dict[str, Any]]
+    plan: dict[str, Any] | None = None
+    sources: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None
     created_at: datetime
     started_at: datetime | None

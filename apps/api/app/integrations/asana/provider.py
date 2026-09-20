@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
@@ -16,7 +17,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     ProviderManifest,
 )
-from app.integrations.base.rest import RestOAuthProvider
+from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 
 
 class MyTasksArgs(BaseModel):
@@ -203,8 +204,26 @@ class AsanaProvider(RestOAuthProvider):
                 ).json()["data"]
             return {"task_gid": a.task_gid, "completed": bool(task.get("completed", True))}
 
+        async def verify_create_task(
+            ctx: ProviderContext, a: CreateTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                task = (await http.get(f"/tasks/{result['task_gid']}")).json()["data"]
+            if task.get("name") not in (None, a.name):
+                return Verification.failed("Task exists but its name differs")
+            return Verification.verified("Task is in Asana")
+
+        async def verify_complete_task(
+            ctx: ProviderContext, a: CompleteTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                task = (await http.get(f"/tasks/{a.task_gid}")).json()["data"]
+            if not task.get("completed"):
+                return Verification.failed("Task is still open in Asana")
+            return Verification.verified("Task is completed in Asana")
+
         return [
-            (
+            ProviderTool(
                 "my_tasks",
                 "List tasks assigned to you.",
                 MyTasksArgs,
@@ -212,7 +231,7 @@ class AsanaProvider(RestOAuthProvider):
                 my_tasks,
                 lambda a: "List my Asana tasks",
             ),
-            (
+            ProviderTool(
                 "search_tasks",
                 "Search Asana tasks.",
                 SearchTasksArgs,
@@ -220,20 +239,22 @@ class AsanaProvider(RestOAuthProvider):
                 search_tasks,
                 lambda a: f"Search Asana for “{a.query}”",
             ),
-            (
+            ProviderTool(
                 "create_task",
                 "Create an Asana task assigned to you.",
                 CreateTaskArgs,
                 Capability.create,
                 create_task,
                 lambda a: f"Create Asana task “{a.name}”",
+                verify=verify_create_task,
             ),
-            (
+            ProviderTool(
                 "complete_task",
                 "Complete an Asana task.",
                 CompleteTaskArgs,
                 Capability.update,
                 complete_task,
                 lambda a: f"Complete Asana task {a.task_gid}",
+                verify=verify_complete_task,
             ),
         ]

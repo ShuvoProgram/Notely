@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Check, CircleDashed, Loader2, Sparkles, Square, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, CircleDashed, ExternalLink, Loader2, ShieldCheck, ShieldQuestion, Sparkles, Square, XCircle } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
@@ -11,14 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ApprovalCard } from "@/features/ai/components/approval-card";
 import { type LiveAssistant, type StepState, useChat } from "@/features/ai/use-chat";
-import type { AIMessage, AISource } from "@/lib/api/types";
+import type { AIMessage, AIPlan, AISource, Verification } from "@/lib/api/types";
+import { providerLabel } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
   "Summarize what I wrote this week",
   "What open tasks do I have?",
-  "Find my notes about pricing",
-  "Turn my latest note into tasks",
+  "Find everything about pricing across my apps",
+  "Prepare a follow-up from my latest meeting note",
 ];
 
 export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }: { threadId: string | null; noteId?: string | null; onThreadCreated?: (id: string) => void; compact?: boolean }) {
@@ -56,7 +57,7 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
             </div>
             <h2 className="mt-4 text-base font-semibold">Ask anything about your notes</h2>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              I can search and read your notes and tasks. Anything that changes something waits for your approval first.
+              I can search and read your notes, tasks and connected apps, and plan multi-step work across them. Anything that changes something waits for your approval first, and I check that it landed.
             </p>
             <ul className="mt-5 flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
@@ -138,6 +139,7 @@ function MessageBubble({ message }: { message: AIMessage }) {
     <li className="flex gap-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1 space-y-2">
+        {message.plan ? <Plan plan={message.plan} /> : null}
         {message.steps?.length ? <Steps steps={message.steps} waiting={false} /> : null}
         <Markdown text={message.content} />
         {message.sources?.length ? <Sources sources={message.sources} /> : null}
@@ -151,10 +153,44 @@ function LiveBubble({ live, waiting }: { live: LiveAssistant; waiting: boolean }
     <li className="flex gap-3">
       <AssistantAvatar pulse />
       <div className="min-w-0 flex-1 space-y-2">
+        {live.plan ? <Plan plan={live.plan} /> : null}
         {live.steps.length ? <Steps steps={live.steps} waiting={waiting} /> : null}
         {live.text ? <Markdown text={live.text} /> : !live.steps.length && !waiting ? <p className="text-sm text-muted-foreground">Thinking…</p> : null}
       </div>
     </li>
+  );
+}
+
+/** The agent's declared plan, ticked off from execution metadata (PRD 62) — never chain-of-thought. */
+function Plan({ plan }: { plan: AIPlan }) {
+  const done = plan.steps.filter((s) => s.status === "done").length;
+  return (
+    <section aria-label="Plan" className="rounded-lg border border-ai/30 bg-ai-soft/30 px-3 py-2 text-sm">
+      <p className="flex items-center gap-2 font-medium">
+        <Sparkles className="size-3.5 text-ai" aria-hidden />
+        <span className="truncate">{plan.goal}</span>
+        <span className="ml-auto text-xs font-normal text-muted-foreground">
+          {done}/{plan.steps.length}
+        </span>
+      </p>
+      <ol className="mt-1.5 space-y-1">
+        {plan.steps.map((step, i) => (
+          <li key={`${i}-${step.title}`} className={cn("flex items-center gap-2", step.status === "skipped" && "text-muted-foreground line-through")} data-status={step.status}>
+            {step.status === "done" ? (
+              <Check className="size-3.5 text-success" aria-hidden />
+            ) : step.status === "active" ? (
+              <Loader2 className="size-3.5 animate-spin text-ai" aria-hidden />
+            ) : step.status === "waiting" ? (
+              <CircleDashed className="size-3.5 text-warning" aria-hidden />
+            ) : (
+              <CircleDashed className="size-3.5 text-muted-foreground" aria-hidden />
+            )}
+            <span>{step.title}</span>
+            {step.status === "waiting" ? <span className="text-xs text-muted-foreground">· needs your approval</span> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -163,7 +199,7 @@ function Steps({ steps, waiting }: { steps: StepState[]; waiting: boolean }) {
   return (
     <ul className="space-y-1 rounded-lg border bg-card/60 px-3 py-2 text-sm" aria-label="Progress">
       {steps.map((s) => (
-        <li key={s.call_id} className="flex items-center gap-2">
+        <li key={s.call_id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {s.status === "running" ? (
             <Loader2 className="size-3.5 animate-spin text-ai" aria-hidden />
           ) : s.status === "failed" ? (
@@ -173,6 +209,7 @@ function Steps({ steps, waiting }: { steps: StepState[]; waiting: boolean }) {
           )}
           <span className={cn(s.status === "failed" && "text-destructive")}>{s.label}</span>
           {s.result_preview && s.status !== "running" ? <span className="text-xs text-muted-foreground">· {s.result_preview}</span> : null}
+          {s.verification ? <VerificationBadge verification={s.verification} /> : null}
         </li>
       ))}
       {waiting ? (
@@ -184,23 +221,54 @@ function Steps({ steps, waiting }: { steps: StepState[]; waiting: boolean }) {
   );
 }
 
+/** Outcome of the read-back after a write. Honest by construction: it is set by the server, never by the model. */
+function VerificationBadge({ verification }: { verification: Verification }) {
+  const label = verification.status === "verified" ? "Verified" : verification.status === "failed" ? "Check failed" : "Unverified";
+  const Icon = verification.status === "verified" ? ShieldCheck : verification.status === "failed" ? AlertTriangle : ShieldQuestion;
+  return (
+    <Badge variant={verification.status === "verified" ? "outline" : verification.status === "failed" ? "destructive" : "secondary"} className="gap-1 font-normal" title={verification.detail}>
+      <Icon className="size-3" aria-hidden />
+      {label}
+    </Badge>
+  );
+}
+
+/** "Based on N sources" (PRD 26). External items open in a new tab; items without a link are plain chips. */
 function Sources({ sources }: { sources: AISource[] }) {
   const providers = [...new Set(sources.map((s) => s.provider))];
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" aria-label="Sources">
       <span>
         Based on {sources.length} source{sources.length === 1 ? "" : "s"}
       </span>
       {providers.map((p) => (
-        <Badge key={p} variant="outline" className="font-normal capitalize">
-          {p}
+        <Badge key={p} variant="outline" className="font-normal">
+          {providerLabel(p)}
         </Badge>
       ))}
-      {sources.slice(0, 4).map((s) => (
-        <Link key={`${s.provider}:${s.object_id}`} href={s.url} className="rounded-full bg-secondary px-2 py-0.5 hover:bg-accent">
-          {s.title}
-        </Link>
-      ))}
+      {sources.slice(0, 6).map((s) => {
+        const cls = "inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 hover:bg-accent";
+        const key = `${s.provider}:${s.object_id}`;
+        if (!s.url) {
+          return (
+            <span key={key} className={cls}>
+              {s.title}
+            </span>
+          );
+        }
+        if (s.provider !== "notely") {
+          return (
+            <a key={key} href={s.url} target="_blank" rel="noopener noreferrer" className={cls}>
+              {s.title} <ExternalLink className="size-3" aria-hidden />
+            </a>
+          );
+        }
+        return (
+          <Link key={key} href={s.url} className={cls}>
+            {s.title}
+          </Link>
+        );
+      })}
     </div>
   );
 }

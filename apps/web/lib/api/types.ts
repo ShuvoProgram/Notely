@@ -190,7 +190,40 @@ export interface AISource {
   provider: string;
   object_id: string;
   title: string;
-  url: string;
+  url: string | null;
+  /** When the agent fetched it (PRD 26). */
+  retrieved_at?: string;
+}
+
+export type VerificationStatus = "verified" | "unverified" | "failed";
+
+export interface Verification {
+  status: VerificationStatus;
+  detail: string;
+}
+
+export type PlanStepKind = "read" | "propose" | "verify" | "answer";
+export type PlanStepStatus = "pending" | "active" | "waiting" | "done" | "skipped";
+
+export interface PlanStep {
+  title: string;
+  kind: PlanStepKind;
+  tools: string[];
+  status: PlanStepStatus;
+}
+
+export interface AIPlan {
+  goal: string;
+  steps: PlanStep[];
+}
+
+export interface AIStep {
+  call_id: string;
+  tool: string;
+  label: string;
+  status: "running" | "completed" | "failed";
+  result_preview?: string;
+  verification?: Verification;
 }
 
 export interface AIThread {
@@ -208,8 +241,9 @@ export interface AIMessage {
   sources: AISource[] | null;
   run_id: string | null;
   created_at: string;
-  /** Execution steps of the run that produced this message (client-side only). */
-  steps?: { call_id: string; tool: string; label: string; status: "running" | "completed" | "failed"; result_preview?: string }[];
+  /** Execution metadata of the run that produced this message (client-side only). */
+  steps?: AIStep[];
+  plan?: AIPlan | null;
 }
 
 export interface AIToolCall {
@@ -221,6 +255,7 @@ export interface AIToolCall {
   arguments: Record<string, unknown>;
   status: "proposed" | "approved" | "rejected" | "executed" | "failed";
   error: string | null;
+  verification: Verification | null;
   executed_at: string | null;
 }
 
@@ -239,7 +274,9 @@ export interface AIRun {
   model: string | null;
   provider: string | null;
   token_usage: Record<string, number>;
-  steps: { call_id?: string; tool?: string; label?: string; status?: string; type?: string }[];
+  steps: { call_id?: string; tool?: string; label?: string; status?: string; type?: string; verification?: Verification }[];
+  plan: AIPlan | null;
+  sources: AISource[];
   error: string | null;
   created_at: string;
   started_at: string | null;
@@ -268,6 +305,8 @@ export type AIChatEvent =
   | { type: "run"; run_id: string; thread_id: string; status: RunStatus }
   | { type: "token"; text: string }
   | { type: "step"; call_id: string; tool: string; label: string; status: "running" | "completed" | "failed"; result_preview?: string }
+  | { type: "plan"; call_id: string; goal: string; steps: PlanStep[] }
+  | { type: "verification"; call_id: string; status: VerificationStatus; detail: string }
   | { type: "approval_required"; approval_id: string; run_id: string; proposals: AIProposal[] }
   | { type: "message"; message_id: string; content: string; sources: AISource[] }
   | { type: "done"; run_id: string; status: RunStatus; usage: Record<string, number> }

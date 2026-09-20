@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from app.ai.tools.base import ToolContext, ToolRegistry, ToolSpec, untrusted
+from app.ai.tools.base import ToolContext, ToolRegistry, ToolSpec, Verification, untrusted
 from app.ai.tools.notely_tools import register_notely_tools
 
 
@@ -28,6 +28,7 @@ __all__ = [
     "ToolContext",
     "ToolRegistry",
     "ToolSpec",
+    "Verification",
     "build_registry",
     "get_tool_registry",
     "untrusted",

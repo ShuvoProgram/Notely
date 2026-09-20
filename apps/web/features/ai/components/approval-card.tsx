@@ -7,8 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PendingApproval } from "@/features/ai/use-chat";
 import type { RiskLevel } from "@/lib/api/types";
-
-const PROVIDER_LABELS: Record<string, string> = { notely: "Notely" };
+import { providerLabel } from "@/lib/providers";
 const RISK_LABELS: Record<RiskLevel, string> = {
   read: "Read",
   write: "Change",
@@ -49,7 +48,7 @@ export function ApprovalCard({ approval, onDecide, disabled }: { approval: Pendi
       <div className="mt-3 space-y-3">
         {grouped.map(([provider, proposals]) => (
           <div key={provider}>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{PROVIDER_LABELS[provider] ?? provider}</p>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{providerLabel(provider)}</p>
             <ul className="space-y-1.5">
               {proposals.map((p) => {
                 const id = `approve-${p.call_id}`;

@@ -38,6 +38,38 @@ ToolHandler = Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]
 ToolSummarizer = Callable[[Any], str]
 
 
+@dataclass(frozen=True)
+class Verification:
+    """Outcome of checking that a write actually happened.
+
+    `verified`   – a read-back found the created/updated object.
+    `unverified` – the provider accepted the write but exposes no way to read it back.
+    `failed`     – the read-back ran and did not find (or contradicted) the change.
+    """
+
+    status: str  # verified | unverified | failed
+    detail: str
+
+    @classmethod
+    def verified(cls, detail: str) -> Verification:
+        return cls("verified", detail)
+
+    @classmethod
+    def unverified(cls, detail: str) -> Verification:
+        return cls("unverified", detail)
+
+    @classmethod
+    def failed(cls, detail: str) -> Verification:
+        return cls("failed", detail)
+
+    def to_dict(self) -> dict[str, str]:
+        return {"status": self.status, "detail": self.detail}
+
+
+# (context, parsed args, handler result) -> Verification. Runs after a successful write.
+ToolVerifier = Callable[[ToolContext, Any, dict[str, Any]], Awaitable[Verification]]
+
+
 class ToolArgumentError(ValueError):
     pass
 
@@ -57,6 +89,8 @@ class ToolSpec:
     # Set for provider tools so execution can load the right credentials.
     connection_id: uuid.UUID | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # Optional read-back for write tools; the framework runs it and reports the outcome.
+    verify: ToolVerifier | None = None
 
     def __post_init__(self) -> None:
         if (self.args_schema is None) == (self.json_schema is None):
