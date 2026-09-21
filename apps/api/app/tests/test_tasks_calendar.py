@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 from app.tests.conftest import ORIGIN, signup
-from app.tests.test_providers import CASES, VendorMock, connect, vendor  # noqa: F401, F811
+from app.tests.test_providers import CASES, connect, vendor  # noqa: F401
+from app.tests.vendor_mocks import VendorMock
 
 
 async def test_notifications_inbox_marks_read_and_reminds_about_tasks(client: Any) -> None:
