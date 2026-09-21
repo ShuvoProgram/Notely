@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
-import { ConnectionStatusBadge, relativeTime } from "@/features/connections/components/connection-status";
+import { ACTION_LABEL, ConnectionStatusBadge, describeConnection, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
 import { playSfx } from "@/lib/sfx/player";
 import type { ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
@@ -122,8 +122,14 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   const canOAuth = p.connect_methods.includes("oauth");
   const canMcp = p.connect_methods.includes("mcp");
   const available = canOAuth || canMcp;
-  const attention = conn && (conn.status === "expired" || conn.status === "needs_attention" || conn.status === "error");
+  const view = describeConnection(conn, p.name, { available, refreshing: test.isPending });
+  const attention = view.state === "attention" || view.state === "error" || view.state === "rate_limited";
   const startConnect = () => setConnectMethod(canOAuth ? "oauth" : "mcp");
+  // Reconnect: let the server redeem the refresh token first; only a real rejection goes to OAuth.
+  const reconnect = () => {
+    if (!conn) return startConnect();
+    test.mutate(conn.id, { onSuccess: (r) => (r.healthy ? undefined : startConnect()), onError: () => startConnect() });
+  };
 
   return (
     <div className="space-y-6">
@@ -142,9 +148,9 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                 {CATEGORY_LABELS[p.category] ?? p.category}
               </Badge>
               {conn ? (
-                <Badge className={cn("font-normal", attention ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>
+                <Badge className={cn("font-normal", view.state === "error" ? "bg-destructive/15 text-destructive" : attention ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>
                   {attention ? <AlertTriangle aria-hidden /> : <Check aria-hidden />}
-                  {attention ? "Needs attention" : "Connected"}
+                  {view.label}
                 </Badge>
               ) : null}
             </div>
@@ -169,9 +175,13 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
             {!conn && !available ? <p className="text-sm text-muted-foreground">{p.name} isn’t available on this deployment yet.</p> : null}
             {conn ? (
               <>
-                {attention ? (
-                  <Button onClick={startConnect} className="rounded-full">
-                    <RefreshCw aria-hidden /> {conn.status === "expired" ? "Reconnect" : "Fix connection"}
+                {view.action === "reconnect" ? (
+                  <Button onClick={reconnect} disabled={test.isPending} className="rounded-full">
+                    <RefreshCw aria-hidden className={cn(test.isPending && "animate-spin")} /> Reconnect
+                  </Button>
+                ) : view.action === "retry" ? (
+                  <Button onClick={() => test.mutate(conn.id)} disabled={test.isPending} className="rounded-full">
+                    <RefreshCw aria-hidden className={cn(test.isPending && "animate-spin")} /> {ACTION_LABEL.retry}
                   </Button>
                 ) : null}
                 <Button variant="outline" onClick={() => test.mutate(conn.id)} disabled={test.isPending} className="rounded-full">
@@ -186,15 +196,25 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
         </div>
       </section>
 
-      {conn?.last_error && attention ? (
-        <Alert className="border-warning/40 bg-warning/10">
-          <AlertTriangle className="text-warning" />
-          <AlertTitle>{conn.status === "expired" ? "Authorization expired" : "Something needs your attention"}</AlertTitle>
+      {conn && attention ? (
+        <Alert className={view.state === "error" ? "border-destructive/40 bg-destructive/10" : "border-warning/40 bg-warning/10"}>
+          <AlertTriangle className={view.state === "error" ? "text-destructive" : "text-warning"} />
+          <AlertTitle>{view.label}</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>{conn.last_error}</span>
-            <Button size="sm" onClick={startConnect}>
-              {conn.status === "expired" ? "Reconnect" : "Re-authorize"}
-            </Button>
+            <span>
+              {view.state === "attention" && conn.status === "expired"
+                ? `${p.name} ended this authorization${conn.last_error ? ` (${conn.last_error.replace(/\.$/, "")})` : ""}. Reconnect to restore access — nothing else changes.`
+                : (conn.last_error ?? view.detail)}
+            </span>
+            {view.action === "reconnect" ? (
+              <Button size="sm" onClick={reconnect} disabled={test.isPending}>
+                Reconnect
+              </Button>
+            ) : view.action === "retry" ? (
+              <Button size="sm" variant="outline" onClick={() => test.mutate(conn.id)} disabled={test.isPending}>
+                {ACTION_LABEL.retry}
+              </Button>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -270,7 +290,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <ConnectionStatusBadge status={conn.status} lastChecked={conn.last_checked_at} lastError={conn.last_error} />
+                <ConnectionStatusBadge view={view} />
                 <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
                   <dt className="text-muted-foreground">Connected</dt>
                   <dd>{relativeTime(conn.created_at)}</dd>

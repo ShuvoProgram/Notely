@@ -77,6 +77,14 @@ class UnifiedSearchService:
 
         connections = ConnectionService(self.db, self.settings)
         usable = await connections.list_usable(user)
+        # Tokens first: a Google access token lives an hour, and searching with a stale one is
+        # how connections used to end up "expired" on a perfectly good refresh token.
+        for conn in usable:
+            try:
+                await connections.refresh_if_needed(user, conn)
+            except ProviderError:
+                pass  # status recorded by the service; the search below reports it
+        usable = [c for c in usable if c.is_usable]
         # Provider calls only need the connection + credentials; run them concurrently but keep
         # the shared DB session out of them (status updates happen afterwards, sequentially).
         contexts = [(conn, connections.context(user, conn)) for conn in usable]
@@ -108,7 +116,7 @@ class UnifiedSearchService:
         outcomes = await asyncio.gather(*(one(c, ctx) for c, ctx in contexts))
         for conn, outcome in outcomes:
             if isinstance(outcome, ProviderError):
-                await connections.record_tool_failure(conn, outcome)
+                await connections.record_tool_failure(conn, outcome, user=user)
                 result.sources.append(
                     SourceStatus(conn.provider, False, 0, outcome.user_message()[1])
                 )

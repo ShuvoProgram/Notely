@@ -4,11 +4,13 @@ style), identity, health test, unified search, a read tool (auto) and a write to
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from langchain_core.messages import AIMessage
+from sqlalchemy import select
 
 from app.ai.llm import captured_prompts, set_fake_script
 from app.core import oauth as core_oauth
@@ -400,11 +402,21 @@ async def test_provider_auth_failure_marks_connection_expired(
 ) -> None:
     await signup(client)
     await connect_via_oauth(client, vendor.provider, CASES[vendor.provider])
+    conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    has_refresh = conn["auth_type"] == "oauth2" and vendor.provider not in ("slack", "notion")
+
+    # A 401 with a working refresh token is a stale access token: the service redeems the
+    # refresh token and the connection stays connected (this call still reports the error).
     vendor.fail_auth = True
     search = (await client.get("/api/v1/search", params={"q": "x"})).json()["data"]
     status = next(s for s in search["sources"] if s["source"] == vendor.provider)
     assert status["ok"] is False and status["error"]
     conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    if has_refresh:
+        assert conn["status"] == "connected", conn
+        # Refreshing did not help (still 401 inside the cooldown): now it is a real verdict.
+        await client.get("/api/v1/search", params={"q": "x"})
+        conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
     assert conn["status"] == "expired"
     assert conn["last_error_code"] in ("expired", "auth_failed")
     # Tools disappear until the user reconnects.
@@ -458,3 +470,76 @@ async def test_google_access_denied_explains_testing_mode(client: Any, vendor: V
     conn = (await client.get("/api/v1/integrations/providers/gmail")).json()["data"]["connection"]
     assert conn["status"] == "error" and conn["last_error_code"] == "auth_failed"
     assert "testing mode" in conn["last_error"] and "publish" in conn["last_error"]
+
+
+@pytest.mark.parametrize("vendor", ["gmail"], indirect=True)
+async def test_token_refresh_keeps_connection_alive(client: Any, vendor: VendorMock) -> None:
+    """The lifecycle behind "Session expired": a token past its hour is refreshed, not reported;
+    only a rejected grant asks for a reconnect; a vendor outage is an error, not a reconnect;
+    and concurrent callers share one refresh."""
+    import asyncio
+
+    from app.core.config import get_settings
+    from app.db.session import get_session_factory
+    from app.models.integration import UserConnection
+    from app.models.user import User
+    from app.services.connection_service import ConnectionService
+
+    await signup(client)
+    await connect_via_oauth(client, vendor.provider, CASES[vendor.provider])
+
+    async def age_token() -> None:
+        async with get_session_factory()() as db:
+            row = await db.scalar(select(UserConnection))
+            assert row is not None
+            row.token_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+            await db.commit()
+
+    def refresh_calls() -> int:
+        return sum(1 for r in vendor.captured.requests if b"grant_type=refresh_token" in r.content)
+
+    # 1. Expired access token + valid refresh token → search refreshes and succeeds silently.
+    await age_token()
+    before = refresh_calls()
+    search = (await client.get("/api/v1/search", params={"q": "pricing"})).json()["data"]
+    assert next(s for s in search["sources"] if s["source"] == "gmail")["ok"] is True, search
+    assert refresh_calls() == before + 1
+    conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    assert conn["status"] == "connected"
+
+    # 2. Concurrent callers: one refresh, not five.
+    await age_token()
+    before = refresh_calls()
+
+    async def one_request() -> bool:
+        # Each caller is its own request with its own session, like concurrent API calls.
+        async with get_session_factory()() as db:
+            user = await db.scalar(select(User))
+            row = await db.scalar(select(UserConnection))
+            assert user is not None and row is not None
+            return await ConnectionService(db, get_settings()).refresh_if_needed(user, row)
+
+    results = await asyncio.gather(*(one_request() for _ in range(5)))
+    assert refresh_calls() == before + 1 and sum(results) == 1
+
+    # 3. Vendor down during refresh → error with the reason, tokens kept, no reconnect asked.
+    await age_token()
+    vendor.fail_refresh_transient = True
+    (await client.get("/api/v1/search", params={"q": "x"})).json()
+    conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    assert conn["status"] == "error" and conn["last_error_code"] == "unavailable"
+    vendor.fail_refresh_transient = False
+    # …and it heals on the next call without the user doing anything.
+    resp = await client.post(f"/api/v1/integrations/connections/{conn['id']}/test", headers=ORIGIN)
+    assert resp.status_code == 200, resp.text
+    conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    assert conn["status"] == "connected"
+
+    # 4. Grant revoked (invalid_grant) → expired, reconnect is genuinely required.
+    await age_token()
+    vendor.fail_refresh = True
+    await client.get("/api/v1/search", params={"q": "x"})
+    conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+    assert conn["status"] == "expired" and conn["last_error_code"] == "expired"
+    inbox = (await client.get("/api/v1/notifications")).json()["data"]
+    assert any(n["kind"] == "integration_auth_required" for n in inbox["items"])

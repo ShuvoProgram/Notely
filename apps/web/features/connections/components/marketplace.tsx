@@ -1,20 +1,20 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, LayoutGrid, Plug, Search, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 
 import { EmptyState } from "@/components/layout/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
-import { ConnectionStatusBadge } from "@/features/connections/components/connection-status";
+import { ACTION_LABEL, ConnectionStatusBadge, describeConnection } from "@/features/connections/components/connection-status";
 import type { ConnectMethod, Provider } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +34,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
 
 export const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);
 
-const CAPABILITY_LABELS: Record<string, string> = {
+export const CAPABILITY_LABELS: Record<string, string> = {
   search: "Search",
   read: "Read",
   write: "Create & update",
@@ -42,6 +42,16 @@ const CAPABILITY_LABELS: Record<string, string> = {
   send: "Send",
   sync: "Sync",
 };
+
+/** The one-line "what kind of thing is this" under the name: sharper than the category alone. */
+export function providerTagline(p: Pick<Provider, "id" | "category">): string {
+  if (/calendar/.test(p.id)) return "Calendar & scheduling";
+  if (/gmail|outlook/.test(p.id)) return "Email & messaging";
+  if (/drive|dropbox|onedrive/.test(p.id)) return "Files & documents";
+  if (/slack|teams/.test(p.id)) return "Team chat";
+  if (p.id === "mcp_server") return "Any MCP server";
+  return CATEGORY_LABELS[p.category] ?? p.category;
+}
 
 export function ProviderLogo({ provider, size = "md", className }: { provider: Pick<Provider, "name" | "logo_url">; size?: "sm" | "md" | "lg"; className?: string }) {
   const [loaded, setLoaded] = React.useState(false);
@@ -75,7 +85,7 @@ export function Marketplace() {
             <Skeleton key={i} className="h-9 w-full rounded-xl" />
           ))}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3" aria-busy>
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-44 w-full rounded-2xl" />
           ))}
@@ -154,7 +164,7 @@ export function Marketplace() {
               <h2 id={`cat-${cat}`} className="text-sm font-semibold">
                 {CATEGORY_LABELS[cat] ?? cat}
               </h2>
-              <ul className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <ul className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
                 {list.map((p) => (
                   <ProviderCard
                     key={p.id}
@@ -177,50 +187,80 @@ export function Marketplace() {
 }
 
 function ProviderCard({ provider, onOpen, onConnect }: { provider: Provider; onOpen: () => void; onConnect: () => void }) {
+  const queryClient = useQueryClient();
   const conn = provider.connection && provider.connection.status !== "disconnected" ? provider.connection : null;
   const available = provider.connect_methods.length > 0;
-  const attention = conn && (conn.status === "expired" || conn.status === "needs_attention" || conn.status === "error");
+  // "Try again" and "Reconnect" both start with the server-side health check, which redeems
+  // the refresh token if it can. Only when that genuinely fails does Reconnect open OAuth —
+  // so a connection that merely had a stale access token never sends the user to a consent
+  // screen.
+  const retry = useMutation({
+    mutationFn: ({ id }: { id: string; thenOAuth: boolean }) => connectionsApi.test(id),
+    onSuccess: (r, { thenOAuth }) => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      if (r.healthy) toast.success(`${provider.name} is connected again`);
+      else if (thenOAuth) onConnect();
+    },
+    onError: (e, { thenOAuth }) => (thenOAuth ? onConnect() : toast.error(messageFor(e))),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["integrations"] }),
+  });
+  const view = describeConnection(conn, provider.name, { available, refreshing: retry.isPending });
+  const act = () => {
+    if (view.action === "connect") onConnect();
+    else if (view.action === "reconnect" && conn) retry.mutate({ id: conn.id, thenOAuth: true });
+    else if (view.action === "retry" && conn) retry.mutate({ id: conn.id, thenOAuth: false });
+    else onOpen();
+  };
+  const caps = provider.capabilities;
+  const shown = caps.slice(0, 4);
+
   return (
     <li className="min-w-0">
-      <article className="glass lift group relative flex h-full min-w-0 flex-col rounded-2xl p-4">
+      <article
+        data-state={view.state}
+        className={cn(
+          "group relative flex h-full min-w-0 flex-col rounded-2xl border bg-card/60 p-4 transition-[border-color,background-color] duration-150 hover:bg-card",
+          view.state === "attention" ? "border-warning/40" : view.state === "error" ? "border-destructive/40" : "border-glass-border",
+        )}
+      >
         <Link href={`/app/settings/connections/${provider.id}`} className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${provider.name} details`} />
-        <div className="flex items-start gap-3">
+
+        <header className="flex items-center gap-3">
           <ProviderLogo provider={provider} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-sm font-semibold">{provider.name}</h3>
+            <h3 className="truncate text-[15px] font-semibold leading-tight" title={provider.name}>
+              {provider.name}
+            </h3>
+            <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+              {providerTagline(provider)}
               {provider.mcp_server_url ? (
-                <Badge variant="secondary" className="hidden font-normal text-muted-foreground sm:inline-flex" title="Connects through the vendor's official MCP server">
-                  <Sparkles className="text-ai" aria-hidden /> Official
-                </Badge>
+                <span className="inline-flex items-center gap-0.5 text-ai" title="Connects through the vendor's official MCP server">
+                  <Sparkles className="size-3" aria-hidden /> Official
+                </span>
               ) : null}
-            </div>
-            <p className="mt-0.5 line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">{provider.description}</p>
+            </p>
           </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-1">
-          {provider.capabilities.slice(0, 4).map((c) => (
-            <Badge key={c} variant="outline" className="border-glass-border font-normal text-muted-foreground">
+        </header>
+
+        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-xs leading-5 text-muted-foreground">{provider.description}</p>
+
+        <ul className="mt-3 flex flex-1 flex-wrap content-start gap-1.5" aria-label="Capabilities">
+          {shown.map((c) => (
+            <li key={c} className="rounded-md bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               {CAPABILITY_LABELS[c] ?? c.charAt(0).toUpperCase() + c.slice(1)}
-            </Badge>
+            </li>
           ))}
-        </div>
-        <div className="relative z-10 mt-auto flex items-center justify-between gap-2 pt-4">
-          {conn ? (
-            <ConnectionStatusBadge status={conn.status} lastChecked={conn.last_checked_at} lastError={null} className="min-w-0 text-xs" />
-          ) : (
-            <span className="text-xs text-muted-foreground">{available ? "Not connected" : "Not available here"}</span>
-          )}
-          {conn ? (
-            <Button size="sm" variant={attention ? "default" : "outline"} onClick={onOpen} className="shrink-0 rounded-full">
-              {attention ? "Fix" : "Manage"}
-            </Button>
-          ) : available ? (
-            <Button size="sm" onClick={onConnect} className="shrink-0 rounded-full">
-              Connect
+          {caps.length > shown.length ? <li className="px-1 py-0.5 text-[11px] text-muted-foreground">+{caps.length - shown.length}</li> : null}
+        </ul>
+
+        <footer className="relative z-10 mt-4 flex items-end justify-between gap-3 border-t border-glass-border pt-3">
+          <ConnectionStatusBadge view={view} compact className="min-w-0 flex-1" />
+          {view.action ? (
+            <Button size="sm" variant={view.action === "connect" || view.action === "reconnect" ? "default" : "outline"} onClick={act} disabled={retry.isPending} className="shrink-0 rounded-full">
+              {ACTION_LABEL[view.action]}
             </Button>
           ) : null}
-        </div>
+        </footer>
       </article>
     </li>
   );

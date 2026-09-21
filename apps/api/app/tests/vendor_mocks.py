@@ -42,6 +42,10 @@ class VendorMock:
         self.provider = provider
         self.captured = Captured()
         self.fail_auth = False
+        # The vendor has revoked the grant: refresh_token exchanges are rejected too.
+        self.fail_refresh = False
+        # The vendor's token endpoint is down (5xx): a transient failure, not a revocation.
+        self.fail_refresh_transient = False
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -52,6 +56,18 @@ class VendorMock:
         host = request.url.host or ""
         if self.fail_auth and "token" not in path and "oauth" not in path:
             return _json(401, {"error": "invalid_token"})
+        is_refresh = (
+            b"grant_type=refresh_token" in request.content
+            or b'"grant_type": "refresh_token"' in request.content.replace(b" ", b"")
+        )
+        if self.fail_refresh_transient and is_refresh:
+            return _json(503, {"error": "temporarily_unavailable"})
+        if self.fail_refresh and b"grant_type=refresh_token" in request.content:
+            return _json(400, {"error": "invalid_grant", "error_description": "Token revoked"})
+        if self.fail_refresh and b'"grant_type": "refresh_token"' in request.content.replace(
+            b" ", b""
+        ):
+            return _json(400, {"error": "invalid_grant"})
         name = f"_{self.provider}"
         if self.provider in ("gmail", "google_calendar", "google_drive"):
             name = "_google"
@@ -620,7 +636,10 @@ class VendorMock:
     def _google(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
         if host == "oauth2.googleapis.com" and path == "/token":
             form = self._form(r)
-            assert form.get("code_verifier"), "Google flow uses PKCE"
+            if form.get("grant_type") == "refresh_token":
+                assert form.get("refresh_token") == "g-refresh"
+            else:
+                assert form.get("code_verifier"), "Google flow uses PKCE"
             assert form.get("client_secret") == "test-secret"
             return _json(
                 200, {"access_token": "g-token", "refresh_token": "g-refresh", "expires_in": 3599}

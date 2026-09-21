@@ -238,7 +238,9 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
         if connection is not None:
             from app.services.connection_service import ConnectionService
 
-            await ConnectionService(ctx.db, get_settings()).record_tool_failure(connection, exc)
+            await ConnectionService(ctx.db, get_settings()).record_tool_failure(
+                connection, exc, user=ctx.user
+            )
     except APIError as exc:
         result = {"error": exc.message, "code": exc.code}
         status = "failed"

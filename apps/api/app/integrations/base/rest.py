@@ -3,6 +3,7 @@ class handles client configuration, token refresh, the HTTP client and the stand
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 
 from app.ai.tools.base import ToolContext, ToolSpec, Verification, untrusted
 from app.core.config import Settings
+from app.core.exceptions import OAuthExchangeFailed
 from app.core.oauth import (
     OAuthClient,
     OAuthClientConfig,
@@ -31,6 +33,9 @@ from app.integrations.base.provider import (
 
 Handler = Callable[[ProviderContext, Any], Awaitable[dict[str, Any]]]
 Verifier = Callable[[ProviderContext, Any, dict[str, Any]], Awaitable[Verification]]
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -109,8 +114,34 @@ class RestOAuthProvider(IntegrationProvider):
             return None
         try:
             return await self._oauth_client(ctx).refresh(ctx.credentials.refresh_token)
-        except Exception as exc:  # noqa: BLE001 — refresh failures always mean re-consent
-            raise ProviderError(ProviderErrorKind.expired, provider=self.manifest.id) from exc
+        except OAuthExchangeFailed as exc:
+            # Only a rejected grant means the user has to consent again. A vendor outage or a
+            # network blip is reported as such so the connection is not torn down for nothing.
+            if exc.transient or not exc.grant_rejected and exc.oauth_error is None:
+                raise ProviderError(
+                    ProviderErrorKind.unavailable,
+                    "token refresh unavailable",
+                    provider=self.manifest.id,
+                ) from exc
+            if exc.oauth_error == "invalid_client":
+                raise ProviderError(
+                    ProviderErrorKind.misconfigured,
+                    "oauth client rejected",
+                    provider=self.manifest.id,
+                ) from exc
+            raise ProviderError(
+                ProviderErrorKind.expired,
+                exc.oauth_error or "refresh rejected",
+                provider=self.manifest.id,
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "token_refresh_failed",
+                extra={"provider": self.manifest.id, "reason": f"{type(exc).__name__}: {exc}"},
+            )
+            raise ProviderError(
+                ProviderErrorKind.unavailable, type(exc).__name__, provider=self.manifest.id
+            ) from exc
 
     async def complete_connection(self, ctx: ProviderContext) -> ConnectionIdentity:
         return await self.identity(ctx)

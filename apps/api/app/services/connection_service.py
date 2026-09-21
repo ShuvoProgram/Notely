@@ -7,9 +7,10 @@ Flow (token):  connect(config, token) → encrypt → provider.complete_connecti
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -57,6 +58,24 @@ log = get_logger(__name__)
 USABLE = {ConnectionStatus.connected, ConnectionStatus.syncing}
 # Refresh OAuth tokens this long before they expire.
 REFRESH_LEEWAY = timedelta(minutes=5)
+# One refresh at a time per connection within this process. Concurrent tool calls, search and
+# the calendar sync would otherwise each redeem the same refresh token; vendors that rotate
+# tokens (Microsoft, Slack, Todoist) invalidate the old one on first use, which is exactly the
+# "session expired" race this prevents.
+_refresh_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+
+# When a forced refresh happened this recently, a further 401 is a real verdict, not a stale
+# token: don't loop on the token endpoint.
+RECOVERY_COOLDOWN = timedelta(seconds=60)
+_last_forced_refresh: dict[uuid.UUID, datetime] = {}
+
+
+def _refresh_lock(conn_id: uuid.UUID) -> asyncio.Lock:
+    lock = _refresh_locks.get(conn_id)
+    if lock is None:
+        lock = _refresh_locks[conn_id] = asyncio.Lock()
+    return lock
 
 
 @dataclass(frozen=True)
@@ -456,30 +475,75 @@ class ConnectionService:
         await self._finish_connect(user, self.adapter(conn), conn)
         return conn
 
-    async def refresh_if_needed(self, user: User, conn: UserConnection) -> None:
-        """Refresh an OAuth token nearing expiry. Marks the connection expired if that fails."""
-        if conn.token_expires_at is None:
-            return
-        if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
-            return
-        provider = self.adapter(conn)
+    async def refresh_if_needed(
+        self, user: User, conn: UserConnection, *, force: bool = False
+    ) -> bool:
+        """Keep an OAuth connection usable without bothering the user.
+
+        Refreshes when the access token is within REFRESH_LEEWAY of expiring (or `force`, after
+        a 401 that a stale token could explain). Returns True when new tokens were stored.
+
+        Outcomes are deliberately different:
+        - grant rejected by the vendor (`invalid_grant`: revoked, or a Google *Testing*-mode app
+          past its 7-day limit) → `expired`, the user must reconnect;
+        - vendor/network trouble → `error` with the reason, tokens untouched, no reconnect;
+        - no refresh token at all → nothing to do here; the next call decides.
+        """
+        if conn.token_expires_at is None and not force:
+            return False
+        if not force and conn.token_expires_at is not None:
+            if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
+                return False
+        async with _refresh_lock(conn.id):
+            # Another request may have refreshed while we waited for the lock.
+            await self.db.refresh(conn)
+            if not force and conn.token_expires_at is not None:
+                if conn.token_expires_at - utcnow() > REFRESH_LEEWAY:
+                    return False
+            if not self.vault.load(conn).refresh_token:
+                return False
+            provider = self.adapter(conn)
+            try:
+                tokens = await provider.refresh_credentials(self.context(user, conn))
+            except ProviderError as exc:
+                await self._fail(conn, exc)
+                if conn.status == ConnectionStatus.expired:
+                    await NotificationService(self.db).notify(
+                        user,
+                        NotificationKind.integration_auth_required,
+                        f"{provider.manifest.name} needs to be reconnected",
+                        body="Its authorization expired. Reconnect to keep using it.",
+                        href=f"/app/settings/connections/{conn.provider}",
+                        dedupe_key=f"conn:{conn.id}:auth:{conn.last_checked_at}",
+                    )
+                raise
+            if tokens is None:
+                return False
+            self._apply_tokens(conn, tokens)
+            if conn.status in (ConnectionStatus.error, ConnectionStatus.expired):
+                # A refresh that works is proof the grant is fine again.
+                conn.status = ConnectionStatus.connected
+                conn.last_error = None
+                conn.last_error_code = None
+            conn.last_checked_at = utcnow()
+            await self.db.commit()
+            metrics.oauth_refreshes.labels(conn.provider).inc()
+            return True
+
+    async def recover_from_auth_failure(self, user: User, conn: UserConnection) -> bool:
+        """A vendor said 401. Before telling the user to reconnect, redeem the refresh token
+        once: an access token that was revoked or expired early is the common, harmless case.
+        Returns True when the connection is usable again."""
+        if not self.vault.load(conn).refresh_token:
+            return False
+        last = _last_forced_refresh.get(conn.id)
+        if last is not None and utcnow() - last < RECOVERY_COOLDOWN:
+            return False
+        _last_forced_refresh[conn.id] = utcnow()
         try:
-            tokens = await provider.refresh_credentials(self.context(user, conn))
-        except ProviderError as exc:
-            await self._fail(conn, exc)
-            await NotificationService(self.db).notify(
-                user,
-                NotificationKind.integration_auth_required,
-                f"{provider.manifest.name} needs to be reconnected",
-                body="Its authorization expired. Reconnect to keep using it.",
-                href=f"/app/settings/connections/{conn.provider}",
-                dedupe_key=f"conn:{conn.id}:auth:{conn.last_checked_at}",
-            )
-            raise
-        if tokens is None:
-            return
-        self._apply_tokens(conn, tokens)
-        await self.db.commit()
+            return await self.refresh_if_needed(user, conn, force=True)
+        except ProviderError:
+            return False
 
     def _apply_tokens(self, conn: UserConnection, tokens: OAuthTokens) -> None:
         # Refresh-token rotation: keep the old refresh token if the provider didn't send one.
@@ -542,13 +606,22 @@ class ConnectionService:
         try:
             await self.refresh_if_needed(user, conn)
             result = await provider.test_connection(self.context(user, conn))
+            auth_failed = next(
+                (st for st in result.steps if st.name == "Authentication" and not st.ok), None
+            )
+            if auth_failed is not None and await self.recover_from_auth_failure(user, conn):
+                result = await provider.test_connection(self.context(user, conn))
         except ProviderError as exc:
             await self._fail(conn, exc)
             title, body = exc.user_message()
             return ConnectionTest([TestStep(title, False, body)])
         conn.last_checked_at = utcnow()
         if result.healthy:
-            if conn.status in (ConnectionStatus.error, ConnectionStatus.needs_attention):
+            if conn.status in (
+                ConnectionStatus.error,
+                ConnectionStatus.needs_attention,
+                ConnectionStatus.expired,
+            ):
                 conn.status = ConnectionStatus.connected
             conn.last_error = None
             conn.last_error_code = None
@@ -572,10 +645,14 @@ class ConnectionService:
         conn.last_checked_at = utcnow()
         await self.db.commit()
 
-    async def record_tool_failure(self, conn: UserConnection, error: ProviderError) -> None:
-        if error.kind in (
-            ProviderErrorKind.expired,
-            ProviderErrorKind.auth_failed,
+    async def record_tool_failure(
+        self, conn: UserConnection, error: ProviderError, *, user: User | None = None
+    ) -> None:
+        if error.kind in (ProviderErrorKind.expired, ProviderErrorKind.auth_failed):
+            if user is not None and await self.recover_from_auth_failure(user, conn):
+                return  # token refreshed; the connection stays connected
+            await self._fail(conn, error)
+        elif error.kind in (
             ProviderErrorKind.permission_denied,
             ProviderErrorKind.admin_approval_required,
         ):
@@ -659,7 +736,7 @@ class ConnectionService:
                 await self.refresh_if_needed(user, conn)
                 specs.extend(await provider.tools(self.context(user, conn)))
             except ProviderError as exc:
-                await self._fail(conn, exc)
+                await self.record_tool_failure(conn, exc, user=user)
                 log.info(
                     "provider_tools_unavailable",
                     extra={"provider": conn.provider, "kind": exc.kind.value},

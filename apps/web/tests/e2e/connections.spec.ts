@@ -115,7 +115,10 @@ test("an unreachable server yields a categorised error and an error status", asy
   await startMcpConnect(page, "http://127.0.0.1:9/mcp"); // nothing listens here
   await expect(page.getByText(/temporarily unavailable/).first()).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");
-  await expect(page.getByText("Connection error")).toBeVisible();
+  await expect(page.getByText("Connection unavailable").first()).toBeVisible();
+  // The action is a retry, never a reconnect: the server being down is not an auth problem.
+  await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
 });
 
 test("marketplace only offers vendors you can connect to; connecting is always the vendor's consent screen", async ({ page }) => {

@@ -91,6 +91,24 @@ class OAuthExchangeFailed(APIError):
     code = "OAUTH_EXCHANGE_FAILED"
     message = "Authorization failed. Your access wasn't granted."
 
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        oauth_error: str | None = None,
+        transient: bool = False,
+    ) -> None:
+        super().__init__(message)
+        # The vendor's `error` code ("invalid_grant", "invalid_client", …) when it sent one, and
+        # whether the failure was the network/vendor being down rather than a verdict on the
+        # grant. Refresh logic needs the difference: only a rejected grant means "reconnect".
+        self.oauth_error = oauth_error
+        self.transient = transient
+
+    @property
+    def grant_rejected(self) -> bool:
+        return self.oauth_error in ("invalid_grant", "invalid_token", "unauthorized_client")
+
 
 # HTTP status per provider error kind (see integrations/base/errors.py).
 PROVIDER_STATUS: dict[str, int] = {

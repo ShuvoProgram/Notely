@@ -122,3 +122,15 @@ otherwise (`docs/deployment.md`).
    the Gmail page showing *Connected as you@gmail.com*. Tokens are stored encrypted
    (`ENCRYPTION_KEY`, Fernet) against the user's connection row; refresh is automatic.
 3. **Disconnect** revokes and deletes the tokens; **Reconnect** runs the same one-click flow.
+
+## Token lifecycle (why a connection can say "Needs attention")
+
+Access tokens are short-lived (Google: 1 hour). Notely refreshes them server-side, on demand,
+right before any call that needs one (search, assistant tools, calendar sync, health checks)
+and on a 5-minute cron in the worker; concurrent callers share one refresh per connection.
+A vendor outage during refresh is reported as **Connection unavailable → Try again** and the
+tokens are kept. Only a rejected grant (`invalid_grant`) becomes **Needs attention → Reconnect**.
+
+Google-specific: while the OAuth consent screen is in **Testing** status, Google expires refresh
+tokens after 7 days, so users will genuinely have to reconnect weekly until the app is published
+(see "Publishing status" above).

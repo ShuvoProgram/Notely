@@ -119,6 +119,9 @@ provider_errors = Counter(
     ["provider", "kind"],
     registry=registry,
 )
+oauth_refreshes = Counter(
+    "notely_oauth_refreshes_total", "Access tokens refreshed", ["provider"], registry=registry
+)
 oauth_failures = Counter(
     "notely_oauth_failures_total", "OAuth flow failures", ["provider", "stage"], registry=registry
 )

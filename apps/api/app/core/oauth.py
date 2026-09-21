@@ -214,13 +214,28 @@ class OAuthClient:
                 "oauth_token_exchange_network_error",
                 extra={"provider": self.config.provider_id, "reason": type(exc).__name__},
             )
-            raise OAuthExchangeFailed() from exc
+            raise OAuthExchangeFailed(transient=True) from exc
         if resp.status_code >= 400:
+            oauth_error: str | None = None
+            try:
+                body = resp.json()
+                if isinstance(body, dict) and isinstance(body.get("error"), str):
+                    oauth_error = body["error"]
+            except ValueError:
+                pass
             log.warning(
                 "oauth_token_exchange_rejected",
-                extra={"provider": self.config.provider_id, "status": resp.status_code},
+                extra={
+                    "provider": self.config.provider_id,
+                    "status": resp.status_code,
+                    "error": oauth_error,
+                },
             )
-            raise OAuthExchangeFailed()
+            # 5xx / 429 are the vendor having a bad minute, not a verdict on the grant.
+            raise OAuthExchangeFailed(
+                oauth_error=oauth_error,
+                transient=resp.status_code >= 500 or resp.status_code == 429,
+            )
         return resp
 
     def _parse_tokens(self, resp: httpx.Response) -> OAuthTokens:

@@ -1,41 +1,110 @@
-import { AlertTriangle, Check, Circle, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { AlertTriangle, Check, Circle, Clock, Loader2, RefreshCw, WifiOff, type LucideIcon } from "lucide-react";
 
-import type { ConnectionStatus } from "@/lib/api/types";
+import type { Connection, ConnectionStatus } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-/** Status is always conveyed by icon + text, never colour alone (WCAG). */
-export const STATUS_META: Record<ConnectionStatus, { label: string; hint: string; icon: typeof Check; tone: string }> = {
-  pending: { label: "Not connected", hint: "", icon: Circle, tone: "text-muted-foreground" },
-  connecting: { label: "Connecting", hint: "Waiting for authorization…", icon: Loader2, tone: "text-muted-foreground" },
-  connected: { label: "Connected", hint: "", icon: Check, tone: "text-success" },
-  syncing: { label: "Syncing", hint: "Updating your data…", icon: RefreshCw, tone: "text-ai" },
-  needs_attention: { label: "Needs attention", hint: "Additional permission or configuration required", icon: AlertTriangle, tone: "text-warning" },
-  expired: { label: "Session expired", hint: "Reconnect to continue", icon: AlertTriangle, tone: "text-warning" },
-  error: { label: "Connection error", hint: "", icon: XCircle, tone: "text-destructive" },
-  disconnected: { label: "Not connected", hint: "", icon: Circle, tone: "text-muted-foreground" },
-};
+/** What the user should do next. Drives the one button every card shows. */
+export type ConnectionAction = "connect" | "manage" | "reconnect" | "retry" | null;
+
+export interface ConnectionView {
+  /** Visual state, coarser than the API status so every state has one clear look. */
+  state: "connected" | "connecting" | "syncing" | "attention" | "error" | "rate_limited" | "disconnected";
+  label: string;
+  /** Shorter label for cards ("Needs attention" instead of "Connection needs attention"). */
+  shortLabel?: string;
+  /** One supporting line: what happened, or when it was last checked. */
+  detail: string;
+  icon: LucideIcon;
+  tone: string;
+  spinning?: boolean;
+  action: ConnectionAction;
+}
 
 export function relativeTime(iso: string | null): string {
   if (!iso) return "never";
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.round(diff / 60_000);
   if (m < 1) return "just now";
-  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  if (m < 60) return `${m} min ago`;
   const h = Math.round(m / 60);
   if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
   return `${Math.round(h / 24)} day${Math.round(h / 24) === 1 ? "" : "s"} ago`;
 }
 
-export function ConnectionStatusBadge({ status, lastChecked, lastError, className }: { status: ConnectionStatus | "none"; lastChecked?: string | null; lastError?: string | null; className?: string }) {
-  const meta = status === "none" ? STATUS_META.disconnected : STATUS_META[status];
-  const Icon = meta.icon;
-  const detail = status === "connected" && lastChecked ? `Last checked ${relativeTime(lastChecked)}` : lastError || meta.hint;
+/**
+ * Turns the API's status + last error into one consistent presentation. Status is always
+ * icon + text, never colour alone. The API only reports `expired` when a refresh was actually
+ * rejected by the vendor, so "Reconnect" here means it is genuinely required.
+ */
+export function describeConnection(conn: Connection | null, providerName: string, opts?: { available?: boolean; refreshing?: boolean }): ConnectionView {
+  if (opts?.refreshing) {
+    return { state: "connecting", label: "Reconnecting…", detail: `Checking ${providerName}`, icon: RefreshCw, tone: "text-muted-foreground", spinning: true, action: null };
+  }
+  const status: ConnectionStatus | "none" = conn && conn.status !== "disconnected" ? conn.status : "none";
+  switch (status) {
+    case "none":
+    case "pending":
+      return {
+        state: "disconnected",
+        label: "Not connected",
+        detail: opts?.available === false ? "Not available on this deployment" : "",
+        icon: Circle,
+        tone: "text-muted-foreground",
+        action: opts?.available === false ? null : "connect",
+      };
+    case "connecting":
+      return { state: "connecting", label: "Connecting…", detail: "Waiting for authorization", icon: Loader2, tone: "text-muted-foreground", spinning: true, action: null };
+    case "syncing":
+      return { state: "syncing", label: "Syncing…", detail: "Updating your data", icon: RefreshCw, tone: "text-ai", spinning: true, action: "manage" };
+    case "connected": {
+      const at = conn?.last_sync_at ?? conn?.last_checked_at ?? null;
+      return {
+        state: "connected",
+        label: "Connected",
+        detail: at ? `${conn?.last_sync_at ? "Last synced" : "Last checked"} ${relativeTime(at)}` : conn?.external_account_name ? conn.external_account_name : "",
+        icon: Check,
+        tone: "text-success",
+        action: "manage",
+      };
+    }
+    case "expired":
+      return { state: "attention", label: "Connection needs attention", shortLabel: "Needs attention", detail: "Authorization expired", icon: AlertTriangle, tone: "text-warning", action: "reconnect" };
+    case "needs_attention":
+      return {
+        state: "attention",
+        label: "Connection needs attention",
+        shortLabel: "Needs attention",
+        detail: conn?.last_error ?? "Additional permission or configuration required",
+        icon: AlertTriangle,
+        tone: "text-warning",
+        action: conn?.last_error_code === "permission_denied" || conn?.last_error_code === "admin_approval_required" ? "reconnect" : "manage",
+      };
+    case "error":
+      if (conn?.last_error_code === "rate_limited") {
+        return { state: "rate_limited", label: "Rate limited", detail: `${providerName} asked us to slow down`, icon: Clock, tone: "text-warning", action: "retry" };
+      }
+      return { state: "error", label: "Connection unavailable", detail: conn?.last_error ?? `Unable to sync with ${providerName}`, icon: WifiOff, tone: "text-destructive", action: "retry" };
+    default:
+      return { state: "disconnected", label: "Not connected", detail: "", icon: Circle, tone: "text-muted-foreground", action: "connect" };
+  }
+}
+
+export const ACTION_LABEL: Record<Exclude<ConnectionAction, null>, string> = {
+  connect: "Connect",
+  manage: "Manage",
+  reconnect: "Reconnect",
+  retry: "Try again",
+};
+
+/** Icon + label + one detail line. Used on cards and on the detail page. */
+export function ConnectionStatusBadge({ view, className, compact }: { view: ConnectionView; className?: string; compact?: boolean }) {
+  const Icon = view.icon;
   return (
-    <div className={cn("flex items-start gap-2 text-sm", className)}>
-      <Icon className={cn("mt-0.5 size-4 shrink-0", meta.tone, (status === "connecting" || status === "syncing") && "animate-spin")} aria-hidden />
+    <div className={cn("flex min-w-0 items-start gap-2", compact ? "text-xs" : "text-sm", className)}>
+      <Icon className={cn("mt-0.5 size-4 shrink-0", view.tone, view.spinning && "animate-spin")} aria-hidden />
       <div className="min-w-0">
-        <p className={cn("font-medium", meta.tone)}>{meta.label}</p>
-        {detail ? <p className="truncate text-xs text-muted-foreground">{detail}</p> : null}
+        <p className={cn("truncate font-medium", view.tone)}>{compact ? (view.shortLabel ?? view.label) : view.label}</p>
+        {view.detail ? <p className="truncate text-xs text-muted-foreground">{view.detail}</p> : null}
       </div>
     </div>
   );
