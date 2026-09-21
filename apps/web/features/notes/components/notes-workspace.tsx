@@ -23,7 +23,7 @@ export function NotesWorkspace({ children }: { children: React.ReactNode }) {
   const hasNote = Boolean(activeNoteId);
 
   return (
-    <div className="-mx-4 -my-6 flex h-[calc(100dvh-4rem)] min-h-0 sm:-mx-6 sm:-my-8">
+    <div data-full-bleed className="flex h-[calc(100dvh-4rem)] min-h-0">
       <aside
         aria-label="Notes list"
         className={cn(

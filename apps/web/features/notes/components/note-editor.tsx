@@ -78,10 +78,13 @@ function LoadedNoteEditor({ note }: { note: Note }) {
   // Restore an unsaved local draft (e.g. after a crash) before the editor mounts.
   const [initial] = React.useState(() => {
     const draft = typeof window !== "undefined" ? readDraft(note.id) : null;
-    if (shouldRestoreDraft(draft, note.version, note.content_json, note.title) && draft) {
+    // Defensive: a note row can arrive without a body (older rows, partial cache patches).
+    const body: TipTapDoc = note.content_json ?? { type: "doc", content: [] };
+    const title = note.title ?? "";
+    if (shouldRestoreDraft(draft, note.version, body, title) && draft) {
       return { title: draft.title, content: draft.content_json, restored: true };
     }
-    return { title: note.title, content: note.content_json, restored: false };
+    return { title, content: body, restored: false };
   });
   const [title, setTitle] = React.useState(initial.title);
   const editorRef = React.useRef<Editor | null>(null);
@@ -270,7 +273,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-        <TagPicker selected={note.tags} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
+        <TagPicker selected={note.tags ?? []} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
         <span className="inline-flex items-center gap-1">
           <FolderIcon className="size-3.5" aria-hidden />
           {folderName ?? "No folder"}

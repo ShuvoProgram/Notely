@@ -89,7 +89,7 @@ export function AppShell({ user, children }: { user: User; children: React.React
         </header>
 
         <main id="main" tabIndex={-1} className="scrollbar-thin flex-1 overflow-y-auto pb-24 focus:outline-none md:pb-0">
-          <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+          <div className="mx-auto w-full max-w-6xl px-4 py-6 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0 sm:px-6 sm:py-8">{children}</div>
         </main>
 
         <nav

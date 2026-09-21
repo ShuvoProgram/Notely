@@ -33,7 +33,7 @@ export function AIWorkspace() {
   const select = (id: string | null) => router.replace(id ? `${pathname}?thread=${id}` : pathname);
 
   return (
-    <div className="-mx-4 -my-6 flex h-[calc(100dvh-4rem)] min-h-0 sm:-mx-6 sm:-my-8">
+    <div data-full-bleed className="flex h-[calc(100dvh-4rem)] min-h-0">
       <aside aria-label="Conversations" className="glass hidden w-72 shrink-0 flex-col rounded-none border-y-0 border-l-0 md:flex">
         <div className="flex items-center justify-between px-4 py-4">
           <h2 className="text-base font-semibold tracking-tight">Conversations</h2>

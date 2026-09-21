@@ -60,7 +60,7 @@ export function useAutosave(note: Note): Autosave {
   const pendingRef = React.useRef<PendingChange>({});
   const latestRef = React.useRef<{ title: string; content_json: TipTapDoc }>({
     title: note.title,
-    content_json: note.content_json,
+    content_json: note.content_json ?? { type: "doc", content: [] },
   });
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const inflightRef = React.useRef<Promise<void> | null>(null);

@@ -59,7 +59,9 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* cmdk's Input/List/Item read a store from Command's context; without this wrapper they
+            throw "Cannot read properties of undefined (reading 'subscribe')". */}
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )

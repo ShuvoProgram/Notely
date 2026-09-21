@@ -44,6 +44,8 @@ function relative(iso: string): string {
 }
 
 function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
+  // A summary from an older API or a partial cache patch may lack tags; never crash the list.
+  const tags = note.tags ?? [];
   return (
     <li>
       <Link
@@ -63,12 +65,12 @@ function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
           </time>
         </div>
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.excerpt || "No additional text"}</p>
-        {note.tags.length ? (
+        {tags.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {note.tags.slice(0, 3).map((t) => (
+            {tags.slice(0, 3).map((t) => (
               <TagChip key={t.id} tag={t} />
             ))}
-            {note.tags.length > 3 ? <span className="text-[11px] text-muted-foreground">+{note.tags.length - 3}</span> : null}
+            {tags.length > 3 ? <span className="text-[11px] text-muted-foreground">+{tags.length - 3}</span> : null}
           </div>
         ) : null}
       </Link>

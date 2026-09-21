@@ -49,6 +49,7 @@ export function CommandPalette({ className }: { className?: string }) {
     queryFn: () => notesApi.list({ q: q.trim() || undefined, limit: 6 }),
     enabled: open,
     staleTime: 10_000,
+    retry: false,
   });
 
   const go = (href: string) => {
@@ -78,7 +79,12 @@ export function CommandPalette({ className }: { className?: string }) {
       <CommandDialog open={open} onOpenChange={setOpen} title="Search and commands" description="Jump to a page, create a note, or open one by title" className="glass-3">
         <CommandInput placeholder="Type a command or search notes…" value={q} onValueChange={setQ} />
         <CommandList className="max-h-[60vh]">
-          <CommandEmpty>Nothing matches yet.</CommandEmpty>
+          <CommandEmpty>{notes.isFetching ? "Searching…" : "Nothing matches yet."}</CommandEmpty>
+          {notes.isError ? (
+            <p role="alert" className="px-3 py-2 text-xs text-destructive">
+              Notes couldn’t be searched right now ({messageFor(notes.error)}). Commands still work.
+            </p>
+          ) : null}
           <CommandGroup heading="Actions">
             <CommandItem
               value="new note"
@@ -105,7 +111,7 @@ export function CommandPalette({ className }: { className?: string }) {
               <CommandSeparator />
               <CommandGroup heading="Notes">
                 {notes.data.notes.map((n) => (
-                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)}>
+                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)}>
                     <FileText aria-hidden />
                     <span className="truncate">{n.title || "Untitled"}</span>
                     {n.excerpt ? <span className="ml-auto max-w-[40%] truncate text-xs text-muted-foreground">{n.excerpt}</span> : null}
