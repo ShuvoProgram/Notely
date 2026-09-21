@@ -87,6 +87,8 @@ class SignInProviderOut(BaseModel):
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     avatar_url: str | None = Field(default=None, max_length=2048)
+    # Which in-app notification kinds the user wants; merged into preferences.notifications.
+    notifications: dict[str, bool] | None = None
 
     @field_validator("display_name")
     @classmethod

@@ -24,6 +24,7 @@ from app.models.integration import (
     WebhookEvent,
 )
 from app.models.note import Folder, Note, NoteTag, Tag
+from app.models.notification import Notification, NotificationKind
 from app.models.task import Task, TaskPriority, TaskSource, TaskStatus
 from app.models.tenant import Tenant, TenantKind
 from app.models.user import AuthIdentity, SignInProvider, User, UserSession
@@ -46,6 +47,8 @@ __all__ = [
     "Integration",
     "MessageRole",
     "Note",
+    "Notification",
+    "NotificationKind",
     "NoteTag",
     "RiskLevel",
     "RunStatus",

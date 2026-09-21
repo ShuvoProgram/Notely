@@ -692,8 +692,20 @@ class VendorMock:
                 },
             )
         if path == f"{base}/calendars/primary/events" and r.method == "POST":
-            self.state["gcal_summary"] = r_json(r)["summary"]
+            body = r_json(r)
+            self.state["gcal_summary"] = body["summary"]
+            self.state["gcal_created"] = self.state.get("gcal_created", 0) + 1
+            self.state["gcal_last_body"] = body
             return _json(200, {"id": "e2", "htmlLink": "https://calendar.google.com/e2"})
+        if path == f"{base}/calendars/primary/events/e2" and r.method == "PATCH":
+            body = r_json(r)
+            self.state["gcal_summary"] = body["summary"]
+            self.state["gcal_patched"] = self.state.get("gcal_patched", 0) + 1
+            self.state["gcal_last_body"] = body
+            return _json(200, {"id": "e2", "htmlLink": "https://calendar.google.com/e2"})
+        if path == f"{base}/calendars/primary/events/e2" and r.method == "DELETE":
+            self.state["gcal_deleted"] = self.state.get("gcal_deleted", 0) + 1
+            return httpx.Response(204)
         if path == f"{base}/calendars/primary/events/e2":
             return _json(
                 200, {"id": "e2", "status": "confirmed", "summary": self.state.get("gcal_summary")}

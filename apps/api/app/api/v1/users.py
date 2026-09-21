@@ -20,7 +20,12 @@ async def me(ctx: CurrentAuth) -> dict[str, Any]:
 @router.patch("/me", response_model=Envelope[UserOut])
 async def update_me(payload: UpdateProfileRequest, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
     changes = payload.model_dump(exclude_unset=True)
+    notifications = changes.pop("notifications", None)
     for field, value in changes.items():
         setattr(ctx.user, field, value)
+    if notifications is not None:
+        prefs = dict(ctx.user.preferences or {})
+        prefs["notifications"] = {**dict(prefs.get("notifications") or {}), **notifications}
+        ctx.user.preferences = prefs
     await db.commit()
     return ok(user_out(ctx.user))

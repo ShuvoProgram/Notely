@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.checkpoint import close_checkpointer, init_checkpointer
 from app.api import health
-from app.api.v1 import ai, auth, integrations, notes, tasks, users
+from app.api.v1 import ai, auth, integrations, notes, notifications, tasks, users
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
@@ -89,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(notes.tags_router)
     v1.include_router(notes.search_router)
     v1.include_router(tasks.router)
+    v1.include_router(notifications.router)
     v1.include_router(ai.router)
     v1.include_router(ai.audit_router)
     v1.include_router(integrations.router)

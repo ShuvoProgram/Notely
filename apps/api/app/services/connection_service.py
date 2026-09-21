@@ -45,9 +45,11 @@ from app.models.integration import (
     Integration,
     UserConnection,
 )
+from app.models.notification import NotificationKind
 from app.models.user import User
 from app.services.audit_service import AuditService
 from app.services.credential_vault import CredentialVault
+from app.services.notification_service import NotificationService
 
 log = get_logger(__name__)
 
@@ -465,6 +467,14 @@ class ConnectionService:
             tokens = await provider.refresh_credentials(self.context(user, conn))
         except ProviderError as exc:
             await self._fail(conn, exc)
+            await NotificationService(self.db).notify(
+                user,
+                NotificationKind.integration_auth_required,
+                f"{provider.manifest.name} needs to be reconnected",
+                body="Its authorization expired. Reconnect to keep using it.",
+                href=f"/app/settings/connections/{conn.provider}",
+                dedupe_key=f"conn:{conn.id}:auth:{conn.last_checked_at}",
+            )
             raise
         if tokens is None:
             return
@@ -503,6 +513,15 @@ class ConnectionService:
         conn.last_error_code = None
         conn.last_checked_at = utcnow()
         conn.disconnected_at = None
+        await NotificationService(self.db).notify(
+            user,
+            NotificationKind.integration_connected,
+            f"{provider.manifest.name} connected",
+            body=f"Signed in as {conn.external_account_name or 'your account'}.",
+            href=f"/app/settings/connections/{conn.provider}",
+            dedupe_key=f"conn:{conn.id}:connected:{utcnow().isoformat()}",
+            commit=False,
+        )
         await self.audit.record(
             user,
             provider=conn.provider,
@@ -594,6 +613,15 @@ class ConnectionService:
         purged = 0
         if purge_data:
             purged = await self.purge_local_data(conn)
+        await NotificationService(self.db).notify(
+            user,
+            NotificationKind.integration_disconnected,
+            f"{provider.manifest.name} disconnected",
+            body="Its credentials were removed from Notely.",
+            href=f"/app/settings/connections/{conn.provider}",
+            dedupe_key=f"conn:{conn.id}:disconnected:{utcnow().isoformat()}",
+            commit=False,
+        )
         await self.audit.record(
             user,
             provider=conn.provider,

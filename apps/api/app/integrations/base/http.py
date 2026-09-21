@@ -104,6 +104,12 @@ class ProviderHttpClient:
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         return await self.request("POST", url, **kwargs)
 
+    async def patch(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self.request("PATCH", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self.request("DELETE", url, **kwargs)
+
     async def _backoff(self, attempt: int, retry_after: float | None) -> None:
         delay = retry_after if retry_after is not None else BASE_DELAY * (2 ** (attempt - 1))
         delay = min(delay, 10.0) + random.uniform(0, 0.25)  # noqa: S311 — jitter, not security

@@ -49,6 +49,8 @@ class TaskService:
             title=payload.title,
             description=payload.description,
             due_date=payload.due_date,
+            due_time=payload.due_time,
+            timezone=payload.timezone,
             priority=payload.priority,
             note_id=payload.note_id,
             source=payload.source,
@@ -69,7 +71,12 @@ class TaskService:
         changes = payload.model_dump(exclude_unset=True)
         if changes.pop("clear_due_date", False):
             task.due_date = None
+            task.due_time = None
             changes.pop("due_date", None)
+            changes.pop("due_time", None)
+        if changes.pop("clear_due_time", False):
+            task.due_time = None
+            changes.pop("due_time", None)
         for key, value in changes.items():
             if value is None and key != "description":
                 continue

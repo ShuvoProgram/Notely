@@ -230,8 +230,10 @@ SETTINGS_PREFIX: dict[str, str | None] = {
 }
 
 
-async def connect(client: Any, provider_id: str, case: dict[str, Any]) -> dict[str, Any]:
-    return await connect_via_oauth(client, provider_id, case)
+async def connect(
+    client: Any, provider_id: str, case: dict[str, Any], scopes: list[str] | None = None
+) -> dict[str, Any]:
+    return await connect_via_oauth(client, provider_id, case, scopes=scopes)
 
 
 @pytest.fixture
@@ -253,8 +255,11 @@ def vendor(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> I
     provider_http.set_transport_override(None)
 
 
-async def connect_via_oauth(client: Any, provider_id: str, case: dict[str, Any]) -> dict[str, Any]:
-    start = await client.get(f"/api/v1/oauth/{provider_id}/start-url")
+async def connect_via_oauth(
+    client: Any, provider_id: str, case: dict[str, Any], scopes: list[str] | None = None
+) -> dict[str, Any]:
+    params = {"scopes": ",".join(scopes)} if scopes else {}
+    start = await client.get(f"/api/v1/oauth/{provider_id}/start-url", params=params)
     assert start.status_code == 200, start.text
     url = start.json()["data"]["authorize_url"]
     parsed = urlparse(url)
@@ -274,7 +279,7 @@ async def connect_via_oauth(client: Any, provider_id: str, case: dict[str, Any])
     )
     assert cb.status_code == 302, cb.text
     assert cb.headers["location"] == (
-        f"http://localhost:3000/app/connections/{provider_id}?connected=1"
+        f"http://localhost:3000/app/settings/connections/{provider_id}?connected=1"
     ), cb.headers["location"]
     detail = (await client.get(f"/api/v1/integrations/providers/{provider_id}")).json()["data"]
     return detail
@@ -447,7 +452,7 @@ async def test_google_access_denied_explains_testing_mode(client: Any, vendor: V
     )
     assert resp.status_code == 302
     assert resp.headers["location"] == (
-        "http://localhost:3000/app/connections/gmail"
+        "http://localhost:3000/app/settings/connections/gmail"
         "?error=PROVIDER_AUTH_FAILED&reason=access_denied"
     )
     conn = (await client.get("/api/v1/integrations/providers/gmail")).json()["data"]["connection"]
