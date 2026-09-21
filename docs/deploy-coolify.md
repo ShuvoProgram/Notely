@@ -47,6 +47,7 @@ and `SERVICE_FQDN_WEB`; add these (**Build Variable** unticked — they are runt
 
 | Variable | Value |
 |---|---|
+| `PUBLIC_URL` | `https://notes.yourdomain.com` — the exact domain you set on the `web` service. **Required**: the API refuses to start without an https origin (this is the usual cause of "container api is unhealthy"). |
 | `SESSION_SECRET` | `openssl rand -base64 48` |
 | `ENCRYPTION_KEY` | Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `LITELLM_MASTER_KEY` | `sk-` + `openssl rand -hex 24` |
