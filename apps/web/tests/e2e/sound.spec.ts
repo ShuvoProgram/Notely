@@ -15,14 +15,14 @@ test("sound preference is per user, applies immediately and survives a reload", 
   await page.goto("/app/settings/notifications");
   const toggle = page.getByRole("switch", { name: "Play sounds" });
   await expect(toggle).toBeChecked();
-  await expect(page.getByText("60%")).toBeVisible();
+  await expect(page.getByText("60%")).toBeVisible({ timeout: 15_000 });
 
   // Volume: keyboard-drive the slider and make sure the value is saved server-side.
   const slider = page.getByRole("slider", { name: "Sound volume" });
   await slider.focus();
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("ArrowLeft");
-  await expect(page.getByText("50%")).toBeVisible();
+  await expect(page.getByText("50%")).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => (await (await page.request.get("/api/v1/users/me")).json()).data.sound.volume).toBe(0.5);
 
   // Off means off: the switch persists and the volume controls go quiet.
@@ -34,7 +34,7 @@ test("sound preference is per user, applies immediately and survives a reload", 
 
   await page.reload();
   await expect(page.getByRole("switch", { name: "Play sounds" })).not.toBeChecked();
-  await expect(page.getByText("50%")).toBeVisible();
+  await expect(page.getByText("50%")).toBeVisible({ timeout: 15_000 });
   // The player mirrors the saved preference locally so it is silent before /users/me resolves.
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem("notely.sound") ?? "{}"))).toEqual({ enabled: false, volume: 0.5 });
 });

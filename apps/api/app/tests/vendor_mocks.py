@@ -69,7 +69,14 @@ class VendorMock:
         ):
             return _json(400, {"error": "invalid_grant"})
         name = f"_{self.provider}"
-        if self.provider in ("gmail", "google_calendar", "google_drive"):
+        if self.provider in (
+            "gmail",
+            "google_calendar",
+            "google_drive",
+            "google_sheets",
+            "google_docs",
+            "google_meet",
+        ):
             name = "_google"
         handler = getattr(self, name)
         response: httpx.Response | None = handler(request, host, path)
@@ -94,7 +101,7 @@ class VendorMock:
                     "authed_user": {
                         "id": "U1",
                         "access_token": "xoxp-user",
-                        "scope": "search:read,channels:read,channels:history,users:read",
+                        "scope": "search:read,channels:read,channels:history,users:read,chat:write",
                     },
                     "team": {"id": "T1", "name": "Acme"},
                 },
@@ -652,8 +659,213 @@ class VendorMock:
             "gmail": self._gmail,
             "google_calendar": self._google_calendar,
             "google_drive": self._google_drive,
+            "google_sheets": self._google_sheets,
+            "google_docs": self._google_docs,
+            "google_meet": self._google_meet,
         }[self.provider]
         return handler(r, host, path)
+
+    def _drive_list(self, r: httpx.Request, name: str) -> httpx.Response:
+        q = r.url.params.get("q", "")
+        files = [
+            {
+                "id": "f1",
+                "name": name,
+                "modifiedTime": "2026-09-19T00:00:00Z",
+                "webViewLink": "https://docs.google.com/x/f1",
+            }
+        ]
+        if "name contains" in q and "pricing" not in q.lower():
+            files = []
+        return _json(200, {"files": files})
+
+    def _google_sheets(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if path == "/drive/v3/about":
+            return _json(200, {"user": {"emailAddress": "ada@acme.io"}})
+        if path == "/drive/v3/files":
+            return self._drive_list(r, "Pricing model")
+        if host != "sheets.googleapis.com":
+            return None
+        if path == "/v4/spreadsheets" and r.method == "POST":
+            self.state["sheet_title"] = r_json(r)["properties"]["title"]
+            return _json(
+                200,
+                {
+                    "spreadsheetId": "s9",
+                    "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/s9",
+                },
+            )
+        if path.startswith("/v4/spreadsheets/") and path.endswith(":append"):
+            body = r_json(r)
+            self.state["appended"] = body["values"]
+            return _json(
+                200,
+                {
+                    "updates": {
+                        "updatedRange": "Sheet1!A5:B6",
+                        "updatedRows": len(body["values"]),
+                    }
+                },
+            )
+        if "/values/" in path and r.method == "PUT":
+            self.state["written"] = r_json(r)["values"]
+            rng = path.split("/values/", 1)[1]
+            return _json(200, {"updatedRange": rng, "updatedCells": 2})
+        if "/values/" in path and r.method == "GET":
+            rng = path.split("/values/", 1)[1]
+            if self.state.get("appended") and rng == "Sheet1!A5:B6":
+                return _json(200, {"range": rng, "values": self.state["appended"]})
+            if self.state.get("written"):
+                return _json(200, {"range": rng, "values": self.state["written"]})
+            return _json(
+                200,
+                {"range": rng, "values": [["Plan", "Price"], ["Starter", "$9"], ["Pro", "$29"]]},
+            )
+        if path in ("/v4/spreadsheets/f1", "/v4/spreadsheets/s9"):
+            title = self.state.get("sheet_title", "Pricing model")
+            return _json(
+                200,
+                {
+                    "properties": {"title": title},
+                    "sheets": [{"properties": {"title": "Sheet1"}}],
+                },
+            )
+        return None
+
+    def _google_docs(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if path == "/drive/v3/about":
+            return _json(200, {"user": {"emailAddress": "ada@acme.io"}})
+        if path == "/drive/v3/files":
+            return self._drive_list(r, "Pricing memo")
+        if host != "docs.googleapis.com":
+            return None
+        if path == "/v1/documents" and r.method == "POST":
+            self.state["doc_title"] = r_json(r)["title"]
+            return _json(200, {"documentId": "d9", "title": self.state["doc_title"]})
+        if path.endswith(":batchUpdate"):
+            text = r_json(r)["requests"][0]["insertText"]["text"]
+            self.state["doc_text"] = self.state.get("doc_text", "") + text
+            return _json(200, {"replies": [{}]})
+        if path in ("/v1/documents/f1", "/v1/documents/d9"):
+            title = self.state.get("doc_title", "Pricing memo")
+            text = self.state.get("doc_text") or "# Pricing memo\nStarter is $9.\n"
+            return _json(
+                200,
+                {
+                    "documentId": path.rsplit("/", 1)[1],
+                    "title": title,
+                    "body": {
+                        "content": [{"paragraph": {"elements": [{"textRun": {"content": text}}]}}]
+                    },
+                },
+            )
+        return None
+
+    def _google_meet(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if host != "meet.googleapis.com":
+            return None
+        if path == "/v2/spaces" and r.method == "POST":
+            self.state["space"] = {
+                "name": "spaces/abc",
+                "meetingCode": "abc-mnop-xyz",
+                "meetingUri": "https://meet.google.com/abc-mnop-xyz",
+                "config": r_json(r).get("config", {}),
+            }
+            return _json(200, self.state["space"])
+        if path == "/v2/spaces/abc" or path == "/v2/spaces/abc-mnop-xyz":
+            return _json(
+                200,
+                self.state.get("space")
+                or {
+                    "name": "spaces/abc",
+                    "meetingCode": "abc-mnop-xyz",
+                    "meetingUri": "https://meet.google.com/abc-mnop-xyz",
+                },
+            )
+        if path == "/v2/conferenceRecords":
+            return _json(
+                200,
+                {
+                    "conferenceRecords": [
+                        {
+                            "name": "conferenceRecords/r1",
+                            "space": "spaces/abc",
+                            "startTime": "2026-09-19T10:00:00Z",
+                            "endTime": "2026-09-19T10:30:00Z",
+                        }
+                    ]
+                },
+            )
+        return None
+
+    # --- Zoom -------------------------------------------------------------------------------
+
+    def _zoom(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
+        if host == "zoom.us" and path == "/oauth/token":
+            # Basic client auth, PKCE verifier, and the granted (granular) scopes in the reply.
+            assert r.headers.get("authorization", "").startswith("Basic ")
+            form = self._form(r)
+            if form.get("grant_type") == "refresh_token":
+                assert form.get("refresh_token") == "zoom-refresh"
+            else:
+                assert form.get("code_verifier")
+            return _json(
+                200,
+                {
+                    "access_token": "zoom-token",
+                    "refresh_token": "zoom-refresh",
+                    "expires_in": 3599,
+                    "scope": "user:read:user meeting:read:list_meetings meeting:read:meeting "
+                    "meeting:write:meeting meeting:update:meeting meeting:delete:meeting",
+                },
+            )
+        if r.headers.get("authorization") != "Bearer zoom-token":
+            return _json(401, {"code": 124, "message": "Invalid access token."})
+        meeting = {
+            "id": 81234567890,
+            "topic": self.state.get("zoom_topic", "Pricing sync"),
+            "start_time": "2026-09-23T10:00:00Z",
+            "duration": self.state.get("zoom_duration", 30),
+            "timezone": "UTC",
+            "join_url": "https://zoom.us/j/81234567890",
+            "type": 2,
+        }
+        if path == "/v2/users/me":
+            return _json(
+                200,
+                {
+                    "id": "u1",
+                    "email": "ada@acme.io",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "account_id": "acc1",
+                },
+            )
+        if path == "/v2/users/me/meetings" and r.method == "GET":
+            return _json(200, {"total_records": 1, "meetings": [meeting]})
+        if path == "/v2/users/me/meetings" and r.method == "POST":
+            body = r_json(r)
+            self.state["zoom_topic"] = body["topic"]
+            self.state["zoom_duration"] = body.get("duration", 30)
+            return _json(
+                201, {**meeting, "topic": body["topic"], "duration": body.get("duration", 30)}
+            )
+        if path == "/v2/meetings/81234567890" and r.method == "GET":
+            if self.state.get("zoom_deleted"):
+                return _json(404, {"code": 3001, "message": "Meeting does not exist"})
+            return _json(200, meeting)
+        if path == "/v2/meetings/81234567890" and r.method == "PATCH":
+            body = r_json(r)
+            self.state["zoom_topic"] = body.get(
+                "topic", self.state.get("zoom_topic", "Pricing sync")
+            )
+            if "duration" in body:
+                self.state["zoom_duration"] = body["duration"]
+            return httpx.Response(204)
+        if path == "/v2/meetings/81234567890" and r.method == "DELETE":
+            self.state["zoom_deleted"] = True
+            return httpx.Response(204)
+        return None
 
     def _gmail(self, r: httpx.Request, host: str, path: str) -> httpx.Response | None:
         base = "/gmail/v1/users/me"
@@ -900,12 +1112,24 @@ def combined_transport(mocks: dict[str, VendorMock]) -> httpx.MockTransport:
         "oauth2.googleapis.com": "google",
         "www.googleapis.com": "google",
         "gmail.googleapis.com": "google",
+        "sheets.googleapis.com": "google",
+        "docs.googleapis.com": "google",
+        "meet.googleapis.com": "google",
+        "zoom.us": "zoom",
+        "api.zoom.us": "zoom",
         "app.clickup.com": "clickup",
         "api.clickup.com": "clickup",
     }
     families = {
         "microsoft": ("microsoft_teams", "outlook", "onedrive"),
-        "google": ("gmail", "google_calendar", "google_drive"),
+        "google": (
+            "gmail",
+            "google_calendar",
+            "google_drive",
+            "google_sheets",
+            "google_docs",
+            "google_meet",
+        ),
     }
 
     def handler(request: httpx.Request) -> httpx.Response:

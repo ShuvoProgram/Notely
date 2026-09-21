@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # Gmail / Google Calendar / Google Drive reuse the Google sign-in client (oauth_google_*).
     oauth_clickup_client_id: str = ""
     oauth_clickup_client_secret: str = ""
+    # Google Sheets / Docs / Meet reuse the Google client as well.
+    oauth_zoom_client_id: str = ""
+    oauth_zoom_client_secret: str = ""
 
     # AI. The application only ever talks to the LiteLLM gateway (OpenAI-compatible).
     ai_provider: Literal["litellm", "fake"] = "litellm"  # "fake" = scripted, dev/test only

@@ -134,3 +134,45 @@ tokens are kept. Only a rejected grant (`invalid_grant`) becomes **Needs attenti
 Google-specific: while the OAuth consent screen is in **Testing** status, Google expires refresh
 tokens after 7 days, so users will genuinely have to reconnect weekly until the app is published
 (see "Publishing status" above).
+
+## Google Sheets, Google Docs and Google Meet
+
+They share the Google OAuth client with Gmail/Calendar/Drive (same `OAUTH_GOOGLE_*`, same
+redirect URI `{FRONTEND_ORIGIN}/api/v1/oauth/google/callback`). Two extra steps in the Google
+Cloud project:
+
+1. **Enable the APIs**: Google Sheets API, Google Docs API, Google Meet REST API, and Google
+   Drive API (used only to list a user's spreadsheets/documents by name).
+2. **Add the scopes to the consent screen** so they appear on the verification form:
+
+   | Connector | Scopes | Sensitivity |
+   |---|---|---|
+   | Sheets | `drive.metadata.readonly`, `spreadsheets.readonly`, `spreadsheets` (optional) | sensitive |
+   | Docs | `drive.metadata.readonly`, `documents.readonly`, `documents` (optional) | sensitive |
+   | Meet | `userinfo.email`, `meetings.space.readonly`, `meetings.space.created` (optional) | non-sensitive / sensitive |
+
+   None of these is a *restricted* scope, so verification does not require a CASA security
+   assessment (Drive's `drive.readonly` — used by the Drive connector — does).
+
+Google Meet has no search and no "schedule a Meet" endpoint of its own: creating a meeting
+link is `spaces.create`; putting one on a calendar is the Google Calendar connector's job.
+
+## Zoom
+
+Create a **General app** (user-managed) at https://marketplace.zoom.us/develop/create, set
+the redirect URL to `{FRONTEND_ORIGIN}/api/v1/oauth/zoom/callback`, and add these granular
+scopes: `user:read:user`, `meeting:read:list_meetings`, `meeting:read:meeting`, and (for the
+write tools) `meeting:write:meeting`, `meeting:update:meeting`, `meeting:delete:meeting`.
+Copy the client id/secret to `OAUTH_ZOOM_CLIENT_ID` / `OAUTH_ZOOM_CLIENT_SECRET`.
+
+Zoom does not take a scope parameter on the authorize URL — the app's configured scopes are
+what the user grants — so Notely reads the granted list from the token response and only
+offers the assistant tools the token actually covers. Until the app passes Zoom's review and
+is published, only users of the developer's own Zoom account can authorize it.
+
+## Microsoft Teams
+
+`ChannelMessage.Read.All` and `ChannelMessage.Send` are delegated permissions that many
+tenants require an administrator to consent to. When Microsoft answers with an admin-consent
+error, the connection shows **Needs attention → Reconnect** with that reason; the tenant admin
+grants consent once in Entra ID and users reconnect.

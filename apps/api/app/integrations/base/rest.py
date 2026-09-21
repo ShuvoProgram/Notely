@@ -50,6 +50,10 @@ class ProviderTool:
     handler: Handler
     summarize: Callable[[Any], str]
     verify: Verifier | None = None
+    # The OAuth scope this tool needs. When the connection's granted scopes are known and do
+    # not include it (an optional permission the user declined), the tool is not offered to
+    # the assistant at all — never advertise what the provider would refuse.
+    scope: str | None = None
 
 
 class RestOAuthProvider(IntegrationProvider):
@@ -189,9 +193,17 @@ class RestOAuthProvider(IntegrationProvider):
     def build_tools(self) -> list[ProviderTool]:
         raise NotImplementedError
 
+    def tool_available(self, tool: ProviderTool, granted: list[str]) -> bool:
+        if tool.scope is None or not granted:
+            return True
+        return tool.scope in granted
+
     async def tools(self, ctx: ProviderContext) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
+        granted = list(ctx.connection.scopes or [])
         for tool in self.build_tools():
+            if not self.tool_available(tool, granted):
+                continue
             specs.append(
                 ToolSpec(
                     name=f"{self.manifest.id}__{tool.name}",

@@ -59,8 +59,10 @@ class OAuthEndpoints:
     # How the token endpoint wants client credentials and the body encoded.
     token_auth: Literal["body", "basic"] = "body"
     token_format: Literal["form", "json"] = "form"
-    # Some providers (Slack) require the scope list under a different query parameter.
-    scope_param: str = "scope"
+    # Some providers (Slack) require the scope list under a different query parameter; some
+    # (Zoom) take no scope parameter at all — the app's configured scopes are granted and the
+    # token response reports which.
+    scope_param: str | None = "scope"
     scope_separator: str = " "
     # Sent with every token request (e.g. RFC 8707 `resource` for MCP servers).
     extra_token_params: dict[str, str] = field(default_factory=dict)
@@ -159,7 +161,7 @@ class OAuthClient:
             "state": state,
             **ep.extra_authorize_params,
         }
-        if self.config.scopes:
+        if self.config.scopes and ep.scope_param:
             params[ep.scope_param] = ep.scope_separator.join(self.config.scopes)
         if "openid" in self.config.scopes:
             params["nonce"] = nonce

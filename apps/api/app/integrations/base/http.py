@@ -104,6 +104,9 @@ class ProviderHttpClient:
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         return await self.request("POST", url, **kwargs)
 
+    async def put(self, url: str, **kwargs: Any) -> httpx.Response:
+        return await self.request("PUT", url, **kwargs)
+
     async def patch(self, url: str, **kwargs: Any) -> httpx.Response:
         return await self.request("PATCH", url, **kwargs)
 

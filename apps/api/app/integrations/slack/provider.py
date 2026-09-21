@@ -62,11 +62,20 @@ class ReadChannelArgs(BaseModel):
     limit: int = Field(default=20, ge=1, le=100)
 
 
+class ReadThreadArgs(BaseModel):
+    """Read a thread: the parent message and its replies."""
+
+    channel_id: str = Field(min_length=1, max_length=40)
+    thread_ts: str = Field(min_length=1, max_length=40)
+    limit: int = Field(default=50, ge=1, le=200)
+
+
 class PostMessageArgs(BaseModel):
-    """Post a message to a channel as the user."""
+    """Post a message to a channel as the user; give `thread_ts` to reply in a thread."""
 
     channel_id: str = Field(min_length=1, max_length=40)
     text: str = Field(min_length=1, max_length=4000)
+    thread_ts: str | None = Field(default=None, max_length=40)
 
 
 class SlackProvider(RestOAuthProvider):
@@ -84,7 +93,7 @@ class SlackProvider(RestOAuthProvider):
         id="slack",
         name="Slack",
         category="communication",
-        description="Search and read the channels you're in; post messages with your approval.",
+        description="Search messages, read channels and threads; post or reply with your approval.",
         logo_url="https://cdn.simpleicons.org/slack",
         docs_url="https://api.slack.com/authentication/oauth-v2",
         auth=AuthType.oauth2,
@@ -205,23 +214,49 @@ class SlackProvider(RestOAuthProvider):
                 ],
             }
 
+        async def read_thread(ctx: ProviderContext, a: ReadThreadArgs) -> dict[str, Any]:
+            body = await self._call(
+                ctx, "conversations.replies", channel=a.channel_id, ts=a.thread_ts, limit=a.limit
+            )
+            return {
+                "messages": [
+                    {
+                        "ts": m.get("ts"),
+                        "user": m.get("user"),
+                        "text": self.wrap(str(m.get("text", "")), ref=a.thread_ts),
+                    }
+                    for m in body.get("messages", [])
+                ],
+                "sources": [
+                    self.source(object_id=a.thread_ts, title=f"Thread in {a.channel_id}", url=None)
+                ],
+            }
+
         async def post_message(ctx: ProviderContext, a: PostMessageArgs) -> dict[str, Any]:
-            body = await self._call(ctx, "chat.postMessage", channel=a.channel_id, text=a.text)
-            return {"ts": body.get("ts"), "channel": body.get("channel")}
+            params: dict[str, Any] = {"channel": a.channel_id, "text": a.text}
+            if a.thread_ts:
+                params["thread_ts"] = a.thread_ts
+            body = await self._call(ctx, "chat.postMessage", **params)
+            return {"ts": body.get("ts"), "channel": body.get("channel"), "thread_ts": a.thread_ts}
 
         async def verify_post_message(
             ctx: ProviderContext, a: PostMessageArgs, result: dict[str, Any]
         ) -> Verification:
             ts = str(result.get("ts") or "")
-            body = await self._call(
-                ctx,
-                "conversations.history",
-                channel=a.channel_id,
-                latest=ts,
-                oldest=ts,
-                inclusive="true",
-                limit=1,
-            )
+            if a.thread_ts:
+                body = await self._call(
+                    ctx, "conversations.replies", channel=a.channel_id, ts=a.thread_ts, limit=200
+                )
+            else:
+                body = await self._call(
+                    ctx,
+                    "conversations.history",
+                    channel=a.channel_id,
+                    latest=ts,
+                    oldest=ts,
+                    inclusive="true",
+                    limit=1,
+                )
             found = [m for m in body.get("messages", []) if str(m.get("ts")) == ts]
             if not found:
                 return Verification.failed("The message is not in the channel history")
@@ -253,6 +288,15 @@ class SlackProvider(RestOAuthProvider):
                 lambda a: f"Read Slack channel {a.channel_id}",
             ),
             ProviderTool(
+                "read_thread",
+                "Read a thread's replies.",
+                ReadThreadArgs,
+                Capability.read,
+                read_thread,
+                lambda a: "Read a Slack thread",
+                scope="channels:history",
+            ),
+            ProviderTool(
                 "post_message",
                 "Post a message to a channel as you.",
                 PostMessageArgs,
@@ -260,5 +304,6 @@ class SlackProvider(RestOAuthProvider):
                 post_message,
                 lambda a: f"Post to Slack channel {a.channel_id}: “{a.text[:60]}”",
                 verify=verify_post_message,
+                scope="chat:write",
             ),
         ]

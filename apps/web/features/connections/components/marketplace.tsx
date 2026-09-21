@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 export const CATEGORY_LABELS: Record<string, string> = {
   communication: "Communication",
   email_calendar: "Email & Calendar",
+  meetings: "Meetings",
+  documents: "Documents & Spreadsheets",
   notes: "Notes & Knowledge",
   tasks: "Tasks & Productivity",
   project_management: "Project management",
@@ -46,9 +48,12 @@ export const CAPABILITY_LABELS: Record<string, string> = {
 /** The one-line "what kind of thing is this" under the name: sharper than the category alone. */
 export function providerTagline(p: Pick<Provider, "id" | "category">): string {
   if (/calendar/.test(p.id)) return "Calendar & scheduling";
+  if (/meet|zoom/.test(p.id)) return "Video meetings";
+  if (/sheets/.test(p.id)) return "Spreadsheets";
+  if (/docs/.test(p.id)) return "Documents";
   if (/gmail|outlook/.test(p.id)) return "Email & messaging";
   if (/drive|dropbox|onedrive/.test(p.id)) return "Files & documents";
-  if (/slack|teams/.test(p.id)) return "Team chat";
+  if (/slack|teams/.test(p.id)) return "Team communication";
   if (p.id === "mcp_server") return "Any MCP server";
   return CATEGORY_LABELS[p.category] ?? p.category;
 }

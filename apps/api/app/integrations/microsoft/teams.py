@@ -35,6 +35,13 @@ class ReadChannelArgs(BaseModel):
     limit: int = Field(default=20, ge=1, le=50)
 
 
+class SearchMessagesArgs(BaseModel):
+    """Search channel and chat messages you can see (Microsoft Search)."""
+
+    query: str = Field(min_length=1, max_length=200)
+    limit: int = Field(default=10, ge=1, le=25)
+
+
 class SendChannelMessageArgs(BaseModel):
     """Post a message to a channel as you."""
 
@@ -52,7 +59,7 @@ class TeamsProvider(MicrosoftGraphProvider):
         logo_url="https://cdn.simpleicons.org/microsoftteams",
         docs_url="https://learn.microsoft.com/graph/api/resources/teams-api-overview",
         auth=AuthType.oauth2,
-        capabilities=[Capability.read, Capability.send],
+        capabilities=[Capability.search, Capability.read, Capability.send],
         permissions=[
             PermissionSpec(
                 scope="User.Read", label="Read your profile", capability=Capability.read
@@ -131,6 +138,52 @@ class TeamsProvider(MicrosoftGraphProvider):
                 "sources": [self.source(object_id=a.channel_id, title="Teams channel", url=None)],
             }
 
+        async def search_messages(ctx: ProviderContext, a: SearchMessagesArgs) -> dict[str, Any]:
+            async with self.http(ctx) as http:
+                body = (
+                    await http.post(
+                        "/search/query",
+                        json={
+                            "requests": [
+                                {
+                                    "entityTypes": ["chatMessage"],
+                                    "query": {"queryString": a.query},
+                                    "from": 0,
+                                    "size": a.limit,
+                                }
+                            ]
+                        },
+                    )
+                ).json()
+            hits: list[dict[str, Any]] = []
+            for container in body.get("value") or []:
+                for hc in container.get("hitsContainers") or []:
+                    hits.extend(hc.get("hits") or [])
+            return {
+                "results": [
+                    {
+                        "id": h.get("hitId"),
+                        "summary": self.wrap(
+                            _strip_html(str(h.get("summary", ""))), ref=str(h.get("hitId"))
+                        ),
+                        "from": (
+                            ((h.get("resource") or {}).get("from") or {}).get("user") or {}
+                        ).get("displayName"),
+                        "created_at": (h.get("resource") or {}).get("createdDateTime"),
+                        "web_url": (h.get("resource") or {}).get("webUrl"),
+                    }
+                    for h in hits
+                ],
+                "sources": [
+                    self.source(
+                        object_id=str(h.get("hitId", "")),
+                        title="Teams message",
+                        url=(h.get("resource") or {}).get("webUrl"),
+                    )
+                    for h in hits
+                ],
+            }
+
         async def send_channel_message(
             ctx: ProviderContext, a: SendChannelMessageArgs
         ) -> dict[str, Any]:
@@ -159,6 +212,15 @@ class TeamsProvider(MicrosoftGraphProvider):
 
         return [
             ProviderTool(
+                "search_messages",
+                "Search Teams messages you can see.",
+                SearchMessagesArgs,
+                Capability.search,
+                search_messages,
+                lambda a: f"Search Teams for “{a.query}”",
+                scope="ChannelMessage.Read.All",
+            ),
+            ProviderTool(
                 "list_teams",
                 "List your teams and channels.",
                 ListTeamsArgs,
@@ -182,5 +244,6 @@ class TeamsProvider(MicrosoftGraphProvider):
                 send_channel_message,
                 lambda a: f"Post to Teams channel: “{a.text[:60]}”",
                 verify=verify_send_channel_message,
+                scope="ChannelMessage.Send",
             ),
         ]

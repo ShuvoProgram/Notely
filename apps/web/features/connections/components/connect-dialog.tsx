@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Lock, ShieldCheck, Unplug } from "lucide-react";
+import { Check, ExternalLink, Lock, ShieldCheck, Unplug } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +36,10 @@ export function ConnectDialog({
 }) {
   const isCustomServer = provider.id === "mcp_server";
   const [serverUrl, setServerUrl] = React.useState(String(provider.connection?.config.server_url ?? ""));
+  // Optional permissions the user can leave out; everything required is always requested.
+  const optional = provider.permissions.filter((p) => !p.required);
+  const [chosen, setChosen] = React.useState<Set<string>>(() => new Set(optional.map((p) => p.scope)));
+  const isRead = (cap: string | null) => cap === null || cap === "read" || cap === "search";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,6 +74,47 @@ export function ConnectDialog({
           </Section>
         </div>
 
+        {provider.permissions.length && method === "oauth" ? (
+          <div className="rounded-xl ring-1 ring-glass-border">
+            <p className="px-4 pt-3 text-sm font-medium">Notely will be able to</p>
+            <ul className="divide-y divide-glass-border px-4 pb-1" aria-label="Permissions">
+              {provider.permissions.map((perm) => {
+                const read = isRead(perm.capability);
+                const on = perm.required || chosen.has(perm.scope);
+                return (
+                  <li key={perm.scope} className="flex items-start gap-3 py-2.5 text-sm">
+                    {perm.required ? (
+                      <span className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm bg-success/15 text-success" aria-hidden>
+                        <Check className="size-3" />
+                      </span>
+                    ) : (
+                      <Checkbox
+                        checked={on}
+                        aria-label={perm.label}
+                        className="mt-0.5"
+                        onCheckedChange={(v) =>
+                          setChosen((prev) => {
+                            const next = new Set(prev);
+                            if (v === true) next.add(perm.scope);
+                            else next.delete(perm.scope);
+                            return next;
+                          })
+                        }
+                      />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className={on ? "" : "text-muted-foreground"}>{perm.label}</span>
+                      {perm.description ? <span className="block text-xs text-muted-foreground">{perm.description}</span> : null}
+                    </span>
+                    <span className={read ? "shrink-0 text-[11px] text-muted-foreground" : "shrink-0 text-[11px] text-warning"}>{read ? "Read" : "Acts · needs approval"}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {optional.length ? <p className="px-4 pb-3 text-xs text-muted-foreground">Unticked permissions are never requested; you can reconnect later to add them.</p> : null}
+          </div>
+        ) : null}
+
         {isCustomServer ? (
           <div className="space-y-2">
             <Label htmlFor="mcp-url">Server URL</Label>
@@ -77,7 +123,7 @@ export function ConnectDialog({
           </div>
         ) : null}
 
-        <ContinueButton provider={provider} method={method} serverUrl={isCustomServer ? serverUrl : null} />
+        <ContinueButton provider={provider} method={method} serverUrl={isCustomServer ? serverUrl : null} scopes={[...chosen]} />
 
         {provider.docs_url ? (
           <Button asChild variant="ghost" className="w-full text-muted-foreground">
@@ -106,12 +152,11 @@ function Section({ icon: Icon, title, children }: { icon: React.ElementType; tit
 }
 
 /** One click: ask the API for the consent URL (or an immediate "connected" URL) and go there. */
-function ContinueButton({ provider, method, serverUrl }: { provider: Provider; method: ConnectMethod; serverUrl: string | null }) {
+function ContinueButton({ provider, method, serverUrl, scopes }: { provider: Provider; method: ConnectMethod; serverUrl: string | null; scopes: string[] }) {
   const queryClient = useQueryClient();
   const go = useMutation({
     mutationFn: async () => {
-      const optional = provider.permissions.filter((p) => !p.required).map((p) => p.scope);
-      const { authorize_url } = await connectionsApi.oauthStartUrl(provider.id, optional, { method, serverUrl: serverUrl || undefined });
+      const { authorize_url } = await connectionsApi.oauthStartUrl(provider.id, scopes, { method, serverUrl: serverUrl || undefined });
       window.location.assign(authorize_url); // the vendor's consent page, or straight back when none is needed
     },
     onError: (e) => {

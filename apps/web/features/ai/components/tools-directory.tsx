@@ -17,7 +17,7 @@ import { providerLabel } from "@/lib/providers";
 import type { AssistantTool, RiskLevel } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-type Category = "all" | "notes" | "tasks" | "calendar" | "email" | "connections";
+type Category = "all" | "notes" | "tasks" | "calendar" | "email" | "meetings" | "documents" | "chat" | "connections";
 
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "all", label: "All" },
@@ -25,13 +25,19 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: "tasks", label: "Tasks" },
   { id: "calendar", label: "Calendar" },
   { id: "email", label: "Email" },
+  { id: "meetings", label: "Meetings" },
+  { id: "documents", label: "Documents" },
+  { id: "chat", label: "Chat" },
   { id: "connections", label: "Connections" },
 ];
 
 function categoryOf(t: AssistantTool): Exclude<Category, "all"> {
   const n = t.name.toLowerCase();
   if (/calendar|event/.test(n) || t.provider === "google_calendar") return "calendar";
-  if (/mail|message|email/.test(n) || t.provider === "gmail" || t.provider === "outlook") return "email";
+  if (t.provider === "google_meet" || t.provider === "zoom") return "meetings";
+  if (t.provider === "google_sheets" || t.provider === "google_docs") return "documents";
+  if (t.provider === "slack" || t.provider === "microsoft_teams") return "chat";
+  if (/mail|email/.test(n) || t.provider === "gmail" || t.provider === "outlook") return "email";
   if (t.provider !== "notely") return "connections";
   if (/task/.test(n)) return "tasks";
   return "notes";

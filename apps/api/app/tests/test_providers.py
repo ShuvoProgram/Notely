@@ -165,6 +165,70 @@ CASES: dict[str, dict[str, Any]] = {
             "write",
         ),
     },
+    "google_sheets": {
+        "authorize_host": "accounts.google.com",
+        "scope_param": "scope",
+        "account": "ada@acme.io",
+        "search_title": "Pricing model",
+        "read": ("google_sheets__read_range", {"spreadsheet_id": "f1"}, "Starter"),
+        "write": (
+            "google_sheets__append_rows",
+            {
+                "spreadsheet_id": "f1",
+                "range": "Sheet1",
+                "rows": [["Team", "$49"], ["Enterprise", "$99"]],
+            },
+            "POST",
+            ":append",
+            "write",
+        ),
+    },
+    "google_docs": {
+        "authorize_host": "accounts.google.com",
+        "scope_param": "scope",
+        "account": "ada@acme.io",
+        "search_title": "Pricing memo",
+        "read": ("google_docs__read_document", {"document_id": "f1"}, "Starter is $9"),
+        "write": (
+            "google_docs__create_document",
+            {"title": "Launch notes", "content": "Ship the pricing page by Friday."},
+            "POST",
+            "/v1/documents",
+            "write",
+        ),
+    },
+    "google_meet": {
+        "authorize_host": "accounts.google.com",
+        "scope_param": "scope",
+        "account": "ada@acme.io",
+        "search_title": None,
+        "read": ("google_meet__list_conference_records", {"limit": 5}, "conferenceRecords/r1"),
+        "write": (
+            "google_meet__create_space",
+            {"access_type": "TRUSTED"},
+            "POST",
+            "/v2/spaces",
+            "write",
+        ),
+    },
+    "zoom": {
+        "authorize_host": "zoom.us",
+        "scope_param": None,
+        "account": "Ada Lovelace (ada@acme.io)",
+        "search_title": None,
+        "read": ("zoom__get_meeting", {"meeting_id": "81234567890"}, "Pricing sync"),
+        "write": (
+            "zoom__create_meeting",
+            {
+                "topic": "Launch follow-up",
+                "start_time": "2026-09-23T10:00:00Z",
+                "duration_minutes": 45,
+            },
+            "POST",
+            "/v2/users/me/meetings",
+            "write",
+        ),
+    },
     "onedrive": {
         "authorize_host": "login.microsoftonline.com",
         "scope_param": "scope",
@@ -229,6 +293,9 @@ SETTINGS_PREFIX: dict[str, str | None] = {
     "gmail": "google",
     "google_calendar": "google",
     "google_drive": "google",
+    "google_sheets": "google",
+    "google_docs": "google",
+    "google_meet": "google",
 }
 
 
@@ -299,7 +366,12 @@ async def test_provider_end_to_end(client: Any, vendor: VendorMock) -> None:
     }
     assert listing[provider_id]["configured"] is True
 
-    detail = await connect(client, provider_id, case)
+    from app.integrations.registry import get_provider
+
+    provider = get_provider(provider_id)
+    assert provider is not None
+    optional = [p.scope for p in provider.manifest.permissions if not p.required]
+    detail = await connect(client, provider_id, case, scopes=optional or None)
     conn = detail["connection"]
     assert conn["status"] == "connected", conn
     assert conn["external_account_name"] == case["account"]
@@ -543,3 +615,38 @@ async def test_token_refresh_keeps_connection_alive(client: Any, vendor: VendorM
     assert conn["status"] == "expired" and conn["last_error_code"] == "expired"
     inbox = (await client.get("/api/v1/notifications")).json()["data"]
     assert any(n["kind"] == "integration_auth_required" for n in inbox["items"])
+
+
+async def test_tools_follow_granted_scopes(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A permission the user declined never becomes an assistant tool: connect Google Sheets
+    with only the required (read) scopes and the write tools are simply absent."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "oauth_google_client_id", "test-id")
+    monkeypatch.setattr(settings, "oauth_google_client_secret", "test-secret")
+    mock = VendorMock("google_sheets")
+    transport = combined_transport({"google_sheets": mock})
+    core_oauth.set_http_transport(transport)
+    provider_http.set_transport_override(lambda _pid: transport)
+    try:
+        await signup(client)
+        await connect(client, "google_sheets", CASES["google_sheets"])  # required scopes only
+        tools = {
+            t["name"] for t in (await client.get("/api/v1/ai/settings")).json()["data"]["tools"]
+        }
+        assert {"google_sheets__search_spreadsheets", "google_sheets__read_range"} <= tools
+        assert not any(
+            t.startswith("google_sheets__")
+            and t.endswith(("append_rows", "write_range", "create_spreadsheet"))
+            for t in tools
+        )
+        # The health check still passes: optional permissions are not "missing".
+        conn = (await client.get("/api/v1/integrations/connections")).json()["data"][0]
+        test = (
+            await client.post(f"/api/v1/integrations/connections/{conn['id']}/test", headers=ORIGIN)
+        ).json()["data"]
+        assert test["healthy"] is True, test
+    finally:
+        core_oauth.set_http_transport(None)
+        provider_http.set_transport_override(None)
