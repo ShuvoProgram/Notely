@@ -2,6 +2,8 @@ import { api, apiEnvelope } from "@/lib/api/client";
 import type {
   Collaborator,
   CollaboratorRole,
+  Invitation,
+  InviteResult,
   NoteVersion,
   NoteVersionDetail,
   Folder,
@@ -45,8 +47,11 @@ export const notesApi = {
   versions: (id: string) => api.get<NoteVersion[]>(`/notes/${id}/versions`),
   version: (id: string, versionId: string) => api.get<NoteVersionDetail>(`/notes/${id}/versions/${versionId}`),
   restoreVersion: (id: string, versionId: string) => api.post<Note>(`/notes/${id}/versions/${versionId}/restore`),
-  invite: (id: string, input: { email: string; role: CollaboratorRole }) =>
-    api.post<Collaborator>(`/notes/${id}/collaborators`, input),
+  invite: (id: string, input: { email: string; role: CollaboratorRole; resend?: boolean }) =>
+    api.post<InviteResult>(`/notes/${id}/collaborators`, input),
+  invitation: (token: string) => api.get<Invitation>(`/invitations/${encodeURIComponent(token)}`),
+  acceptInvitation: (token: string) => api.post<Note>(`/invitations/${encodeURIComponent(token)}/accept`, {}),
+  trashMany: (ids: string[]) => api.post<{ moved: number }>("/notes/bulk/trash", { ids }),
   updateCollaborator: (id: string, collaboratorId: string, role: CollaboratorRole) =>
     api.patch<Collaborator>(`/notes/${id}/collaborators/${collaboratorId}`, { role }),
   removeCollaborator: (id: string, collaboratorId: string) =>

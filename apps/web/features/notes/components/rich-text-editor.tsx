@@ -63,6 +63,10 @@ export function RichTextEditor({
         StarterKit.configure({
           heading: { levels: [1, 2, 3] },
           link: false,
+          // Notes are prose, not source: no inline code or code blocks (also removes their
+          // input rules and Mod-E / ``` shortcuts).
+          code: false,
+          codeBlock: false,
         }),
         Link.configure({
           openOnClick: false,

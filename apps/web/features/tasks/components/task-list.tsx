@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, CalendarDays, Check, CheckSquare, FileText, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { CalendarCheck, CalendarDays, Check, CheckSquare, FileText, ListChecks, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -9,9 +9,11 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/layout/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
+import { SelectionBar } from "@/components/layout/selection-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -111,6 +113,32 @@ export function TaskList() {
     },
     onError: (e) => toast.error(messageFor(e)),
   });
+  // Selection mode: pick several tasks, delete them together (after confirming).
+  const [selecting, setSelecting] = React.useState(false);
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const [confirmBulk, setConfirmBulk] = React.useState(false);
+  const exitSelection = () => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
+  const removeMany = useMutation({
+    mutationFn: tasksApi.removeMany,
+    onSuccess: ({ deleted }) => {
+      playSfx("delete");
+      toast.success(`Deleted ${deleted} ${deleted === 1 ? "task" : "tasks"}`);
+      setConfirmBulk(false);
+      exitSelection();
+      invalidate();
+    },
+    onError: (e) => toast.error(messageFor(e)),
+  });
+  const toggleSelected = (id: string, checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const list = tasks.data ?? [];
   const sections = view === "open" ? groupOpen(list) : [{ key: "done", label: "Completed", tasks: list }];
@@ -158,7 +186,7 @@ export function TaskList() {
       </form>
 
       <div className="flex items-center justify-between gap-3">
-        <Tabs value={view} onValueChange={setView}>
+        <Tabs value={view} onValueChange={(v) => { exitSelection(); setView(v); }}>
           <TabsList className="rounded-full">
             <TabsTrigger value="open" className="rounded-full">
               Open{openCount !== undefined ? <span className="ml-1.5 text-xs text-muted-foreground">{openCount}</span> : null}
@@ -168,7 +196,15 @@ export function TaskList() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        {list.length ? (
+          <Button variant="ghost" size="sm" aria-label={selecting ? "Cancel selection" : "Select tasks"} aria-pressed={selecting} onClick={() => (selecting ? exitSelection() : setSelecting(true))} className="rounded-full text-muted-foreground">
+            <ListChecks aria-hidden /> {selecting ? "Done" : "Select"}
+          </Button>
+        ) : null}
       </div>
+      {selecting ? (
+        <SelectionBar selected={selected.size} total={list.length} noun="tasks" onSelectAll={(all) => setSelected(all ? new Set(list.map((t) => t.id)) : new Set())} onClear={exitSelection} onDelete={() => setConfirmBulk(true)} />
+      ) : null}
 
       {tasks.isPending ? (
         <div className="space-y-2" aria-busy>
@@ -205,7 +241,7 @@ export function TaskList() {
               </h2>
               <ul className="glass divide-y divide-glass-border rounded-2xl">
                 {section.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} onToggle={() => toggle.mutate(t)} onEdit={() => setEditing({ task: t, open: true })} onDelete={() => remove.mutate(t.id)} />
+                  <TaskRow key={t.id} task={t} onToggle={() => toggle.mutate(t)} onEdit={() => setEditing({ task: t, open: true })} onDelete={() => remove.mutate(t.id)} selectable={selecting} selected={selected.has(t.id)} onSelect={(checked) => toggleSelected(t.id, checked)} />
                 ))}
               </ul>
             </section>
@@ -214,24 +250,37 @@ export function TaskList() {
       )}
 
       <TaskDialog key={`${editing.task?.id ?? "new"}:${editing.open}`} task={editing.task} open={editing.open} onOpenChange={(open) => setEditing((s) => ({ ...s, open }))} />
+      <ConfirmDialog
+        open={confirmBulk}
+        onOpenChange={setConfirmBulk}
+        title={`Delete ${selected.size} ${selected.size === 1 ? "task" : "tasks"}?`}
+        description="This can't be undone. Tasks linked to Google Calendar are removed from the calendar too."
+        confirmLabel="Delete"
+        pending={removeMany.isPending}
+        onConfirm={() => removeMany.mutate([...selected])}
+      />
     </div>
   );
 }
 
-function TaskRow({ task, onToggle, onEdit, onDelete }: { task: Task; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
+function TaskRow({ task, onToggle, onEdit, onDelete, selectable, selected, onSelect }: { task: Task; onToggle: () => void; onEdit: () => void; onDelete: () => void; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean) => void }) {
   const done = task.status === "done";
   const state = dueState(task);
   const due = formatDue(task);
   const prio = priorityMeta(task.priority);
   return (
-    <li className={cn("group flex items-start gap-3 px-3 py-2.5 transition-colors first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/30 sm:items-center", done && "opacity-80")}>
-      <Checkbox
-        checked={done}
-        onCheckedChange={onToggle}
-        aria-label={done ? `Mark ${task.title} as open` : `Mark ${task.title} as done`}
-        className="mt-1 size-[18px] rounded-full sm:mt-0"
-      />
-      <button type="button" onClick={onEdit} className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <li className={cn("group flex items-start gap-3 px-3 py-2.5 transition-colors first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/30 sm:items-center", done && "opacity-80", selected && "bg-accent/40")}>
+      {selectable ? (
+        <Checkbox checked={Boolean(selected)} onCheckedChange={(v) => onSelect?.(v === true)} aria-label={`Select ${task.title}`} className="mt-1 size-[18px] sm:mt-0" />
+      ) : (
+        <Checkbox
+          checked={done}
+          onCheckedChange={onToggle}
+          aria-label={done ? `Mark ${task.title} as open` : `Mark ${task.title} as done`}
+          className="mt-1 size-[18px] rounded-full sm:mt-0"
+        />
+      )}
+      <button type="button" onClick={selectable ? () => onSelect?.(!selected) : onEdit} aria-pressed={selectable ? selected : undefined} className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className={cn("block truncate text-sm", done && "text-muted-foreground line-through")}>{task.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
           {due ? (

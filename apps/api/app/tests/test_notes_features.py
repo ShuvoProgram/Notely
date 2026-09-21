@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+
 from app.tests.conftest import ORIGIN, signup
 
 DOC = {
@@ -189,8 +191,24 @@ async def test_collaborators_invite_access_and_shared_view(client: Any) -> None:
         headers=ORIGIN,
     )
     assert inv.status_code == 201, inv.text
-    collab = inv.json()["data"]
+    collab = inv.json()["data"]["collaborator"]
     assert collab["email"] == "bob@example.com" and collab["user_id"] is None
+    assert collab["status"] == "pending" and collab["invite_expires_at"]
+    # No SMTP in tests: the API says so instead of pretending the email went out.
+    delivery = inv.json()["data"]["delivery"]
+    assert delivery["sent"] is False and "SMTP_HOST" in delivery["error"]
+    # A second click does not create or send a second invitation.
+    again = await client.post(
+        f"/api/v1/notes/{nid}/collaborators", json={"email": "bob@example.com"}, headers=ORIGIN
+    )
+    assert again.status_code == 409 and again.json()["error"]["code"] == "INVITE_ALREADY_SENT"
+    resent = await client.post(
+        f"/api/v1/notes/{nid}/collaborators",
+        json={"email": "bob@example.com", "resend": True},
+        headers=ORIGIN,
+    )
+    assert resent.status_code == 201
+    assert resent.json()["data"]["collaborator"]["id"] == collab["id"]
     detail = (await client.get(f"/api/v1/notes/{nid}")).json()["data"]
     assert detail["shared"] is True and detail["access"] == "owner"
     assert [c["email"] for c in detail["collaborators"]] == ["bob@example.com"]
@@ -206,13 +224,16 @@ async def test_collaborators_invite_access_and_shared_view(client: Any) -> None:
         json={"email": "owner@example.com", "password": "correct horse battery"},
         headers=ORIGIN,
     )
-    promoted = await client.post(
+    # Signing up accepted the invitation; inviting again is refused, roles change via PATCH.
+    dup = await client.post(
         f"/api/v1/notes/{nid}/collaborators",
         json={"email": "bob@example.com", "role": "viewer"},
         headers=ORIGIN,
     )
-    assert promoted.json()["data"]["role"] == "viewer"
-    assert promoted.json()["data"]["user_id"]
+    assert dup.status_code == 409 and dup.json()["error"]["code"] == "INVITE_ALREADY_ACCEPTED"
+    people = (await client.get(f"/api/v1/notes/{nid}")).json()["data"]["collaborators"]
+    assert people[0]["status"] == "accepted" and people[0]["user_id"]
+    cid = people[0]["id"]
 
     await client.post("/api/v1/auth/logout", headers=ORIGIN)
     await client.post(
@@ -236,7 +257,6 @@ async def test_collaborators_invite_access_and_shared_view(client: Any) -> None:
         json={"email": "owner@example.com", "password": "correct horse battery"},
         headers=ORIGIN,
     )
-    cid = promoted.json()["data"]["id"]
     assert (
         await client.patch(
             f"/api/v1/notes/{nid}/collaborators/{cid}", json={"role": "editor"}, headers=ORIGIN
@@ -261,3 +281,133 @@ async def test_collaborators_invite_access_and_shared_view(client: Any) -> None:
     removed = await client.delete(f"/api/v1/notes/{nid}/collaborators/{cid}", headers=ORIGIN)
     assert removed.json()["data"] == {"removed": True}
     assert (await client.get(f"/api/v1/notes/{nid}")).json()["data"]["shared"] is False
+
+
+async def test_invitation_link_accept_expiry_and_wrong_account(
+    client: Any, monkeypatch: Any
+) -> None:
+    from app.core import mailer
+
+    sent: list[tuple[str, str]] = []
+
+    async def fake_send(to: str, subject: str, text: str, html: str | None = None) -> Any:
+        sent.append((to, subject))
+        assert "/invite/" in text and html and "Open the note" in html
+        return mailer.Delivery.ok()
+
+    monkeypatch.setattr("app.services.note_service.mailer.send", fake_send)
+    await signup(client, email="owner@example.com")
+    note = await make(client, "Launch checklist")
+    nid = note["id"]
+    inv = await client.post(
+        f"/api/v1/notes/{nid}/collaborators",
+        json={"email": "cara@example.com", "role": "editor"},
+        headers=ORIGIN,
+    )
+    assert inv.status_code == 201 and inv.json()["data"]["delivery"] == {
+        "sent": True,
+        "error": None,
+    }
+    assert sent == [("cara@example.com", "Ada shared \u201cLaunch checklist\u201d with you")]
+
+    # The link is public to *describe*, but accepting needs the invited account.
+    from app.db.session import get_session_factory
+    from app.models.note import NoteCollaborator
+
+    async with get_session_factory()() as db:
+        row = await db.scalar(
+            select(NoteCollaborator).where(NoteCollaborator.email == "cara@example.com")
+        )
+        assert row is not None and row.invite_token
+        token = row.invite_token
+    public = await client.get(f"/api/v1/invitations/{token}")
+    assert public.status_code == 200
+    assert public.json()["data"]["note_title"] == "Launch checklist"
+    assert public.json()["data"]["status"] == "pending"
+    assert (await client.get("/api/v1/invitations/nope")).status_code == 404
+
+    wrong = await client.post(f"/api/v1/invitations/{token}/accept", headers=ORIGIN)
+    assert wrong.status_code == 403 and wrong.json()["error"]["code"] == "INVITE_WRONG_ACCOUNT"
+
+    await client.post("/api/v1/auth/logout", headers=ORIGIN)
+    await signup(client, email="dave@example.com")
+    assert (
+        await client.post(f"/api/v1/invitations/{token}/accept", headers=ORIGIN)
+    ).status_code == 403
+
+    # Expired links are refused with a distinct code so the UI can offer "ask to resend".
+    async with get_session_factory()() as db:
+        row = await db.scalar(
+            select(NoteCollaborator).where(NoteCollaborator.email == "cara@example.com")
+        )
+        assert row is not None
+        row.invite_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await db.commit()
+    assert (await client.get(f"/api/v1/invitations/{token}")).json()["data"]["status"] == "expired"
+    await client.post("/api/v1/auth/logout", headers=ORIGIN)
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": "owner@example.com", "password": "correct horse battery"},
+        headers=ORIGIN,
+    )
+    detail = (await client.get(f"/api/v1/notes/{nid}")).json()["data"]
+    assert detail["collaborators"][0]["status"] == "expired"
+    # Owner resends: new token, new expiry.
+    resent = await client.post(
+        f"/api/v1/notes/{nid}/collaborators",
+        json={"email": "cara@example.com", "role": "editor", "resend": True},
+        headers=ORIGIN,
+    )
+    assert resent.status_code == 201 and len(sent) == 2
+    async with get_session_factory()() as db:
+        row = await db.scalar(
+            select(NoteCollaborator).where(NoteCollaborator.email == "cara@example.com")
+        )
+        assert row is not None and row.invite_token and row.invite_token != token
+        token2 = row.invite_token
+    assert (await client.get(f"/api/v1/invitations/{token}")).status_code == 404  # old link dead
+
+    # Cara accepts with the right account and can edit; the link is single-use.
+    await client.post("/api/v1/auth/logout", headers=ORIGIN)
+    await signup(client, email="cara@example.com")  # signup binds + accepts
+    assert (await client.get(f"/api/v1/notes/{nid}")).json()["data"]["access"] == "editor"
+    assert (await client.get(f"/api/v1/invitations/{token2}")).status_code == 404
+
+
+async def test_custom_colours_and_bulk_trash(client: Any) -> None:
+    await signup(client)
+    a = await make(client, "A")
+    b = await make(client, "B")
+    c = await make(client, "C")
+    ok_hex = await client.patch(
+        f"/api/v1/notes/{a['id']}", json={"color": "#3B82F6"}, headers=ORIGIN
+    )
+    assert ok_hex.status_code == 200 and ok_hex.json()["data"]["color"] == "#3b82f6"
+    preset = await client.patch(
+        f"/api/v1/notes/{a['id']}", json={"color": "lavender"}, headers=ORIGIN
+    )
+    assert preset.json()["data"]["color"] == "lavender"
+    bad = await client.patch(f"/api/v1/notes/{a['id']}", json={"color": "red"}, headers=ORIGIN)
+    assert bad.status_code == 422
+
+    moved = await client.post(
+        "/api/v1/notes/bulk/trash",
+        json={"ids": [a["id"], b["id"], b["id"], "00000000-0000-0000-0000-000000000000"]},
+        headers=ORIGIN,
+    )
+    assert moved.status_code == 200 and moved.json()["data"] == {"moved": 2}
+    assert await titles(client, "active") == ["C"]
+    assert sorted(await titles(client, "trash")) == ["A", "B"]
+    assert c["id"]
+
+
+async def test_bulk_delete_tasks(client: Any) -> None:
+    await signup(client)
+    ids = []
+    for t in ("one", "two", "three"):
+        r = await client.post("/api/v1/tasks", json={"title": t}, headers=ORIGIN)
+        ids.append(r.json()["data"]["id"])
+    r = await client.post("/api/v1/tasks/bulk/delete", json={"ids": ids[:2]}, headers=ORIGIN)
+    assert r.status_code == 200 and r.json()["data"] == {"deleted": 2}
+    left = (await client.get("/api/v1/tasks")).json()["data"]
+    assert [t["title"] for t in left] == ["three"]

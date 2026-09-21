@@ -88,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(notes.folders_router)
     v1.include_router(notes.tags_router)
     v1.include_router(notes.search_router)
+    v1.include_router(notes.invitations_router)
     v1.include_router(tasks.router)
     v1.include_router(notifications.router)
     v1.include_router(ai.router)

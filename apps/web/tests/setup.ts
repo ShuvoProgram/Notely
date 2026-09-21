@@ -11,5 +11,6 @@ afterEach(() => {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/app",
+  useSearchParams: () => new URLSearchParams(),
   redirect: vi.fn(),
 }));

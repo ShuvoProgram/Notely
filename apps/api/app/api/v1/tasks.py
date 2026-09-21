@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
+from app.core.exceptions import NotFound
 from app.core.responses import Envelope, ok
 from app.models.notification import NotificationKind
 from app.models.task import TaskStatus
@@ -81,6 +82,30 @@ async def delete_task(
         await CalendarSyncService(db, settings).unlink(ctx.user, task)
     await service.delete(ctx.user, task_id)
     return ok({"deleted": True})
+
+
+class BulkIds(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+@router.post("/bulk/delete", response_model=Envelope[dict[str, int]])
+async def delete_tasks(
+    payload: BulkIds, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
+) -> dict[str, Any]:
+    """Delete several tasks at once (selection mode). Linked calendar events are removed too;
+    ids that are not the user's are skipped rather than failing the whole batch."""
+    service = TaskService(db)
+    deleted = 0
+    for task_id in dict.fromkeys(payload.ids):
+        try:
+            task = await service.get(ctx.user, task_id)
+        except NotFound:
+            continue
+        if task.calendar_event_id:
+            await CalendarSyncService(db, settings).unlink(ctx.user, task)
+        await service.delete(ctx.user, task_id)
+        deleted += 1
+    return ok({"deleted": deleted})
 
 
 # --- Google Calendar ------------------------------------------------------------------------------

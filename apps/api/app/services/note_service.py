@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import secrets
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -10,7 +11,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import APIError, Conflict, NotFound, ValidationFailed
+from app.core import mailer
+from app.core.config import get_settings
+from app.core.exceptions import APIError, Conflict, Forbidden, NotFound, ValidationFailed
 from app.db.base import utcnow
 from app.models.note import CollaboratorRole, Folder, Note, NoteCollaborator, NoteVersion, Tag
 from app.models.notification import NotificationKind
@@ -25,12 +28,14 @@ from app.schemas.notes import (
     CollaboratorInvite,
     FolderCreate,
     FolderUpdate,
+    InvitationStatus,
     NoteCreate,
     NoteListQuery,
     NoteUpdate,
     TagCreate,
     TagUpdate,
 )
+from app.services.email_templates import invitation_html
 from app.services.notification_service import NotificationService
 from app.services.rich_text import EMPTY_DOC, to_plain_text
 
@@ -338,9 +343,20 @@ class NoteService:
 
     # --- collaboration -----------------------------------------------------------------------
 
+    @staticmethod
+    def invitation_status(row: NoteCollaborator) -> InvitationStatus:
+        if row.accepted_at is not None or (row.user_id is not None and row.invite_token is None):
+            return "accepted"
+        if row.invite_expires_at is not None and row.invite_expires_at < utcnow():
+            return "expired"
+        return "pending"
+
     async def invite(
         self, user: User, note_id: uuid.UUID, payload: CollaboratorInvite
-    ) -> NoteCollaborator:
+    ) -> tuple[NoteCollaborator, mailer.Delivery]:
+        """Create (or re-send) an invitation and email the link. The row exists whether or not
+        the email goes out — the delivery result tells the caller what really happened."""
+        settings = get_settings()
         note = await self.get_note(user, note_id)
         if note.user_id != user.id:
             raise Conflict("Only the owner can share this note.", code="NOTE_NOT_OWNER")
@@ -352,19 +368,29 @@ class NoteService:
         match = await self.db.scalar(select(User).where(User.email == email))
         existing = next((c for c in note.collaborators if c.email == email), None)
         if existing is not None:
-            existing.role = payload.role
-            if existing.user_id is None and match is not None:
-                existing.user_id = match.id
-            await self.db.commit()
-            return existing
-        row = NoteCollaborator(
-            note_id=note.id,
-            user_id=match.id if match else None,
-            email=email,
-            role=payload.role,
-            invited_by=user.id,
-        )
-        self.db.add(row)
+            status = self.invitation_status(existing)
+            if status == "accepted":
+                raise Conflict(
+                    "This person already has access. Change their role from the list instead.",
+                    code="INVITE_ALREADY_ACCEPTED",
+                )
+            if status == "pending" and not payload.resend:
+                raise Conflict(
+                    "Invitation already sent. Use Resend if it did not arrive.",
+                    code="INVITE_ALREADY_SENT",
+                )
+            row = existing
+            row.role = payload.role
+        else:
+            row = NoteCollaborator(
+                note_id=note.id, email=email, role=payload.role, invited_by=user.id
+            )
+            self.db.add(row)
+        if match is not None:
+            row.user_id = match.id
+        row.invite_token = secrets.token_urlsafe(32)
+        row.invited_at = utcnow()
+        row.invite_expires_at = utcnow() + timedelta(days=settings.invitation_ttl_days)
         await self.db.flush()
         if match is not None:
             await NotificationService(self.db).notify(
@@ -377,8 +403,72 @@ class NoteService:
                 commit=False,
             )
         await self.db.commit()
+        delivery = await self._send_invitation(user, note, row)
         await self.db.refresh(note)
-        return row
+        return row, delivery
+
+    async def _send_invitation(
+        self, inviter: User, note: Note, row: NoteCollaborator
+    ) -> mailer.Delivery:
+        settings = get_settings()
+        title = note.title or "Untitled"
+        link = f"{settings.frontend_origin}/invite/{row.invite_token}"
+        access = "edit" if row.role == CollaboratorRole.editor else "view"
+        days = settings.invitation_ttl_days
+        text = (
+            f"{inviter.display_name} ({inviter.email}) shared the note \u201c{title}\u201d "
+            f"with you on {settings.app_name} and gave you permission to {access} it.\n\n"
+            f"Open the note: {link}\n\n"
+            f"This link is personal to {row.email} and expires in {days} days. If you were not "
+            f"expecting it, you can ignore this email."
+        )
+        html = invitation_html(
+            app_name=settings.app_name,
+            inviter=inviter.display_name,
+            title=title,
+            access=access,
+            email=row.email,
+            link=link,
+            days=days,
+        )
+        return await mailer.send(
+            row.email,
+            f"{inviter.display_name} shared \u201c{title}\u201d with you",
+            text,
+            html,
+        )
+
+    async def get_invitation(self, token: str) -> tuple[NoteCollaborator, Note, User]:
+        row = await self.db.scalar(
+            select(NoteCollaborator).where(NoteCollaborator.invite_token == token)
+        )
+        if row is None:
+            raise NotFound("This invitation link is not valid.", code="INVITE_NOT_FOUND")
+        note = await self.db.get(Note, row.note_id)
+        inviter = await self.db.get(User, row.invited_by)
+        if note is None or inviter is None or note.deleted_at is not None:
+            raise NotFound("The shared note is no longer available.", code="INVITE_NOT_FOUND")
+        return row, note, inviter
+
+    async def accept_invitation(self, user: User, token: str) -> Note:
+        row, note, _ = await self.get_invitation(token)
+        if row.email != user.email.lower():
+            raise Forbidden(
+                f"This invitation was sent to {row.email}. Sign in with that address to accept it.",
+                code="INVITE_WRONG_ACCOUNT",
+            )
+        if self.invitation_status(row) == "expired":
+            raise APIError(
+                "This invitation has expired. Ask the owner to send it again.",
+                code="INVITE_EXPIRED",
+                status_code=410,
+            )
+        row.user_id = user.id
+        row.accepted_at = utcnow()
+        row.invite_token = None  # single use
+        await self.db.commit()
+        await self.db.refresh(note)
+        return note
 
     async def update_collaborator(
         self, user: User, note_id: uuid.UUID, collaborator_id: uuid.UUID, role: CollaboratorRole
@@ -419,6 +509,20 @@ class NoteService:
             note.deleted_at = utcnow()
             await self.db.commit()
         return note
+
+    async def trash_many(self, user: User, ids: list[uuid.UUID]) -> int:
+        """Move several of the user's own notes to the trash in one commit. Ids that are not
+        theirs (or already trashed) are skipped, never an error — the list UI may be stale."""
+        moved = 0
+        now = utcnow()
+        for nid in dict.fromkeys(ids):
+            note = await self.notes.get(nid, user.id)
+            if note is None or note.deleted_at is not None:
+                continue
+            note.deleted_at = now
+            moved += 1
+        await self.db.commit()
+        return moved
 
     async def restore_note(self, user: User, note_id: uuid.UUID) -> Note:
         note = await self.get_note(user, note_id)

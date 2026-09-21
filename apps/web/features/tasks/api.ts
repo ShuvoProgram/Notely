@@ -14,6 +14,7 @@ export const tasksApi = {
   update: (id: string, input: Partial<TaskCreateInput> & { status?: TaskStatus; clear_due_date?: boolean; clear_due_time?: boolean }) =>
     api.patch<Task>(`/tasks/${id}`, input),
   remove: (id: string) => api.delete<{ deleted: boolean }>(`/tasks/${id}`),
+  removeMany: (ids: string[]) => api.post<{ deleted: number }>("/tasks/bulk/delete", { ids }),
   calendarStatus: () => api.get<CalendarStatus>("/tasks/calendar/status"),
   addToCalendar: (id: string) => api.post<Task>(`/tasks/${id}/calendar`, {}),
   removeFromCalendar: (id: string) => api.delete<Task>(`/tasks/${id}/calendar`),

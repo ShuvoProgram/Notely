@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 
 import { FormField } from "@/components/forms/form-field";
@@ -14,9 +15,12 @@ import { ApiError } from "@/lib/api/client";
 
 export function SignupForm() {
   const signup = useSignup();
+  const params = useSearchParams();
+  // An invitation link lands here with the invited address and where to go afterwards.
+  const next = params.get("next");
   const form = useForm<SignupValues>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { display_name: "", email: "", password: "" },
+    defaultValues: { display_name: "", email: params.get("email") ?? "", password: "" },
   });
 
   const onSubmit = (values: SignupValues) =>
@@ -80,7 +84,7 @@ export function SignupForm() {
       <SignInProviderButtons />
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="text-foreground underline-offset-4 hover:underline">
+        <Link href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} className="text-foreground underline-offset-4 hover:underline">
           Sign in
         </Link>
       </p>

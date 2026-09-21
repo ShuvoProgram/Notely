@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { pickDate, pickTime } from "./pickers";
+
 const password = "a perfectly fine passphrase";
 
 async function signup(page: Page) {
@@ -10,12 +12,6 @@ async function signup(page: Page) {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(/\/app$/);
-}
-
-function isoDate(offsetDays: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 test("tasks: quick add, edit with date/time/priority, sections, complete, notifications", async ({ page }) => {
@@ -34,8 +30,8 @@ test("tasks: quick add, edit with date/time/priority, sections, complete, notifi
   // Edit: due tomorrow at 10:00, high priority, details.
   await row.getByRole("button", { name: /^Write the launch email/ }).click();
   const dialog = page.getByRole("dialog", { name: "Edit task" });
-  await dialog.getByLabel("Due date").fill(isoDate(1));
-  await dialog.getByLabel("Time").fill("10:00");
+  await pickDate(page, dialog.getByLabel("Due date"), 1);
+  await pickTime(page, dialog.getByLabel("Time"), "10:00 am");
   await dialog.getByLabel("Priority").click();
   await page.getByRole("option", { name: "High" }).click();
   await dialog.getByLabel("Details").fill("Draft, review with marketing, send.");
@@ -52,7 +48,7 @@ test("tasks: quick add, edit with date/time/priority, sections, complete, notifi
   await page.getByRole("button", { name: "New task" }).first().click();
   const create = page.getByRole("dialog", { name: "New task" });
   await create.getByLabel("Title").fill("Yesterday's report");
-  await create.getByLabel("Due date").fill(isoDate(-1));
+  await pickDate(page, create.getByLabel("Due date"), -1);
   await create.getByRole("button", { name: "Add task" }).click();
   await expect(page.getByRole("heading", { name: /Overdue/ })).toBeVisible();
 
@@ -87,4 +83,25 @@ test("tasks: quick add, edit with date/time/priority, sections, complete, notifi
   await page.goto("/app/search");
   await expect(page.getByText("Page not found")).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("select several tasks and delete them together", async ({ page }) => {
+  await signup(page);
+  await page.goto("/app/tasks");
+  for (const t of ["Alpha task", "Beta task", "Gamma task"]) {
+    await page.getByLabel("New task").fill(t);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("listitem").filter({ hasText: t })).toBeVisible();
+  }
+  await page.getByRole("button", { name: "Select tasks" }).click();
+  await page.getByRole("checkbox", { name: "Select Alpha task" }).click();
+  await page.getByRole("checkbox", { name: "Select Beta task" }).click();
+  await expect(page.getByText("2 selected")).toBeVisible();
+  await page.getByRole("toolbar", { name: "Selection" }).getByRole("button", { name: "Delete" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete 2 tasks?" });
+  await confirm.getByRole("button", { name: "Delete" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(page.getByRole("listitem").filter({ hasText: "Alpha task" })).toHaveCount(0);
+  await expect(page.getByRole("listitem").filter({ hasText: "Gamma task" })).toBeVisible();
+  await expect(page.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
 });

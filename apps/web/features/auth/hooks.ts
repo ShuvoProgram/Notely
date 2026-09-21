@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { authApi } from "@/features/auth/api";
 import { ApiError } from "@/lib/api/client";
@@ -27,14 +27,26 @@ export function useSignInProviders() {
   return useQuery({ queryKey: authKeys.providers, queryFn: authApi.providers, staleTime: Infinity });
 }
 
+/** Where to go after sign-in: an in-app path from `?next=`, never an external URL. */
+export function safeNext(value: string | null | undefined): string {
+  if (value && /^\/(app|invite)(\/|$|\?)/.test(value) && !value.startsWith("//")) return value;
+  return "/app";
+}
+
+function useAfterAuth() {
+  const params = useSearchParams();
+  return safeNext(params.get("next"));
+}
+
 export function useLogin() {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const next = useAfterAuth();
   return useMutation({
     mutationFn: authApi.login,
     onSuccess: (user) => {
       queryClient.setQueryData(authKeys.me, user);
-      router.push("/app");
+      router.push(next);
       router.refresh();
     },
   });
@@ -43,11 +55,12 @@ export function useLogin() {
 export function useSignup() {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const next = useAfterAuth();
   return useMutation({
     mutationFn: authApi.signup,
     onSuccess: (user) => {
       queryClient.setQueryData(authKeys.me, user);
-      router.push("/app");
+      router.push(next);
       router.refresh();
     },
   });

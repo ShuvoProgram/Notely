@@ -1,14 +1,49 @@
+import type * as React from "react";
+
 import type { NoteColor } from "@/lib/api/types";
 
 export const NOTE_COLORS: { value: NoteColor; label: string; swatch: string }[] = [
   { value: "default", label: "Default", swatch: "bg-muted ring-1 ring-glass-border-strong" },
-  { value: "cream", label: "Cream", swatch: "bg-[oklch(0.86_0.09_85)]" },
+  { value: "warm", label: "Warm", swatch: "bg-[oklch(0.84_0.1_60)]" },
+  { value: "cream", label: "Cream", swatch: "bg-[oklch(0.88_0.08_85)]" },
   { value: "yellow", label: "Yellow", swatch: "bg-[oklch(0.88_0.14_95)]" },
   { value: "green", label: "Green", swatch: "bg-[oklch(0.8_0.14_150)]" },
-  { value: "blue", label: "Blue", swatch: "bg-[oklch(0.8_0.14_240)]" },
-  { value: "purple", label: "Purple", swatch: "bg-[oklch(0.78_0.14_300)]" },
-  { value: "rose", label: "Rose", swatch: "bg-[oklch(0.8_0.14_10)]" },
+  { value: "mint", label: "Mint", swatch: "bg-[oklch(0.84_0.11_170)]" },
+  { value: "blue", label: "Blue", swatch: "bg-[oklch(0.78_0.14_240)]" },
+  { value: "sky", label: "Sky", swatch: "bg-[oklch(0.84_0.1_215)]" },
+  { value: "purple", label: "Purple", swatch: "bg-[oklch(0.76_0.14_300)]" },
+  { value: "lavender", label: "Lavender", swatch: "bg-[oklch(0.84_0.09_285)]" },
+  { value: "pink", label: "Pink", swatch: "bg-[oklch(0.84_0.1_350)]" },
+  { value: "rose", label: "Rose", swatch: "bg-[oklch(0.78_0.14_10)]" },
+  { value: "gray", label: "Gray", swatch: "bg-[oklch(0.72_0.02_260)]" },
 ];
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export function isHexColor(value: string): boolean {
+  return HEX.test(value.trim());
+}
+
+export function isPresetColor(value: string): boolean {
+  return NOTE_COLORS.some((c) => c.value === value);
+}
+
+/**
+ * What to put on the element for a note colour: presets resolve through CSS, a custom hex is
+ * applied inline as the same two variables. The custom colour is only ever a ~12% tint over
+ * the surface (full strength just for the dot/swatch), so text stays readable whatever the hex.
+ */
+export function noteColorProps(color: string | null | undefined): { "data-note-color": string; style?: React.CSSProperties } {
+  if (!color || isPresetColor(color)) return { "data-note-color": color || "default" };
+  if (!isHexColor(color)) return { "data-note-color": "default" };
+  return {
+    "data-note-color": "custom",
+    style: {
+      "--note-tint": `color-mix(in oklch, ${color} 12%, transparent)`,
+      "--note-tint-strong": color,
+    } as React.CSSProperties,
+  };
+}
 
 /** "Edited 3m ago" style stamp for the list and the editor meta row. */
 export function editedLabel(iso: string): string {

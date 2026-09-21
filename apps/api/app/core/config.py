@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
 
+    # Outbound email (invitations). Any SMTP relay works; unset SMTP_HOST disables sending and
+    # the API reports "not configured" instead of pretending a message went out.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""  # e.g. "notely@yourdomain.com" — must be a sender your relay allows
+    smtp_from_name: str = "Notely AI"
+    smtp_starttls: bool = True  # STARTTLS on 587 (typical); set SMTP_SSL=true for 465 instead
+    smtp_ssl: bool = False
+    smtp_timeout_seconds: int = 15
+    invitation_ttl_days: int = 7
+
     # Sign-in providers (enabled only when both id and secret are set)
     oauth_google_client_id: str = ""
     oauth_google_client_secret: str = ""

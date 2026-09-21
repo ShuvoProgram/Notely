@@ -85,9 +85,26 @@ export interface Folder {
   updated_at: string;
 }
 
-export type NoteColor = "default" | "cream" | "yellow" | "green" | "blue" | "purple" | "rose";
+/** A preset name, or a custom "#rrggbb" (rendered as a soft tint). */
+export type NoteColor =
+  | "default"
+  | "warm"
+  | "cream"
+  | "yellow"
+  | "green"
+  | "mint"
+  | "blue"
+  | "sky"
+  | "purple"
+  | "lavender"
+  | "pink"
+  | "rose"
+  | "gray"
+  | (string & {});
 export type CollaboratorRole = "viewer" | "editor";
 export type NoteAccess = "owner" | "editor" | "viewer";
+
+export type InvitationStatus = "pending" | "accepted" | "expired";
 
 export interface Collaborator {
   id: string;
@@ -95,7 +112,32 @@ export interface Collaborator {
   role: CollaboratorRole;
   user_id: string | null;
   display_name: string | null;
+  status: InvitationStatus;
+  invited_at: string | null;
+  accepted_at: string | null;
+  invite_expires_at: string | null;
   created_at: string;
+}
+
+/** What happened to the invitation email; `sent=false` carries the server's real reason. */
+export interface Delivery {
+  sent: boolean;
+  error: string | null;
+}
+
+export interface InviteResult {
+  collaborator: Collaborator;
+  delivery: Delivery;
+}
+
+export interface Invitation {
+  note_id: string;
+  note_title: string;
+  inviter_name: string;
+  email: string;
+  role: CollaboratorRole;
+  status: InvitationStatus;
+  expires_at: string | null;
 }
 
 export interface NoteVersion {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Copy, Eye, Folder as FolderIcon, History, MoreHorizontal, Palette, RotateCcw, Sparkles, Star, Trash2, Users } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, ChevronRight, Copy, Eye, Folder as FolderIcon, History, MoreHorizontal, Palette, RotateCcw, Sparkles, Star, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -29,10 +29,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NOTE_AI_ACTIONS, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
-import { ReminderPopover } from "@/features/notes/components/reminder-popover";
+import { BackgroundDialog } from "@/features/notes/components/background-dialog";
+import { ReminderDialog } from "@/features/notes/components/reminder-dialog";
 import { RichTextEditor } from "@/features/notes/components/rich-text-editor";
 import { SaveStatusIndicator } from "@/features/notes/components/save-status";
 import { ShareDialog } from "@/features/notes/components/share-dialog";
@@ -40,13 +40,13 @@ import { TagPicker } from "@/features/notes/components/tag-picker";
 import { VersionHistoryDialog } from "@/features/notes/components/version-history-dialog";
 import { clearDraft, readDraft, shouldRestoreDraft } from "@/features/notes/drafts";
 import { useFolders, useNote, useNoteActions, useUpdateNote } from "@/features/notes/hooks";
-import { editedLabel, NOTE_COLORS } from "@/features/notes/lib";
+import { editedLabel, noteColorProps, reminderLabel } from "@/features/notes/lib";
 import { useAutosave } from "@/features/notes/use-autosave";
 import type { Editor } from "@tiptap/react";
 
 import { ApiError } from "@/lib/api/client";
 import { playSfx, type SfxName } from "@/lib/sfx/player";
-import type { Note, NoteAIAction, NoteColor, TipTapDoc } from "@/lib/api/types";
+import type { Note, NoteAIAction, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export function NoteEditor({ noteId }: { noteId: string }) {
@@ -71,33 +71,6 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     );
   }
   return <LoadedNoteEditor key={note.id} note={note} />;
-}
-
-/** Swatch row used inside the "Change background" submenu. */
-function ColorSwatches({ value, onPick }: { value: NoteColor; onPick: (c: NoteColor) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5 p-2" role="radiogroup" aria-label="Note background">
-      {NOTE_COLORS.map((c) => (
-        <Tooltip key={c.value}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={value === c.value}
-              aria-label={c.label}
-              onClick={() => onPick(c.value)}
-              className={cn(
-                "size-6 rounded-full outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover",
-                c.swatch,
-                value === c.value && "ring-2 ring-foreground ring-offset-2 ring-offset-popover",
-              )}
-            />
-          </TooltipTrigger>
-          <TooltipContent>{c.label}</TooltipContent>
-        </Tooltip>
-      ))}
-    </div>
-  );
 }
 
 function LoadedNoteEditor({ note }: { note: Note }) {
@@ -166,6 +139,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
   const [shareOpen, setShareOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [reminderOpen, setReminderOpen] = React.useState(false);
+  const [backgroundOpen, setBackgroundOpen] = React.useState(false);
 
   const folderName = note.folder_id ? folders.find((f) => f.id === note.folder_id)?.name : null;
   const collaborators = note.collaborators ?? [];
@@ -173,11 +147,15 @@ function LoadedNoteEditor({ note }: { note: Note }) {
     <NoteAIPanel key={aiAction} noteId={note.id} action={aiAction} editor={editorInstance} onClose={() => setAiAction(null)} />
   ) : null;
 
-  const setReminder = (iso: string | null) => meta(iso ? { reminder_at: iso } : { clear_reminder: true }, iso ? "Reminder set" : "Reminder removed");
+  const setReminder = (iso: string | null) => {
+    meta(iso ? { reminder_at: iso } : { clear_reminder: true }, iso ? "Reminder set" : "Reminder removed");
+    setReminderOpen(false);
+  };
+  const reminder = note.reminder_at ? reminderLabel(note.reminder_at) : null;
 
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
-      <article data-note-color={note.color} className="note-surface flex min-h-full min-w-0 flex-col rounded-2xl px-5 py-5 sm:px-10 sm:py-7">
+      <article {...noteColorProps(note.color)} className="note-surface flex min-h-full min-w-0 flex-col rounded-2xl px-5 py-5 sm:px-10 sm:py-7">
         {/* Top row: where you are on the left, what you can do on the right. */}
         <div className="mb-6 flex items-center gap-2">
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
@@ -215,17 +193,17 @@ function LoadedNoteEditor({ note }: { note: Note }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-60">
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger disabled={readOnly}>
-                    <Palette aria-hidden /> Change background
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-auto">
-                    <ColorSwatches value={note.color} onPick={(color) => meta({ color })} />
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuItem disabled={readOnly} onSelect={() => setReminderOpen(true)}>
-                  <Bell aria-hidden /> {note.reminder_at ? "Edit reminder" : "Remind me"}
+                <DropdownMenuItem disabled={readOnly} onSelect={() => setBackgroundOpen(true)}>
+                  <Palette aria-hidden /> Change background
                 </DropdownMenuItem>
+                <DropdownMenuItem disabled={readOnly} onSelect={() => setReminderOpen(true)}>
+                  <Bell aria-hidden /> {note.reminder_at ? "Edit reminder" : "Set reminder"}
+                </DropdownMenuItem>
+                {note.reminder_at ? (
+                  <DropdownMenuItem disabled={readOnly} onSelect={() => setReminder(null)}>
+                    <BellOff aria-hidden /> Remove reminder
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
                   <History aria-hidden /> Version history
                 </DropdownMenuItem>
@@ -361,14 +339,15 @@ function LoadedNoteEditor({ note }: { note: Note }) {
             <FolderIcon className="size-3.5" aria-hidden />
             {folderName ?? "No folder"}
           </span>
-          <span aria-hidden className="px-1 opacity-50">·</span>
-          <ReminderPopover
-            value={note.reminder_at}
-            onChange={setReminder}
-            disabled={readOnly}
-            open={reminderOpen}
-            onOpenChange={setReminderOpen}
-          />
+          {reminder ? (
+            <>
+              <span aria-hidden className="px-1 opacity-50">·</span>
+              <span className={cn("inline-flex h-7 items-center gap-1 px-1", reminder.passed ? "text-muted-foreground" : "text-ai")} title="Reminder">
+                <Bell className="size-3.5" aria-hidden />
+                {reminder.passed ? `Reminded ${reminder.text}` : reminder.text}
+              </span>
+            </>
+          ) : null}
           {note.shared || collaborators.length ? (
             <>
               <span aria-hidden className="px-1 opacity-50">·</span>
@@ -406,6 +385,16 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         />
 
         <ShareDialog note={note} open={shareOpen} onOpenChange={setShareOpen} />
+        <ReminderDialog open={reminderOpen} onOpenChange={setReminderOpen} value={note.reminder_at} onSave={(iso) => setReminder(iso)} onRemove={() => setReminder(null)} />
+        <BackgroundDialog
+          open={backgroundOpen}
+          onOpenChange={setBackgroundOpen}
+          value={note.color}
+          onSave={(color) => {
+            meta({ color }, "Background changed", "save");
+            setBackgroundOpen(false);
+          }}
+        />
         <VersionHistoryDialog
           note={note}
           open={historyOpen}

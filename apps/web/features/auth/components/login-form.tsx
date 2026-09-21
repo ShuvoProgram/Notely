@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 
 import { FormField } from "@/components/forms/form-field";
@@ -13,6 +14,7 @@ import { loginSchema, type LoginValues } from "@/features/auth/schemas";
 
 export function LoginForm({ initialError }: { initialError?: string }) {
   const login = useLogin();
+  const next = useSearchParams().get("next");
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
@@ -48,7 +50,7 @@ export function LoginForm({ initialError }: { initialError?: string }) {
       <SignInProviderButtons />
       <p className="text-center text-sm text-muted-foreground">
         New to Notely?{" "}
-        <Link href="/signup" className="text-foreground underline-offset-4 hover:underline">
+        <Link href={next ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} className="text-foreground underline-offset-4 hover:underline">
           Create an account
         </Link>
       </p>

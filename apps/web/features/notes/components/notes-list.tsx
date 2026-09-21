@@ -1,21 +1,27 @@
 "use client";
 
-import { Bell, Inbox, ListChecks, Plus, Search, Star, Users } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/layout/empty-state";
+import { SelectionBar } from "@/components/layout/selection-bar";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
+import { notesApi } from "@/features/notes/api";
 import { TagChip } from "@/features/notes/components/tag-picker";
-import { editedLabel, reminderLabel } from "@/features/notes/lib";
+import { editedLabel, noteColorProps, reminderLabel } from "@/features/notes/lib";
 import { useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
 import type { NoteSummary, NoteView } from "@/lib/api/types";
+import { playSfx } from "@/lib/sfx/player";
 import { cn } from "@/lib/utils";
 
 const VIEWS: { value: NoteView; label: string }[] = [
@@ -34,25 +40,18 @@ export function useNoteListFilters() {
   return { view: VIEWS.some((v) => v.value === view) ? view : "active", folderId, tagId };
 }
 
-function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
+function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteSummary; active: boolean; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean) => void }) {
   // A summary from an older API or a partial cache patch may lack tags; never crash the list.
   const tags = note.tags ?? [];
   const reminder = note.reminder_at ? reminderLabel(note.reminder_at) : null;
   const checklist = note.checklist && note.checklist.total > 0 ? note.checklist : null;
   const tinted = note.color && note.color !== "default";
-  return (
-    <li>
-      <Link
-        href={`/app/notes/${note.id}`}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "relative block rounded-xl px-3 py-2.5 outline-none transition-colors duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
-          active && "bg-accent/80 shadow-1 ring-1 ring-glass-border",
-        )}
-      >
-        <span aria-hidden className={cn("absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-ai transition-opacity", active ? "opacity-100" : "opacity-0")} />
+  const body = (
+    <>
+        <span aria-hidden className={cn("absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-ai transition-opacity", active && !selectable ? "opacity-100" : "opacity-0")} />
         <div className="flex items-start gap-2">
-          {tinted ? <span aria-hidden data-note-color={note.color} className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--note-tint-strong)]" /> : null}
+          {selectable ? <Checkbox checked={Boolean(selected)} onCheckedChange={(v) => onSelect?.(v === true)} aria-label={`Select ${note.title || "Untitled"}`} className="mt-0.5" onClick={(e) => e.stopPropagation()} /> : null}
+          {tinted ? <span aria-hidden {...noteColorProps(note.color)} className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--note-tint-strong)]" /> : null}
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{note.title || "Untitled"}</p>
           {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 fill-warning text-warning" aria-label="Favorite" /> : null}
           <time className="shrink-0 text-[11px] text-muted-foreground" dateTime={note.updated_at} title={new Date(note.updated_at).toLocaleString()}>
@@ -86,7 +85,24 @@ function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
             {tags.length > 3 ? <span>+{tags.length - 3}</span> : null}
           </div>
         ) : null}
-      </Link>
+    </>
+  );
+  const rowClass = cn(
+    "relative block w-full rounded-xl px-3 py-2.5 text-left outline-none transition-colors duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
+    active && !selectable && "bg-accent/80 shadow-1 ring-1 ring-glass-border",
+    selected && "bg-accent/60 ring-1 ring-glass-border",
+  );
+  return (
+    <li>
+      {selectable ? (
+        <div role="button" tabIndex={0} aria-pressed={selected} onClick={() => onSelect?.(!selected)} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onSelect?.(!selected); } }} className={cn(rowClass, "cursor-pointer")}>
+          {body}
+        </div>
+      ) : (
+        <Link href={`/app/notes/${note.id}`} aria-current={active ? "page" : undefined} className={rowClass}>
+          {body}
+        </Link>
+      )}
     </li>
   );
 }
@@ -105,6 +121,27 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   const list = useNotesList({ view, folder_id: folderId, tag_id: tagId, q: debouncedQ || undefined });
   const create = useCreateNote();
+  const queryClient = useQueryClient();
+  // Selection mode: pick several notes, then move them to the trash in one go.
+  const [selecting, setSelecting] = React.useState(false);
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const [confirmBulk, setConfirmBulk] = React.useState(false);
+  const exitSelection = () => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
+  const bulkTrash = useMutation({
+    mutationFn: (ids: string[]) => notesApi.trashMany(ids),
+    onSuccess: ({ moved }) => {
+      playSfx("delete");
+      toast.success(`Moved ${moved} ${moved === 1 ? "note" : "notes"} to trash`);
+      setConfirmBulk(false);
+      exitSelection();
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+    },
+    onError: (e) => toast.error(messageFor(e)),
+  });
+
   const { data: folders = [] } = useFolders();
   const { data: tags = [] } = useTags();
 
@@ -127,12 +164,32 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pt-4">
+      <div className="flex items-center justify-between gap-2 px-4 pt-4">
         <h2 className="text-base font-semibold tracking-tight">Notes</h2>
-        <Button size="sm" aria-label="New note" onClick={onCreate} disabled={create.isPending} className="rounded-full">
-          <Plus aria-hidden /> New
-        </Button>
+        <div className="flex items-center gap-1">
+          {view !== "trash" && notes.length ? (
+            <Button variant="ghost" size="sm" aria-label={selecting ? "Cancel selection" : "Select notes"} aria-pressed={selecting} onClick={() => (selecting ? exitSelection() : setSelecting(true))} className="rounded-full text-muted-foreground">
+              <CheckSquare aria-hidden /> {selecting ? "Done" : "Select"}
+            </Button>
+          ) : null}
+          <Button size="sm" aria-label="New note" onClick={onCreate} disabled={create.isPending || selecting} className="rounded-full">
+            <Plus aria-hidden /> New
+          </Button>
+        </div>
       </div>
+      {selecting ? (
+        <div className="px-3 pt-3">
+          <SelectionBar
+            selected={selected.size}
+            total={notes.length}
+            noun="notes"
+            onSelectAll={(all) => setSelected(all ? new Set(notes.map((n) => n.id)) : new Set())}
+            onClear={exitSelection}
+            onDelete={() => setConfirmBulk(true)}
+            deleteLabel="Move to trash"
+          />
+        </div>
+      ) : null}
       <div className="px-3 pt-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -140,7 +197,13 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
         </div>
       </div>
       <div className="px-3 pt-2">
-        <Tabs value={view} onValueChange={(v) => setParam("view", v === "active" ? undefined : v)}>
+        <Tabs
+          value={view}
+          onValueChange={(v) => {
+            exitSelection();
+            setParam("view", v === "active" ? undefined : v);
+          }}
+        >
           <TabsList className="w-full rounded-full">
             {VIEWS.map((v) => (
               <TabsTrigger key={v.value} value={v.value} className="flex-1 rounded-full text-xs">
@@ -204,7 +267,21 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           <>
             <ul className="space-y-0.5">
               {notes.map((n) => (
-                <NoteRow key={n.id} note={n} active={n.id === activeNoteId} />
+                <NoteRow
+                  key={n.id}
+                  note={n}
+                  active={n.id === activeNoteId}
+                  selectable={selecting}
+                  selected={selected.has(n.id)}
+                  onSelect={(checked) =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(n.id);
+                      else next.delete(n.id);
+                      return next;
+                    })
+                  }
+                />
               ))}
             </ul>
             {list.hasNextPage ? (
@@ -215,6 +292,15 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmBulk}
+        onOpenChange={setConfirmBulk}
+        title={`Delete ${selected.size} ${selected.size === 1 ? "note" : "notes"}?`}
+        description="These notes will be moved to Trash. You can restore them from there."
+        confirmLabel="Move to Trash"
+        pending={bulkTrash.isPending}
+        onConfirm={() => bulkTrash.mutate([...selected])}
+      />
     </div>
   );
 }

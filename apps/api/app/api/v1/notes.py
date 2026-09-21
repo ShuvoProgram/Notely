@@ -11,13 +11,17 @@ from app.core.responses import Envelope, ok
 from app.models.note import Folder, Note, NoteCollaborator, Tag
 from app.models.user import User
 from app.schemas.notes import (
+    BulkIds,
     ChecklistProgress,
     CollaboratorInvite,
     CollaboratorOut,
     CollaboratorUpdate,
+    DeliveryOut,
     FolderCreate,
     FolderOut,
     FolderUpdate,
+    InvitationOut,
+    InviteResult,
     NoteCreate,
     NoteListQuery,
     NoteOut,
@@ -92,7 +96,15 @@ def note_summary(note: Note, user: User) -> NoteSummary:
 
 def collaborator_out(c: NoteCollaborator) -> CollaboratorOut:
     return CollaboratorOut(
-        id=c.id, email=c.email, role=c.role, user_id=c.user_id, created_at=c.created_at
+        id=c.id,
+        email=c.email,
+        role=c.role,
+        user_id=c.user_id,
+        status=NoteService.invitation_status(c),
+        invited_at=c.invited_at,
+        accepted_at=c.accepted_at,
+        invite_expires_at=c.invite_expires_at,
+        created_at=c.created_at,
     )
 
 
@@ -138,6 +150,12 @@ async def update_note(
 @notes_router.delete("/{note_id}", response_model=Envelope[NoteSummary])
 async def trash_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
     return ok(note_summary(await service.trash_note(ctx.user, note_id), ctx.user))
+
+
+@notes_router.post("/bulk/trash", response_model=Envelope[dict[str, int]])
+async def trash_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    """Bulk "move to trash" from the list's selection mode. Reversible per note via restore."""
+    return ok({"moved": await service.trash_many(ctx.user, payload.ids)})
 
 
 @notes_router.post("/{note_id}/restore", response_model=Envelope[NoteSummary])
@@ -193,12 +211,44 @@ async def restore_version(
 @notes_router.post(
     "/{note_id}/collaborators",
     status_code=status.HTTP_201_CREATED,
-    response_model=Envelope[CollaboratorOut],
+    response_model=Envelope[InviteResult],
 )
 async def invite_collaborator(
     note_id: uuid.UUID, payload: CollaboratorInvite, ctx: CurrentAuth, service: ServiceDep
 ) -> dict[str, Any]:
-    return ok(collaborator_out(await service.invite(ctx.user, note_id, payload)))
+    row, delivery = await service.invite(ctx.user, note_id, payload)
+    return ok(
+        InviteResult(
+            collaborator=collaborator_out(row),
+            delivery=DeliveryOut(sent=delivery.sent, error=delivery.error),
+        )
+    )
+
+
+invitations_router = APIRouter(prefix="/invitations", tags=["notes"])
+
+
+@invitations_router.get("/{token}", response_model=Envelope[InvitationOut])
+async def get_invitation(token: str, service: ServiceDep) -> dict[str, Any]:
+    """Public: what the link is for, so the accept page can explain before sign-in."""
+    row, note, inviter = await service.get_invitation(token)
+    return ok(
+        InvitationOut(
+            note_id=note.id,
+            note_title=note.title or "Untitled",
+            inviter_name=inviter.display_name,
+            email=row.email,
+            role=row.role,
+            status=NoteService.invitation_status(row),
+            expires_at=row.invite_expires_at,
+        )
+    )
+
+
+@invitations_router.post("/{token}/accept", response_model=Envelope[NoteOut])
+async def accept_invitation(token: str, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    note = await service.accept_invitation(ctx.user, token)
+    return ok(note_out(note, ctx.user))
 
 
 @notes_router.patch(

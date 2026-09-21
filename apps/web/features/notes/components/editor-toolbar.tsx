@@ -5,7 +5,6 @@ import { useEditorState } from "@tiptap/react";
 import {
   Bold,
   ChevronDown,
-  Code,
   Eraser,
   Heading1,
   Heading2,
@@ -20,7 +19,6 @@ import {
   Pilcrow,
   Quote,
   Redo2,
-  SquareCode,
   Strikethrough,
   Undo2,
 } from "lucide-react";
@@ -90,13 +88,11 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
       bold: e.isActive("bold"),
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
-      code: e.isActive("code"),
       heading: e.isActive("heading", { level: 1 }) ? 1 : e.isActive("heading", { level: 2 }) ? 2 : e.isActive("heading", { level: 3 }) ? 3 : ("p" as const),
       bullet: e.isActive("bulletList"),
       ordered: e.isActive("orderedList"),
       task: e.isActive("taskList"),
       quote: e.isActive("blockquote"),
-      codeBlock: e.isActive("codeBlock"),
       link: e.isActive("link"),
       canUndo: e.can().undo(),
       canRedo: e.can().redo(),
@@ -183,19 +179,13 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="More formatting" onMouseDown={keep} className={cn("rounded-md text-muted-foreground hover:text-foreground", (state.quote || state.code || state.codeBlock) && "bg-accent text-foreground")}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="More formatting" onMouseDown={keep} className={cn("rounded-md text-muted-foreground hover:text-foreground", state.quote && "bg-accent text-foreground")}>
             <MoreHorizontal aria-hidden />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-52" onCloseAutoFocus={(e) => e.preventDefault()}>
           <DropdownMenuCheckboxItem checked={state.quote} onSelect={() => editor.chain().focus().toggleBlockquote().run()}>
             <Quote aria-hidden className="mr-2 size-4 text-muted-foreground" /> Quote
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem checked={state.code} onSelect={() => editor.chain().focus().toggleCode().run()}>
-            <Code aria-hidden className="mr-2 size-4 text-muted-foreground" /> Inline code
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem checked={state.codeBlock} onSelect={() => editor.chain().focus().toggleCodeBlock().run()}>
-            <SquareCode aria-hidden className="mr-2 size-4 text-muted-foreground" /> Code block
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>

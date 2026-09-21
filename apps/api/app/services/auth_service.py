@@ -75,7 +75,11 @@ class AuthService:
             )
         )
         for row in rows:
+            # Signing up with the invited address is acceptance: the emailed link is no longer
+            # needed (and could not be reused).
             row.user_id = user.id
+            row.accepted_at = utcnow()
+            row.invite_token = None
             note = await self.db.get(Note, row.note_id)
             if note is not None:
                 await NotificationService(self.db).notify(

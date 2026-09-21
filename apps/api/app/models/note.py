@@ -85,7 +85,8 @@ class Note(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     )
     is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # Appearance + reminder. `color` is a named tint (see NOTE_COLORS), never a raw hex.
+    # Appearance + reminder. `color` is a preset name or a custom "#rrggbb" (validated in the
+    # schema); the UI renders either as a soft tint, never a full-bleed fill.
     color: Mapped[str] = mapped_column(String(20), nullable=False, default="default")
     reminder_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
@@ -100,7 +101,21 @@ class Note(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     )
 
 
-NOTE_COLORS = ("default", "cream", "yellow", "green", "blue", "purple", "rose")
+NOTE_COLORS = (
+    "default",
+    "warm",
+    "cream",
+    "yellow",
+    "green",
+    "mint",
+    "blue",
+    "sky",
+    "purple",
+    "lavender",
+    "pink",
+    "rose",
+    "gray",
+)
 
 
 class NoteVersion(UUIDPrimaryKeyMixin, Base):
@@ -155,5 +170,12 @@ class NoteCollaborator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     invited_by: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    # The emailed link carries `invite_token`; it is single-use and expires. `accepted_at` is
+    # set when the recipient opens the link signed in (signup with the invited address also
+    # binds `user_id`, so access never depends on the email arriving).
+    invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    invite_expires_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    invited_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
 
     note: Mapped[Note] = relationship(back_populates="collaborators")

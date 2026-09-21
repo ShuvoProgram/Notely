@@ -8,7 +8,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -150,11 +152,11 @@ export function TaskDialog({ task, open, onOpenChange }: { task: Task | null; op
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="task-date">Due date</Label>
-              <Input id="task-date" type="date" value={draft.due_date} onChange={(e) => set("due_date", e.target.value)} aria-invalid={errors.due_date ? true : undefined} />
+              <DatePicker id="task-date" value={draft.due_date} onChange={(v) => set("due_date", v)} aria-invalid={errors.due_date ? true : undefined} placeholder="No date" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="task-time">Time</Label>
-              <Input id="task-time" type="time" value={draft.due_time} disabled={!draft.due_date} onChange={(e) => set("due_time", e.target.value)} />
+              <TimePicker id="task-time" value={draft.due_time} disabled={!draft.due_date} onChange={(v) => set("due_time", v)} placeholder="All day" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="task-priority">Priority</Label>

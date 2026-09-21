@@ -112,7 +112,41 @@ def _validate_doc(v: dict[str, Any] | None) -> dict[str, Any] | None:
     return v
 
 
-NoteColor = Literal["default", "cream", "yellow", "green", "blue", "purple", "rose"]
+NOTE_COLOR_PRESETS = (
+    "default",
+    "warm",
+    "cream",
+    "yellow",
+    "green",
+    "mint",
+    "blue",
+    "sky",
+    "purple",
+    "lavender",
+    "pink",
+    "rose",
+    "gray",
+)
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def validate_note_color(v: str) -> str:
+    """A preset name or a custom `#rrggbb`. The UI only ever paints a custom colour as a soft
+    tint over the surface, so any hex is safe for readability."""
+    v = v.strip()
+    if v in NOTE_COLOR_PRESETS:
+        return v
+    if _HEX.match(v):
+        return v.lower()
+    raise ValueError("Pick one of the preset colours or a #rrggbb value")
+
+
+# Preset name or "#rrggbb" (see validate_note_color).
+NoteColor = str
+
+
+class BulkIds(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
 
 
 class NoteCreate(BaseModel):
@@ -138,6 +172,12 @@ class NoteUpdate(BaseModel):
     is_favorite: bool | None = None
     archived: bool | None = None
     color: NoteColor | None = None
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str | None) -> str | None:
+        return None if v is None else validate_note_color(v)
+
     reminder_at: datetime | None = None
     clear_reminder: bool = False
     expected_version: int | None = Field(default=None, ge=1)
@@ -153,6 +193,9 @@ class ChecklistProgress(BaseModel):
     total: int
 
 
+InvitationStatus = Literal["pending", "accepted", "expired"]
+
+
 class CollaboratorOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -161,12 +204,44 @@ class CollaboratorOut(BaseModel):
     role: CollaboratorRole
     user_id: uuid.UUID | None
     display_name: str | None = None
+    status: InvitationStatus = "pending"
+    invited_at: datetime | None = None
+    accepted_at: datetime | None = None
+    invite_expires_at: datetime | None = None
     created_at: datetime
+
+
+class DeliveryOut(BaseModel):
+    """What happened to the invitation email. `sent=False` carries the real reason."""
+
+    sent: bool
+    error: str | None = None
+
+
+class InviteResult(BaseModel):
+    collaborator: CollaboratorOut
+    delivery: DeliveryOut
+
+
+class InvitationOut(BaseModel):
+    """Public view of an invitation, for the accept page (no secrets, no note body)."""
+
+    note_id: uuid.UUID
+    note_title: str
+    inviter_name: str
+    email: str
+    role: CollaboratorRole
+    status: InvitationStatus
+    expires_at: datetime | None
 
 
 class CollaboratorInvite(BaseModel):
     email: EmailStr
     role: CollaboratorRole = CollaboratorRole.viewer
+    # Re-send the email for a pending invitation (new link, new expiry). Without it, inviting
+    # an address that already has a pending invitation is a 409, so a double click never
+    # sends two emails.
+    resend: bool = False
 
 
 class CollaboratorUpdate(BaseModel):

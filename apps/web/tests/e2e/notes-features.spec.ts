@@ -72,26 +72,47 @@ test("background colour, reminder and version history", async ({ page, isMobile 
   // Colour is persisted on the note and survives a reload.
   await page.getByRole("button", { name: "Note actions" }).click();
   await page.getByRole("menuitem", { name: "Change background" }).click();
-  const saved = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().includes("/notes/"));
-  await page.getByRole("radio", { name: "Blue" }).click();
+  const background = page.getByRole("dialog", { name: "Note background" });
+  await background.getByRole("radio", { name: "Blue" }).click();
+  const saved = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().includes("/notes/") && (r.request().postData() ?? "").includes("color"));
+  await background.getByRole("button", { name: "Apply" }).click();
   await saved;
-  await page.keyboard.press("Escape");
+  await expect(background).toBeHidden();
   await expect(page.locator("article[data-note-color='blue']")).toBeVisible();
   await page.reload();
   await expect(page.locator("article[data-note-color='blue']")).toBeVisible();
+  // A custom colour is typed as hex, previewed, and kept as a soft tint.
+  await page.getByRole("button", { name: "Note actions" }).click();
+  await page.getByRole("menuitem", { name: "Change background" }).click();
+  await background.getByLabel("Custom colour").fill("#8AA1C1");
+  const savedHex = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().includes("/notes/") && (r.request().postData() ?? "").includes("color"));
+  await background.getByRole("button", { name: "Apply" }).click();
+  await savedHex;
+  await expect(page.locator("article[data-note-color='custom']")).toHaveAttribute("style", /8aa1c1/);
 
-  // Reminder: set for tomorrow morning, shown in the meta row and in the list.
-  await page.getByRole("button", { name: "Remind me" }).click();
-  await page.getByRole("button", { name: "Tomorrow" }).click();
-  await page.getByRole("button", { name: "Set reminder" }).click();
-  await expect(page.getByRole("button", { name: /Tomorrow, / })).toBeVisible();
+  // Reminder: one entry point (More → Set reminder). The dialog stays open until the user acts.
+  await page.getByRole("button", { name: "Note actions" }).click();
+  await page.getByRole("menuitem", { name: "Set reminder" }).click();
+  const reminder = page.getByRole("dialog", { name: "Remind me" });
+  await expect(reminder).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(reminder).toBeVisible(); // did not close itself after the menu went away
+  await reminder.getByRole("button", { name: "Tomorrow" }).click();
+  await expect(reminder.getByLabel("Time", { exact: true })).toHaveText(/9:00 AM/);
+  await reminder.getByRole("button", { name: "Set reminder" }).click();
+  await expect(reminder).toBeHidden();
+  await expect(page.locator("article").getByText(/Tomorrow, 9:00 AM/)).toBeVisible();
   if (isMobile) await page.goto("/app/notes");
   await expect(page.getByRole("complementary", { name: "Notes list" }).getByText(/Tomorrow, /)).toBeVisible();
   await openFromList(page, "Design review", isMobile);
-  // Remove it again.
-  await page.getByRole("button", { name: /Tomorrow, / }).click();
-  await page.getByRole("button", { name: "Remove" }).click();
-  await expect(page.getByRole("button", { name: "Remind me" })).toBeVisible();
+  // Edit via the same dialog, remove via the menu.
+  await page.getByRole("button", { name: "Note actions" }).click();
+  await page.getByRole("menuitem", { name: "Edit reminder" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit reminder" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Edit reminder" }).getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Note actions" }).click();
+  await page.getByRole("menuitem", { name: "Remove reminder" }).click();
+  await expect(page.locator("article").getByText(/Tomorrow, 9:00 AM/)).toHaveCount(0);
 
   // Version history. The very first edit (the title) snapshotted the empty note; keystrokes
   // inside the snapshot window collapse into it, so there is exactly one version now.
@@ -137,7 +158,18 @@ test("share a note by email: the guest sees it under Shared and cannot edit as a
   await share.getByLabel("Email address").fill(guestEmail);
   await share.getByRole("button", { name: "Invite" }).click();
   await expect(share.getByText(guestEmail)).toBeVisible();
-  await expect(share.getByText("Invited — pending sign-up")).toBeVisible();
+  // No SMTP in the test environment: the app says so, with the exact fix, instead of "sent".
+  await expect(page.getByText("Unable to send invitation")).toBeVisible();
+  await expect(share.getByText(/SMTP_HOST/)).toBeVisible();
+  await expect(share.getByText("Invited — waiting for them to open the email")).toBeVisible();
+  await expect(page.getByText("Unable to send invitation")).toBeHidden({ timeout: 15_000 }); // toast gone (it can cover the form on phones)
+  // A second click for the same address is refused rather than sending twice.
+  await share.getByLabel("Email address").fill(guestEmail);
+  await share.getByRole("button", { name: "Invite" }).click();
+  await expect(page.getByText("Invitation already sent")).toBeVisible();
+  await share.getByLabel("Email address").fill("not an email");
+  await share.getByRole("button", { name: "Invite" }).click();
+  await expect(share.getByText("Enter a valid email address.")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: /Shared with 1/ })).toBeVisible();
 
@@ -162,7 +194,7 @@ test("share a note by email: the guest sees it under Shared and cannot edit as a
   await page.getByRole("button", { name: /^Share( \d+)?$/ }).click();
   await share.getByLabel(`Role for ${guestEmail}`).click();
   await page.getByRole("option", { name: "Can edit" }).click();
-  await expect(share.getByText("Has a Notely account")).toBeVisible();
+  await expect(share.getByText("Has access")).toBeVisible();
   await page.keyboard.press("Escape");
   await guest.reload();
   await expect(guest.getByLabel("Note title")).not.toHaveAttribute("readonly", "");
@@ -171,4 +203,35 @@ test("share a note by email: the guest sees it under Shared and cannot edit as a
   await guestBody.pressSequentially("Added by the guest.");
   await expect(guest.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible({ timeout: 10_000 });
   await guestContext.close();
+});
+
+test("select several notes and move them to trash in one go", async ({ page, isMobile }) => {
+  await signup(page);
+  await createNote(page, "Keep me");
+  await createNote(page, "Bin one");
+  await createNote(page, "Bin two");
+  if (isMobile) await page.goto("/app/notes");
+  const list = page.getByRole("complementary", { name: "Notes list" });
+  await list.getByRole("button", { name: "Select notes" }).click();
+  await list.getByRole("checkbox", { name: "Select Bin one" }).click();
+  await list.getByRole("checkbox", { name: "Select Bin two" }).click();
+  await expect(list.getByText("2 selected")).toBeVisible();
+  await list.getByRole("button", { name: "Move to trash" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete 2 notes?" });
+  await expect(confirm.getByText(/moved to Trash/)).toBeVisible();
+  await confirm.getByRole("button", { name: "Move to Trash" }).click();
+  await expect(confirm).toBeHidden();
+  await expect(listTitles(page)).toHaveText(["Keep me"]);
+  await page.getByRole("tab", { name: "Trash" }).click();
+  await expect(listTitles(page)).toHaveText(["Bin two", "Bin one"]);
+
+  // Select all + cancel leaves everything untouched; an invalid invitation link is explained.
+  await page.getByRole("tab", { name: "Notes" }).click();
+  await list.getByRole("button", { name: "Select notes" }).click();
+  await list.getByRole("checkbox", { name: "Select all" }).click();
+  await expect(list.getByText("1 selected")).toBeVisible();
+  await list.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(list.getByRole("checkbox", { name: "Select all" })).toHaveCount(0);
+  await page.goto("/invite/not-a-real-token");
+  await expect(page.getByRole("heading", { name: /invitation link isn’t valid/ })).toBeVisible();
 });
