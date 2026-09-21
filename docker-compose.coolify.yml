@@ -1,0 +1,173 @@
+# Coolify deployment (one self-contained compose file; Coolify does not merge overlays).
+#
+# Coolify's own Traefik terminates TLS and routes the domain to `web`; Next.js proxies /api and
+# /health to the API on the private compose network (same-origin, SSE-friendly, first-party
+# cookie), so the nginx edge from docker-compose.prod.yml is not needed here. Postgres, Redis,
+# LiteLLM, api and worker publish no ports.
+#
+# `SERVICE_*` variables are filled in by Coolify (magic variables); everything else is set in
+# the resource's Environment Variables tab. See docs/deploy-coolify.md.
+name: notely
+
+x-api-env: &api-env
+  ENVIRONMENT: production
+  DATABASE_URL: postgresql+asyncpg://notely:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/notely
+  REDIS_URL: redis://redis:6379/0
+  SESSION_SECRET: ${SESSION_SECRET}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  FRONTEND_ORIGIN: ${SERVICE_FQDN_WEB}
+  ALLOWED_ORIGINS: ${SERVICE_FQDN_WEB}
+  API_PUBLIC_URL: ${SERVICE_FQDN_WEB}
+  LITELLM_API_BASE: http://litellm:4000
+  LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+  METRICS_TOKEN: ${METRICS_TOKEN}
+  TRUST_PROXY_HEADERS: "true"
+  AI_PROVIDER: litellm
+  AI_CHECKPOINTER: postgres
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
+  # Email (note invitations) — optional; leave SMTP_HOST empty to disable.
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Notely AI}
+  # Sign-in + connectors (each pair optional; redirect URI = ${SERVICE_FQDN_WEB}/api/v1/oauth/<vendor>/callback)
+  OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+  OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+  OAUTH_MICROSOFT_CLIENT_ID: ${OAUTH_MICROSOFT_CLIENT_ID:-}
+  OAUTH_MICROSOFT_CLIENT_SECRET: ${OAUTH_MICROSOFT_CLIENT_SECRET:-}
+  OAUTH_MICROSOFT_TENANT: ${OAUTH_MICROSOFT_TENANT:-common}
+  OAUTH_SLACK_CLIENT_ID: ${OAUTH_SLACK_CLIENT_ID:-}
+  OAUTH_SLACK_CLIENT_SECRET: ${OAUTH_SLACK_CLIENT_SECRET:-}
+  OAUTH_NOTION_CLIENT_ID: ${OAUTH_NOTION_CLIENT_ID:-}
+  OAUTH_NOTION_CLIENT_SECRET: ${OAUTH_NOTION_CLIENT_SECRET:-}
+  OAUTH_TODOIST_CLIENT_ID: ${OAUTH_TODOIST_CLIENT_ID:-}
+  OAUTH_TODOIST_CLIENT_SECRET: ${OAUTH_TODOIST_CLIENT_SECRET:-}
+  OAUTH_ASANA_CLIENT_ID: ${OAUTH_ASANA_CLIENT_ID:-}
+  OAUTH_ASANA_CLIENT_SECRET: ${OAUTH_ASANA_CLIENT_SECRET:-}
+  OAUTH_JIRA_CLIENT_ID: ${OAUTH_JIRA_CLIENT_ID:-}
+  OAUTH_JIRA_CLIENT_SECRET: ${OAUTH_JIRA_CLIENT_SECRET:-}
+  OAUTH_DROPBOX_CLIENT_ID: ${OAUTH_DROPBOX_CLIENT_ID:-}
+  OAUTH_DROPBOX_CLIENT_SECRET: ${OAUTH_DROPBOX_CLIENT_SECRET:-}
+  OAUTH_CLICKUP_CLIENT_ID: ${OAUTH_CLICKUP_CLIENT_ID:-}
+  OAUTH_CLICKUP_CLIENT_SECRET: ${OAUTH_CLICKUP_CLIENT_SECRET:-}
+  OAUTH_ZOOM_CLIENT_ID: ${OAUTH_ZOOM_CLIENT_ID:-}
+  OAUTH_ZOOM_CLIENT_SECRET: ${OAUTH_ZOOM_CLIENT_SECRET:-}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: always
+    environment:
+      POSTGRES_DB: notely
+      POSTGRES_USER: notely
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notely -d notely"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: always
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      - ./infra/litellm/config.yaml:/etc/litellm/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health/liveliness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    environment: *api-env
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: always
+    environment: *api-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: always
+    environment: *api-env
+    command: ["arq", "app.workers.main.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "arq", "--check", "app.workers.main.WorkerSettings"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        API_INTERNAL_URL: http://api:8000
+        WEB_SECURE: "true"
+    restart: always
+    environment:
+      SERVICE_FQDN_WEB_3000: ""
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
