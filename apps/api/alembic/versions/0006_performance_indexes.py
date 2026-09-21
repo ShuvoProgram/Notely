@@ -19,8 +19,9 @@ down_revision: str | None = "0005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# ix_notes_user_updated was already created by 0002 (as user_id, updated_at DESC); creating it
+# again here broke every fresh database. It is left to 0002.
 INDEXES: list[tuple[str, str, list[str]]] = [
-    ("ix_notes_user_updated", "notes", ["user_id", "updated_at"]),
     ("ix_tasks_user_status_created", "tasks", ["user_id", "status", "created_at"]),
     ("ix_ai_threads_user_updated", "ai_threads", ["user_id", "updated_at"]),
     ("ix_ai_runs_user_created", "ai_runs", ["user_id", "created_at"]),
@@ -32,9 +33,9 @@ INDEXES: list[tuple[str, str, list[str]]] = [
 
 def upgrade() -> None:
     for name, table, columns in INDEXES:
-        op.create_index(name, table, columns, unique=False)
+        op.create_index(name, table, columns, unique=False, if_not_exists=True)
 
 
 def downgrade() -> None:
     for name, table, _ in reversed(INDEXES):
-        op.drop_index(name, table_name=table)
+        op.drop_index(name, table_name=table, if_exists=True)

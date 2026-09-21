@@ -153,6 +153,7 @@ class NoteCollaborator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "note_collaborators"
     __table_args__ = (
         UniqueConstraint("note_id", "email", name="uq_note_collaborators_note_email"),
+        Index("ix_note_collaborators_invite_token", "invite_token", unique=True),
     )
 
     note_id: Mapped[uuid.UUID] = mapped_column(
@@ -173,7 +174,7 @@ class NoteCollaborator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # The emailed link carries `invite_token`; it is single-use and expires. `accepted_at` is
     # set when the recipient opens the link signed in (signup with the invited address also
     # binds `user_id`, so access never depends on the email arriving).
-    invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     invite_expires_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     invited_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
