@@ -212,6 +212,8 @@ class UserAISetting(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     verified_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Learned by the test probe. None = not probed (first-party vendors always support tools).
+    supports_tools: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class AuditEvent(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):

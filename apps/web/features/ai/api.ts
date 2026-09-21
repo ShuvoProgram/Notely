@@ -4,7 +4,12 @@ import type {
   AIChatEvent,
   AIPreferences,
   AIRun,
-  AISettings, ModelTestResult, UserModel, UserModelInput,
+  AISettings,
+  ModelDraft,
+  ModelInfo,
+  ModelTestResult,
+  UserModel,
+  UserModelInput,
   AIThread,
   AIThreadDetail,
   AuditEvent,
@@ -21,10 +26,11 @@ export const aiApi = {
   settings: () => api.get<AISettings>("/ai/settings"),
   updateSettings: (prefs: AIPreferences) => api.patch<AIPreferences>("/ai/settings", prefs),
   setUserModel: (input: UserModelInput) => api.put<UserModel>("/ai/settings/model", input),
-  testUserModel: () => api.post<ModelTestResult>("/ai/settings/model/test"),
+  /** Test the saved configuration, or (with a draft) one that is not stored yet. */
+  testUserModel: (draft?: ModelDraft) => api.post<ModelTestResult>("/ai/settings/model/test", draft),
   // Which models a key can use, from the vendor. Empty api_key = the stored key for that provider.
   listUserModels: (input: { provider: string; api_key?: string | null; base_url?: string | null }) =>
-    api.post<{ models: string[] }>("/ai/settings/model/models", input),
+    api.post<{ models: ModelInfo[] }>("/ai/settings/model/models", input),
   deleteUserModel: () => api.delete<{ deleted: boolean }>("/ai/settings/model"),
   audit: () => api.get<AuditEvent[]>("/audit"),
 

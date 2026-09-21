@@ -110,6 +110,7 @@ class UserModelOut(BaseModel):
     enabled: bool
     verified_at: datetime | None
     last_error: str | None
+    supports_tools: bool | None = None
 
 
 class UserModelIn(BaseModel):
@@ -119,6 +120,17 @@ class UserModelIn(BaseModel):
     # Write-only. Omit (or send empty) to keep the stored key.
     api_key: str | None = Field(default=None, max_length=500)
     enabled: bool = True
+    # Test the draft before storing it (default). Only the workspace test-suite turns this off.
+    verify: bool = True
+
+
+class ModelDraftIn(BaseModel):
+    """A configuration to try without saving. Empty api_key = the stored key for the provider."""
+
+    provider: str = Field(max_length=40)
+    model: str = Field(min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
 
 
 class ModelListIn(BaseModel):
@@ -128,21 +140,33 @@ class ModelListIn(BaseModel):
     base_url: str | None = Field(default=None, max_length=500)
 
 
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    tier: str = "balanced"
+    context: int | None = None
+    price: str = "unknown"
+    status: str = "current"
+    tools: bool = True
+    note: str = ""
+
+
 class ModelListOut(BaseModel):
-    models: list[str]
+    models: list[ModelInfo]
 
 
 class ModelTestOut(BaseModel):
     ok: bool
     detail: str
     latency_ms: int | None
+    supports_tools: bool | None = None
 
 
 class AISettingsOut(BaseModel):
     provider: str
     models: list[dict[str, str]]
     preferences: AIPreferences
-    tools: list[dict[str, str]]
+    tools: list[dict[str, Any]]
     # Bring your own key
     user_model: UserModelOut | None = None
     user_model_providers: list[dict[str, Any]] = Field(default_factory=list)

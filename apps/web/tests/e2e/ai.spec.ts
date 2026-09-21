@@ -177,30 +177,72 @@ test("cross-app request: plan is shown and ticked off, writes are verified after
   await expect(page.getByText("verified", { exact: true })).toBeVisible();
 });
 
-test("AI settings: bring your own model is saved encrypted, tested for real, and switched off again", async ({ page }) => {
+test("AI settings: own model is tested before it is saved, locked once saved, key never shown", async ({ page }) => {
   await signup(page);
   await page.goto("/app/settings/ai");
   await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Provider" }).click();
-  await page.getByRole("menuitemradio", { name: "OpenAI-compatible endpoint" }).click();
+  // Workspace model is a themed select, not a native one.
+  await page.getByLabel("Workspace model").click();
+  await expect(page.getByRole("option", { name: "Fast" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Draft an OpenAI-compatible endpoint that nothing listens on.
+  await page.getByLabel("Provider").click();
+  await page.getByRole("option", { name: "OpenAI-compatible endpoint" }).click();
   await expect(page.getByLabel("Base URL")).toHaveValue("http://localhost:11434/v1");
-  await page.getByLabel("Base URL").fill("http://127.0.0.1:1/v1"); // nothing listens here
-  await page.getByRole("textbox", { name: "Model name" }).fill("llama3.1");
+  await page.getByLabel("Base URL").fill("not a url");
+  await expect(page.getByText(/Enter a full http\(s\) URL/)).toBeVisible();
+  await page.getByLabel("Base URL").fill("http://127.0.0.1:1/v1");
+  await page.getByRole("combobox", { name: "Model", exact: true }).click();
+  await page.getByPlaceholder("Search models…").fill("llama3.1");
+  await page.getByRole("option", { name: /Use “llama3.1” as typed/ }).click();
   await page.getByLabel("API key").fill("sk-local-test-key-9876");
-  await page.getByRole("button", { name: "Save model" }).click();
-  await expect(page.getByText("In use")).toBeVisible();
-  await expect(page.getByText(/key …9876/)).toBeVisible();
-  await expect(page.getByText(/Requests go to your own openai_compatible model \(llama3\.1\)/)).toBeVisible();
-  // The key never comes back: the field is empty and only the hint is shown.
-  await expect(page.getByLabel("API key")).toHaveValue("");
-  await expect(page.getByLabel("API key")).toHaveAttribute("placeholder", /Stored \(…9876\)/);
 
-  // A real test against a dead endpoint fails with a categorised message, not a stack trace.
-  await page.getByRole("button", { name: "Test" }).click();
-  await expect(page.getByRole("status")).toContainText(/Failed: Could not reach the provider/, { timeout: 30_000 });
-  await expect(page.getByText("Last test failed")).toBeVisible();
-
-  await page.getByRole("button", { name: "Remove key" }).click();
+  // Test the draft: categorised failure, nothing saved.
+  await page.getByRole("button", { name: "Test", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText(/Could not reach the provider/, { timeout: 30_000 });
   await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
+  // Saving verifies first and refuses for the same reason — the gateway stays in use.
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect(page.getByRole("status")).toContainText(/Could not reach the provider/, { timeout: 30_000 });
+  await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
+
+  // A configuration that passed verification earlier (seeded through the API, as a working
+  // save would) is shown locked: no editable fields, key masked, explicit Edit.
+  const seeded = await page.request.put("/api/v1/ai/settings/model", {
+    data: { provider: "openai_compatible", model: "llama3.1", base_url: "http://127.0.0.1:1/v1", api_key: "sk-local-test-key-9876", enabled: true, verify: false },
+    headers: { Origin: "http://localhost:3000" },
+  });
+  expect(seeded.ok(), await seeded.text()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText(/Requests go to your own model \(OpenAI-compatible endpoint · llama3\.1\)/)).toBeVisible();
+  await expect(page.getByText("••••••••••••9876")).toBeVisible();
+  await expect(page.getByLabel("API key")).toHaveCount(0);
+  await expect(page.getByText("sk-local-test-key-9876")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Edit configuration" }).click();
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace API key" })).toBeVisible();
+  await expect(page.getByLabel("API key")).toHaveCount(0); // stored key stays hidden until replaced
+  await page.getByRole("button", { name: "Replace API key" }).click();
+  await expect(page.getByLabel("API key")).toHaveValue("");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "Edit configuration" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByText(/Requests go through the Notely model gateway/)).toBeVisible();
+
+  // Capabilities live on their own page, searchable, with approval clearly marked.
+  await page.getByRole("link", { name: /View all capabilities/ }).click();
+  await expect(page).toHaveURL(/\/app\/settings\/ai\/tools$/);
+  await page.getByLabel("Search tools").fill("task");
+  const card = (title: string) => page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+  await expect(card("Create task").getByText("Requires approval")).toBeVisible();
+  await expect(card("Search notes")).toHaveCount(0);
+  await page.getByLabel("Search tools").fill("");
+  await page.getByRole("tab", { name: /Notes/ }).click();
+  await expect(card("Search notes").getByText("Available")).toBeVisible();
 });

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.ai.actions import NoteActionRequest, NoteActionService
+from app.ai.byo import model_as_dict
 from app.ai.llm import provider_name
 from app.ai.runner import AIRunner, AIThreadService
 from app.ai.tools import build_registry
@@ -22,6 +23,8 @@ from app.schemas.ai import (
     AuditEventOut,
     ChatRequest,
     MessageOut,
+    ModelDraftIn,
+    ModelInfo,
     ModelListIn,
     ModelListOut,
     ModelTestOut,
@@ -158,6 +161,7 @@ async def get_ai_settings(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) ->
                     "name": t.name,
                     "risk": t.risk.value,
                     "provider": t.provider,
+                    "capability": t.capability,
                     "description": t.description,
                 }
                 for t in registry.all()
@@ -194,6 +198,7 @@ async def set_user_model(
         base_url=payload.base_url,
         api_key=payload.api_key,
         enabled=payload.enabled,
+        verify=payload.verify,
     )
     return ok(UserModelOut.model_validate(row, from_attributes=True))
 
@@ -210,7 +215,7 @@ async def list_user_models(
     models = await AISettingsService(db, settings).list_models(
         ctx.user, provider=payload.provider, api_key=payload.api_key, base_url=payload.base_url
     )
-    return ok(ModelListOut(models=models))
+    return ok(ModelListOut(models=[ModelInfo(**model_as_dict(m)) for m in models]))
 
 
 @router.post(
@@ -218,10 +223,30 @@ async def list_user_models(
     response_model=Envelope[ModelTestOut],
     dependencies=[Depends(ai_limit)],
 )
-async def test_user_model(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) -> dict[str, Any]:
-    """One tiny completion against the saved configuration; records verified_at/last_error."""
-    result = await AISettingsService(db, settings).test(ctx.user)
-    return ok(ModelTestOut(ok=result.ok, detail=result.detail, latency_ms=result.latency_ms))
+async def test_user_model(
+    ctx: CurrentAuth, db: DbDep, settings: SettingsDep, payload: ModelDraftIn | None = None
+) -> dict[str, Any]:
+    """One tiny completion. With a body, it tests that draft without storing anything (the
+    key in the body is used once and forgotten); without one, the saved configuration."""
+    service = AISettingsService(db, settings)
+    if payload is not None:
+        result = await service.test_draft(
+            ctx.user,
+            provider=payload.provider,
+            model=payload.model,
+            base_url=payload.base_url,
+            api_key=payload.api_key,
+        )
+    else:
+        result = await service.test(ctx.user)
+    return ok(
+        ModelTestOut(
+            ok=result.ok,
+            detail=result.detail,
+            latency_ms=result.latency_ms,
+            supports_tools=result.supports_tools,
+        )
+    )
 
 
 @router.delete("/settings/model", response_model=Envelope[dict[str, bool]])

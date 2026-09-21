@@ -436,6 +436,8 @@ export interface UserModel {
   enabled: boolean;
   verified_at: string | null;
   last_error: string | null;
+  /** Learned by the test probe; null = not probed (first-party vendors always support tools). */
+  supports_tools: boolean | null;
 }
 
 export interface UserModelInput {
@@ -445,29 +447,65 @@ export interface UserModelInput {
   /** Write-only; omit or send "" to keep the stored key. */
   api_key?: string | null;
   enabled: boolean;
+  /** Test the draft before it is stored (default true). */
+  verify?: boolean;
+}
+
+export interface ModelDraft {
+  provider: string;
+  model: string;
+  base_url?: string | null;
+  api_key?: string | null;
+}
+
+export type ModelPrice = "free" | "budget" | "standard" | "premium" | "unknown";
+
+/** Catalog entry: static suggestion or a live vendor listing enriched with catalog metadata. */
+export interface ModelInfo {
+  id: string;
+  name: string;
+  tier: "flagship" | "balanced" | "fast";
+  context: number | null;
+  price: ModelPrice;
+  status: "current" | "preview" | "deprecated";
+  tools: boolean;
+  note: string;
 }
 
 export interface UserModelProvider {
   id: string;
   label: string;
+  tagline: string;
   key_placeholder: string;
   docs_url: string;
-  models: string[];
+  models: ModelInfo[];
   needs_base_url: boolean;
   default_base_url: string | null;
+  base_url_fixed: boolean;
+  key_optional: boolean;
+  live_models: boolean;
 }
 
 export interface ModelTestResult {
+  supports_tools: boolean | null;
   ok: boolean;
   detail: string;
   latency_ms: number | null;
+}
+
+export interface AssistantTool {
+  name: string;
+  risk: RiskLevel;
+  provider: string;
+  capability: string;
+  description: string;
 }
 
 export interface AISettings {
   provider: string;
   models: { id: string; label: string }[];
   preferences: AIPreferences;
-  tools: { name: string; risk: RiskLevel; provider: string; description: string }[];
+  tools: AssistantTool[];
   user_model: UserModel | null;
   user_model_providers: UserModelProvider[];
   encryption_available: boolean;

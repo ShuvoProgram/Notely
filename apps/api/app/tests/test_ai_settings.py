@@ -20,8 +20,9 @@ from app.tests.test_ai import chat
 async def put_model(client: AsyncClient, **overrides: Any) -> Any:
     payload = {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-5",
+        "model": "claude-sonnet-5",
         "api_key": "sk-ant-api03-super-secret-key-1234",
+        "verify": False,  # most tests are about storage; verification has its own tests
         **overrides,
     }
     return await client.put("/api/v1/ai/settings/model", json=payload, headers=ORIGIN)
@@ -33,9 +34,16 @@ async def test_settings_expose_provider_catalog_and_no_user_model(client: AsyncC
     assert data["user_model"] is None
     assert data["encryption_available"] is True
     ids = [p["id"] for p in data["user_model_providers"]]
-    assert ids == ["openai", "anthropic", "google", "openai_compatible"]
+    assert ids == ["openai", "anthropic", "google", "openrouter", "openai_compatible"]
     compat = next(p for p in data["user_model_providers"] if p["id"] == "openai_compatible")
     assert compat["needs_base_url"] is True and compat["default_base_url"]
+    assert compat["key_optional"] is True and compat["models"] == []
+    router = next(p for p in data["user_model_providers"] if p["id"] == "openrouter")
+    assert router["base_url_fixed"] is True and router["models"] == []
+    openai = next(p for p in data["user_model_providers"] if p["id"] == "openai")
+    # Catalog entries carry display metadata, and none of them is a retired model.
+    assert {"id", "name", "tier", "context", "price", "status"} <= set(openai["models"][0])
+    assert not any(m["id"].startswith(("gpt-4o", "gpt-3.5", "o1", "o3")) for m in openai["models"])
 
 
 async def test_save_model_encrypts_key_and_returns_only_a_hint(client: AsyncClient) -> None:
@@ -47,12 +55,13 @@ async def test_save_model_encrypts_key_and_returns_only_a_hint(client: AsyncClie
     out = resp.json()["data"]
     assert out == {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-5",
+        "model": "claude-sonnet-5",
         "base_url": None,
         "key_hint": "…1234",
         "enabled": True,
         "verified_at": None,
         "last_error": None,
+        "supports_tools": None,
     }
     assert "super-secret" not in resp.text
     async with get_session_factory()() as db:
@@ -64,7 +73,7 @@ async def test_save_model_encrypts_key_and_returns_only_a_hint(client: AsyncClie
     assert "super-secret" not in settings_body and "…1234" in settings_body
 
     # Updating without a key keeps the stored one; changing the model resets verification.
-    again = await put_model(client, api_key="", model="claude-opus-4-1")
+    again = await put_model(client, api_key="", model="claude-opus-5")
     assert again.status_code == 200 and again.json()["data"]["key_hint"] == "…1234"
 
 
@@ -125,6 +134,7 @@ async def test_test_endpoint_reports_categorised_failures(
         "ok": False,
         "detail": "The API key was rejected. Check the key and the provider.",
         "latency_ms": None,
+        "supports_tools": None,
     }
     saved = (await client.get("/api/v1/ai/settings")).json()["data"]["user_model"]
     assert saved["verified_at"] is None and "rejected" in saved["last_error"]
@@ -234,7 +244,12 @@ async def test_models_are_listed_live_from_the_vendor(
         headers=ORIGIN,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"]["models"] == ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
+    listed = resp.json()["data"]["models"]
+    assert [m["id"] for m in listed] == ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
+    # Known ids pick up catalog metadata; unknown ones still list (name = id).
+    assert (
+        listed[0]["name"] == "Gemini 3.1 Pro (preview)" and listed[1]["name"] == "gemini-2.5-flash"
+    )
     assert calls[-1][1]["x-goog-api-key"] == "AIza-typed"
     assert (await client.get("/api/v1/ai/settings")).json()["data"]["user_model"] is None
 
@@ -244,7 +259,7 @@ async def test_models_are_listed_live_from_the_vendor(
         "/api/v1/ai/settings/model/models", json={"provider": "openai"}, headers=ORIGIN
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"]["models"] == ["gpt-5.2", "gpt-5-mini"]
+    assert [m["id"] for m in resp.json()["data"]["models"]] == ["gpt-5.2", "gpt-5-mini"]
 
     # A rejected key surfaces the same friendly message as the Test button.
     resp = await client.post(
@@ -261,3 +276,125 @@ async def test_models_are_listed_live_from_the_vendor(
     )
     assert resp.status_code == 422
     assert resp.json()["error"]["details"]["fields"]["api_key"] == ["Required"]
+
+
+async def test_saving_verifies_first_and_keeps_the_working_configuration(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify-then-write: a draft that fails never replaces what is saved; a draft that passes
+    is stored already verified, with what the probe learned about tool support."""
+    await signup(client)
+    assert (await put_model(client)).status_code == 200  # verify=False: plain storage
+
+    async def rejected(config: byo.BYOModel) -> byo.ModelTest:
+        assert config.api_key == "sk-or-new-key-9999"  # the draft key is what gets tested
+        return byo.ModelTest(False, "That model name was not found at the provider.")
+
+    monkeypatch.setattr("app.services.ai_settings_service.test_model", rejected)
+    resp = await put_model(
+        client,
+        provider="openrouter",
+        model="nobody/no-such-model",
+        api_key="sk-or-new-key-9999",
+        verify=True,
+    )
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "MODEL_TEST_FAILED"
+    assert "not found" in resp.json()["error"]["message"]
+    saved = (await client.get("/api/v1/ai/settings")).json()["data"]["user_model"]
+    assert saved["provider"] == "anthropic" and saved["key_hint"] == "…1234"  # untouched
+
+    async def accepted(config: byo.BYOModel) -> byo.ModelTest:
+        return byo.ModelTest(True, "answered", 90, supports_tools=False)
+
+    monkeypatch.setattr("app.services.ai_settings_service.test_model", accepted)
+    # Drafts can be tested without saving; the key in the body is used once and forgotten.
+    draft = await client.post(
+        "/api/v1/ai/settings/model/test",
+        json={
+            "provider": "openrouter",
+            "model": "z-ai/glm-5.2:free",
+            "api_key": "sk-or-new-key-9999",
+        },
+        headers=ORIGIN,
+    )
+    assert draft.status_code == 200 and draft.json()["data"]["supports_tools"] is False
+    assert (await client.get("/api/v1/ai/settings")).json()["data"]["user_model"][
+        "provider"
+    ] == "anthropic"
+
+    ok_save = await put_model(
+        client,
+        provider="openrouter",
+        model="z-ai/glm-5.2:free",
+        api_key="sk-or-new-key-9999",
+        verify=True,
+    )
+    assert ok_save.status_code == 200, ok_save.text
+    out = ok_save.json()["data"]
+    assert out["verified_at"] and out["supports_tools"] is False and out["key_hint"] == "…9999"
+    assert out["base_url"] == "https://openrouter.ai/api/v1"
+    assert "sk-or-new-key" not in ok_save.text
+
+
+async def test_openrouter_models_come_with_pricing(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "openrouter.ai"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "z-ai/glm-5.2:free",
+                        "name": "Z.ai: GLM 5.2 (free)",
+                        "context_length": 200000,
+                        "architecture": {"modality": "text->text"},
+                        "pricing": {"prompt": "0", "completion": "0"},
+                        "supported_parameters": ["tools"],
+                    },
+                    {
+                        "id": "openai/gpt-5.5",
+                        "name": "OpenAI: GPT-5.5",
+                        "context_length": 1050000,
+                        "architecture": {"modality": "text+image->text"},
+                        "pricing": {"prompt": "0.000005", "completion": "0.00003"},
+                        "supported_parameters": ["tools"],
+                    },
+                    {
+                        "id": "some/tts-model",
+                        "name": "Speech",
+                        "architecture": {"modality": "text->audio"},
+                        "pricing": {"prompt": "0", "completion": "0"},
+                    },
+                    {
+                        "id": "openai/gpt-5.5:batch",
+                        "name": "batch",
+                        "architecture": {"modality": "text->text"},
+                        "pricing": {"prompt": "0", "completion": "0"},
+                    },
+                ]
+            },
+        )
+
+    real_client = httpx.AsyncClient
+
+    def patched(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched)
+    monkeypatch.setattr(byo, "_openrouter_cache", None)
+    await signup(client)
+    resp = await client.post(
+        "/api/v1/ai/settings/model/models", json={"provider": "openrouter"}, headers=ORIGIN
+    )
+    assert resp.status_code == 200, resp.text
+    models = resp.json()["data"]["models"]
+    assert [(m["id"], m["price"]) for m in models] == [
+        ("z-ai/glm-5.2:free", "free"),
+        ("openai/gpt-5.5", "premium"),
+    ]
+    assert models[0]["context"] == 200000 and models[0]["tools"] is True

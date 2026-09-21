@@ -24,7 +24,7 @@ export const primaryNav: NavItem[] = [
 
 export const settingsNav: NavItem[] = [
   { href: "/app/settings/profile", label: "Account", icon: UserRound },
-  { href: "/app/settings/ai", label: "AI", icon: Sparkles },
+  { href: "/app/settings/ai", label: "AI", icon: Sparkles, prefix: true },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell },
   { href: "/app/settings/connections", label: "Connections", icon: Plug, prefix: true },
   { href: "/app/settings/security", label: "Security", icon: ShieldCheck },
