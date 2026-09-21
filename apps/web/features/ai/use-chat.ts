@@ -5,6 +5,7 @@ import * as React from "react";
 
 import { aiApi } from "@/features/ai/api";
 import { ApiError } from "@/lib/api/client";
+import { playSfx } from "@/lib/sfx/player";
 import type { AIChatEvent, AIMessage, AIPlan, AIProposal, AISource, AIStep, PlanStep, RunStatus } from "@/lib/api/types";
 
 export type StepState = AIStep;
@@ -117,6 +118,10 @@ export function useChat(initialThreadId: string | null) {
 
   const handleEvent = React.useCallback(
     (event: AIChatEvent) => {
+      // Cues live here, outside the state updater, so they fire exactly once per event.
+      if (event.type === "done" && event.status === "completed") playSfx("ai-done");
+      else if (event.type === "error") playSfx("error");
+      else if (event.type === "approval_required") playSfx("notification");
       setState((s) => {
         switch (event.type) {
           case "run":
@@ -197,6 +202,7 @@ export function useChat(initialThreadId: string | null) {
       if (!trimmed) return;
       const optimistic: AIMessage = { id: `local-${Date.now()}`, role: "user", content: trimmed, sources: null, run_id: null, created_at: new Date().toISOString() };
       setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: emptyLive(), approval: null }));
+      playSfx("ai-start");
       void runStream((signal) => aiApi.chat({ message: trimmed, thread_id: state.threadId, note_id: noteId ?? null }, handleEvent, signal));
     },
     [handleEvent, runStream, state.threadId],

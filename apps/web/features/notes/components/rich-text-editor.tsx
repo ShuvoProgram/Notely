@@ -6,6 +6,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import Typography from "@tiptap/extension-typography";
+import type { Node } from "@tiptap/pm/model";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import * as React from "react";
@@ -14,6 +15,7 @@ import { EditorToolbar } from "@/features/notes/components/editor-toolbar";
 import { ListItemMove } from "@/features/notes/extensions/list-item-move";
 import { SelectionAIMenu } from "@/features/notes/components/selection-ai-menu";
 import type { NoteAIAction, TipTapDoc } from "@/lib/api/types";
+import { playSfx } from "@/lib/sfx/player";
 import { cn } from "@/lib/utils";
 
 interface RichTextEditorProps {
@@ -27,6 +29,14 @@ interface RichTextEditorProps {
   /** Hands a chosen AI action (from the toolbar or the selection menu) to the suggestion panel. */
   onAskAI?: (action: NoteAIAction) => void;
   className?: string;
+}
+
+function checkedCount(doc: Node): number {
+  let n = 0;
+  doc.descendants((node) => {
+    if (node.type.name === "taskItem" && node.attrs.checked) n += 1;
+  });
+  return n;
 }
 
 export function RichTextEditor({
@@ -81,6 +91,8 @@ export function RichTextEditor({
         // transaction that changed the document is an edit. Otherwise every open would
         // autosave the untouched body and the note would jump to the top of the list.
         if (!transaction.docChanged) return;
+        // A checklist item flipping to done is a state change worth a cue; typing is not.
+        if (checkedCount(transaction.doc) > checkedCount(transaction.before)) playSfx("check");
         onChangeRef.current?.(e.getJSON() as TipTapDoc);
       },
       onCreate: ({ editor: e }) => onReady?.(e),

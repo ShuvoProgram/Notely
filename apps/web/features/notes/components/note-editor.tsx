@@ -45,6 +45,7 @@ import { useAutosave } from "@/features/notes/use-autosave";
 import type { Editor } from "@tiptap/react";
 
 import { ApiError } from "@/lib/api/client";
+import { playSfx, type SfxName } from "@/lib/sfx/player";
 import type { Note, NoteAIAction, NoteColor, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -143,8 +144,23 @@ function LoadedNoteEditor({ note }: { note: Note }) {
   };
   const onBodyChange = React.useCallback((doc: TipTapDoc) => autosave.queue({ content_json: doc }), [autosave]);
 
-  const meta = (input: Parameters<typeof update.mutate>[0]["input"], ok?: string) =>
-    update.mutate({ id: note.id, input }, { onSuccess: () => ok && toast.success(ok), onError: (e) => toast.error(messageFor(e)) });
+  // Metadata changes: the ones that show a toast are confirmations and get a cue with it.
+  const meta = (input: Parameters<typeof update.mutate>[0]["input"], ok?: string, cue: SfxName = "success") =>
+    update.mutate(
+      { id: note.id, input },
+      {
+        onSuccess: () => {
+          if (ok) {
+            toast.success(ok);
+            playSfx(cue);
+          }
+        },
+        onError: (e) => {
+          toast.error(messageFor(e));
+          playSfx("error");
+        },
+      },
+    );
 
   const [confirmPurge, setConfirmPurge] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
@@ -244,7 +260,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
                     </DropdownMenuRadioGroup>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                <DropdownMenuItem disabled={readOnly || !owner} onSelect={() => meta({ archived: !note.archived_at }, note.archived_at ? "Unarchived" : "Archived")}>
+                <DropdownMenuItem disabled={readOnly || !owner} onSelect={() => meta({ archived: !note.archived_at }, note.archived_at ? "Unarchived" : "Archived", note.archived_at ? "restore" : "delete")}>
                   {note.archived_at ? <ArchiveRestore aria-hidden /> : <Archive aria-hidden />}
                   {note.archived_at ? "Unarchive" : "Archive"}
                 </DropdownMenuItem>
@@ -395,6 +411,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
           open={historyOpen}
           onOpenChange={setHistoryOpen}
           onRestored={(restored) => {
+            playSfx("restore");
             autosave.adopt(restored);
             setTitle(restored.title);
             setContent(restored.content_json);

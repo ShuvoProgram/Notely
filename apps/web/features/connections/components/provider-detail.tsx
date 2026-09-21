@@ -20,6 +20,7 @@ import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
 import { ConnectionStatusBadge, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
+import { playSfx } from "@/lib/sfx/player";
 import type { ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +54,10 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
     const error = params.get("error");
     const connected = params.get("connected");
     if (!error && !connected) return;
-    if (connected) toast.success("Connected", { description: "The assistant can use this tool from now on." });
+    if (connected) {
+      playSfx("connect");
+      toast.success("Connected", { description: "The assistant can use this tool from now on." });
+    } else playSfx("error");
     if (error === "PROVIDER_AUTH_FAILED" && params.get("reason") === "access_denied" && /^(gmail|google_|teams|outlook|onedrive)/.test(providerId)) {
       // Google/Microsoft send the same code for "user cancelled" and "app still in testing mode
       // on the vendor console"; the server stored the full explanation on the connection.
@@ -70,14 +74,19 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
   const test = useMutation({
     mutationFn: connectionsApi.test,
     onSuccess: (r) => {
+      playSfx(r.healthy ? "success" : "error");
       setTestResult(r);
       invalidate();
     },
-    onError: (e) => toast.error(messageFor(e)),
+    onError: (e) => {
+      playSfx("error");
+      toast.error(messageFor(e));
+    },
   });
   const disconnect = useMutation({
     mutationFn: ({ id, purge }: { id: string; purge: boolean }) => connectionsApi.disconnect(id, purge),
     onSuccess: () => {
+      playSfx("disconnect");
       invalidate();
       setDisconnectOpen(false);
       setPurge(false);

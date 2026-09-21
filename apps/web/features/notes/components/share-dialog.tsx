@@ -15,6 +15,7 @@ import { messageFor } from "@/features/auth/components/auth-form-error";
 import { notesApi } from "@/features/notes/api";
 import { noteKeys } from "@/features/notes/hooks";
 import type { CollaboratorRole, Note } from "@/lib/api/types";
+import { playSfx } from "@/lib/sfx/player";
 
 const ROLE_LABEL: Record<CollaboratorRole, string> = { viewer: "Can view", editor: "Can edit" };
 
@@ -34,6 +35,7 @@ export function ShareDialog({ note, open, onOpenChange }: { note: Note; open: bo
   const invite = useMutation({
     mutationFn: () => notesApi.invite(note.id, { email: email.trim(), role }),
     onSuccess: (c) => {
+      playSfx("success");
       setEmail("");
       refresh();
       queryClient.invalidateQueries({ queryKey: ["notes", "list"] });

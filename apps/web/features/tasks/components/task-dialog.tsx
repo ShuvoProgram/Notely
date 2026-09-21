@@ -17,6 +17,7 @@ import { messageFor } from "@/features/auth/components/auth-form-error";
 import { tasksApi } from "@/features/tasks/api";
 import { PRIORITIES, localTimeZone, toTimeInput } from "@/features/tasks/lib";
 import { ApiError } from "@/lib/api/client";
+import { playSfx } from "@/lib/sfx/player";
 import type { Task, TaskPriority } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,7 @@ export function TaskDialog({ task, open, onOpenChange }: { task: Task | null; op
       return saved;
     },
     onSuccess: (saved) => {
+      playSfx(task ? "success" : "create");
       invalidate();
       onOpenChange(false);
       toast.success(task ? "Task updated" : "Task added", {
@@ -98,12 +100,14 @@ export function TaskDialog({ task, open, onOpenChange }: { task: Task | null; op
         return;
       }
       invalidate(); // the task may have saved even if the calendar step failed
+      playSfx("error");
       toast.error(messageFor(error));
     },
   });
   const remove = useMutation({
     mutationFn: () => tasksApi.remove(task!.id),
     onSuccess: () => {
+      playSfx("delete");
       invalidate();
       onOpenChange(false);
       toast.success("Task deleted");

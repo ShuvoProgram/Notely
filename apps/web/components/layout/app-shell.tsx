@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { FolderSidebar } from "@/features/folders/components/folder-sidebar";
 import { NotificationBell } from "@/features/notifications/components/notification-bell";
+import { SfxPreferenceSync } from "@/lib/sfx/sfx-preference-sync";
 import type { User } from "@/lib/api/types";
 
 /**
@@ -26,6 +27,7 @@ export function AppShell({ user, children }: { user: User; children: React.React
 
   return (
     <div className="flex h-dvh w-full overflow-hidden">
+      <SfxPreferenceSync initialUser={user} />
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"

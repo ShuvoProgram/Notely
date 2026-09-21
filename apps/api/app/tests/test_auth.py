@@ -259,3 +259,27 @@ async def test_continue_with_google_signs_up_then_signs_in_via_the_shared_callba
         assert denied.headers["location"] == "http://localhost:3000/login?error=oauth_denied"
     finally:
         core_oauth.set_http_transport(None)
+
+
+async def test_sound_preference_persists_and_validates(client: AsyncClient) -> None:
+    await signup(client)
+    me = await client.get("/api/v1/users/me")
+    assert me.json()["data"]["sound"] == {"enabled": True, "volume": 0.6}
+
+    resp = await client.patch(
+        "/api/v1/users/me", json={"sound": {"enabled": False, "volume": 0.25}}, headers=ORIGIN
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["sound"] == {"enabled": False, "volume": 0.25}
+    # Other preference groups are untouched by a sound update.
+    resp = await client.patch(
+        "/api/v1/users/me", json={"notifications": {"sharing": False}}, headers=ORIGIN
+    )
+    data = resp.json()["data"]
+    assert data["sound"] == {"enabled": False, "volume": 0.25}
+    assert data["notifications"] == {"sharing": False}
+
+    out_of_range = await client.patch(
+        "/api/v1/users/me", json={"sound": {"enabled": True, "volume": 1.5}}, headers=ORIGIN
+    )
+    assert out_of_range.status_code == 422

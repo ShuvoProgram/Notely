@@ -25,6 +25,7 @@ from app.schemas.auth import (
     SessionOut,
     SignInProviderOut,
     SignupRequest,
+    SoundPreference,
     UserOut,
 )
 from app.services.auth_service import AuthService
@@ -42,6 +43,7 @@ auth_limit = rate_limit("auth", lambda s: s.rate_limit_auth_per_minute)
 
 
 def user_out(user: Any) -> UserOut:
+    prefs = user.preferences if isinstance(user.preferences, dict) else {}
     return UserOut(
         id=user.id,
         tenant_id=user.tenant_id,
@@ -51,11 +53,8 @@ def user_out(user: Any) -> UserOut:
         avatar_url=user.avatar_url,
         has_password=user.password_hash is not None,
         created_at=user.created_at,
-        notifications=(
-            dict((user.preferences or {}).get("notifications") or {})
-            if isinstance(user.preferences, dict)
-            else {}
-        ),
+        notifications=dict(prefs.get("notifications") or {}),
+        sound=SoundPreference.model_validate(prefs.get("sound") or {}),
     )
 
 

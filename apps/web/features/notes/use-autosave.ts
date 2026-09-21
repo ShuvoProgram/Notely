@@ -7,6 +7,7 @@ import { notesApi } from "@/features/notes/api";
 import { clearDraft, writeDraft } from "@/features/notes/drafts";
 import { noteKeys } from "@/features/notes/hooks";
 import { ApiError } from "@/lib/api/client";
+import { playSfx } from "@/lib/sfx/player";
 import type { Note, TipTapDoc } from "@/lib/api/types";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "offline" | "conflict" | "error";
@@ -114,6 +115,7 @@ export function useAutosave(note: Note): Autosave {
           } else {
             clearDraft(note.id);
             setStatus("saved");
+            playSfx("save"); // throttled in the player: one tick per writing pause at most
           }
         } catch (error) {
           // Keep the unsent change so a retry or the draft backup still has it.
@@ -123,9 +125,11 @@ export function useAutosave(note: Note): Autosave {
             const current = error.details["current_version"];
             setConflictVersion(typeof current === "number" ? current : null);
             setStatus("conflict");
+            playSfx("error");
           } else if (error instanceof ApiError) {
             setErrorMessage(error.message);
             setStatus("error");
+            playSfx("error");
           } else {
             setStatus("offline");
           }

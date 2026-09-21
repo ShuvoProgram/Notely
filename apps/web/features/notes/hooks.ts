@@ -3,6 +3,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { foldersApi, notesApi, searchApi, tagsApi } from "@/features/notes/api";
+import { playSfx } from "@/lib/sfx/player";
 import type { Note, NoteCreateInput, NoteListParams, NoteSummary, NoteUpdateInput } from "@/lib/api/types";
 
 export const noteKeys = {
@@ -45,6 +46,7 @@ export function useCreateNote() {
   return useMutation({
     mutationFn: (input: NoteCreateInput = {}) => notesApi.create(input),
     onSuccess: (note) => {
+      playSfx("create");
       queryClient.setQueryData(noteKeys.detail(note.id), note);
       queryClient.invalidateQueries({ queryKey: ["notes", "list"] });
       queryClient.invalidateQueries({ queryKey: noteKeys.folders });
@@ -74,6 +76,7 @@ export function useNoteActions() {
   const trash = useMutation({
     mutationFn: notesApi.trash,
     onSuccess: (note) => {
+      playSfx("delete");
       patchCaches(queryClient, note);
       refresh();
     },
@@ -81,6 +84,7 @@ export function useNoteActions() {
   const restore = useMutation({
     mutationFn: notesApi.restore,
     onSuccess: (note) => {
+      playSfx("restore");
       patchCaches(queryClient, note);
       refresh();
     },
@@ -88,6 +92,7 @@ export function useNoteActions() {
   const purge = useMutation({
     mutationFn: notesApi.purge,
     onSuccess: (_, id) => {
+      playSfx("delete");
       queryClient.removeQueries({ queryKey: noteKeys.detail(id) });
       refresh();
     },
@@ -95,6 +100,7 @@ export function useNoteActions() {
   const duplicate = useMutation({
     mutationFn: notesApi.duplicate,
     onSuccess: (note) => {
+      playSfx("create");
       queryClient.setQueryData(noteKeys.detail(note.id), note);
       refresh();
     },

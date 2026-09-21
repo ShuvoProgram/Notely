@@ -22,6 +22,7 @@ import { Markdown } from "@/features/ai/components/chat-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { tasksApi } from "@/features/tasks/api";
 import { ApiError } from "@/lib/api/client";
+import { playSfx } from "@/lib/sfx/player";
 import type { ExtractedTask, NoteAIAction } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -98,10 +99,13 @@ export function NoteAIPanel({ noteId, action, editor, onClose, className }: { no
       const selection = editor && !editor.state.selection.empty ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n") : undefined;
       const original = selection ?? (act === "improve" ? (editor?.getText() ?? null) : null);
       setPanel({ action: act, instruction: instr, original, status: "streaming", text: "", tasks: null, error: null });
+      playSfx("ai-start");
       try {
         await aiApi.noteAction(
           { note_id: noteId, action: act, instruction: instr, selection },
           (event) => {
+            if (event.type === "done") playSfx("ai-done");
+            else if (event.type === "error") playSfx("error");
             setPanel((p) => {
               if (!p) return p;
               switch (event.type) {
@@ -121,7 +125,10 @@ export function NoteAIPanel({ noteId, action, editor, onClose, className }: { no
           controller.signal,
         );
       } catch (error) {
-        if (!controller.signal.aborted) setPanel((p) => (p ? { ...p, status: "error", error: error instanceof ApiError ? error.message : messageFor(error) } : p));
+        if (!controller.signal.aborted) {
+          playSfx("error");
+          setPanel((p) => (p ? { ...p, status: "error", error: error instanceof ApiError ? error.message : messageFor(error) } : p));
+        }
       }
     },
     [editor, noteId],
@@ -135,6 +142,7 @@ export function NoteAIPanel({ noteId, action, editor, onClose, className }: { no
   const addTasks = useMutation({
     mutationFn: (tasks: ExtractedTask[]) => tasksApi.createMany(tasks.map((t) => ({ ...t, note_id: noteId, source: "ai" as const }))),
     onSuccess: (created) => {
+      playSfx("task-complete");
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       toast.success(`Added ${created.length} task${created.length === 1 ? "" : "s"}`);
       onClose();

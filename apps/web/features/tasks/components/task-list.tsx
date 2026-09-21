@@ -20,6 +20,7 @@ import { messageFor } from "@/features/auth/components/auth-form-error";
 import { tasksApi } from "@/features/tasks/api";
 import { TaskDialog } from "@/features/tasks/components/task-dialog";
 import { dueAt, dueState, formatDue, localTimeZone, priorityMeta, type DueState } from "@/features/tasks/lib";
+import { playSfx } from "@/lib/sfx/player";
 import type { Task, TaskStatus } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -71,10 +72,14 @@ export function TaskList() {
   const create = useMutation({
     mutationFn: tasksApi.create,
     onSuccess: () => {
+      playSfx("create");
       invalidate();
       setTitle("");
     },
-    onError: (e) => toast.error(messageFor(e)),
+    onError: (e) => {
+      playSfx("error");
+      toast.error(messageFor(e));
+    },
   });
   const toggle = useMutation({
     mutationFn: (t: Task) => tasksApi.update(t.id, { status: t.status === "open" ? "done" : "open" }),
@@ -89,6 +94,7 @@ export function TaskList() {
       toast.error(messageFor(e));
     },
     onSuccess: (saved, t) => {
+      playSfx(t.status === "open" ? "task-complete" : "restore");
       invalidate();
       if (t.status === "open") {
         toast.success("Task completed", {
@@ -97,7 +103,14 @@ export function TaskList() {
       }
     },
   });
-  const remove = useMutation({ mutationFn: tasksApi.remove, onSuccess: invalidate, onError: (e) => toast.error(messageFor(e)) });
+  const remove = useMutation({
+    mutationFn: tasksApi.remove,
+    onSuccess: () => {
+      playSfx("delete");
+      invalidate();
+    },
+    onError: (e) => toast.error(messageFor(e)),
+  });
 
   const list = tasks.data ?? [];
   const sections = view === "open" ? groupOpen(list) : [{ key: "done", label: "Completed", tasks: list }];

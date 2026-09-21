@@ -53,6 +53,13 @@ class ChangePasswordRequest(BaseModel):
         return _validate_password(v)
 
 
+class SoundPreference(BaseModel):
+    """UI sound effects. Volume is a 0–1 master gain applied on top of each cue's own level."""
+
+    enabled: bool = True
+    volume: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +73,7 @@ class UserOut(BaseModel):
     created_at: datetime
     # In-app notification switches (per kind group); absent keys mean "on".
     notifications: dict[str, bool] = {}
+    sound: SoundPreference = Field(default_factory=lambda: SoundPreference())
 
 
 class SessionOut(BaseModel):
@@ -91,6 +99,7 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=2048)
     # Which in-app notification kinds the user wants; merged into preferences.notifications.
     notifications: dict[str, bool] | None = None
+    sound: SoundPreference | None = None
 
     @field_validator("display_name")
     @classmethod

@@ -2,14 +2,22 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import * as React from "react";
+
 import { notificationsApi } from "@/features/notifications/api";
 import type { NotificationsResponse } from "@/lib/api/types";
+import { playSfx } from "@/lib/sfx/player";
+
+// Ids already shown once in this page session. Seeded on the first response so a reload is
+// silent; only notifications that arrive *afterwards* (reminders, shares, sync results) chime.
+const seen = new Set<string>();
+let seeded = false;
 
 export const notificationKeys = { all: ["notifications"] as const };
 
 /** The inbox, polled quietly so reminders show up without a refresh. */
 export function useNotifications(enabled = true) {
-  return useQuery({
+  const query = useQuery({
     queryKey: notificationKeys.all,
     queryFn: notificationsApi.list,
     enabled,
@@ -17,6 +25,20 @@ export function useNotifications(enabled = true) {
     refetchOnWindowFocus: true,
     staleTime: 15_000,
   });
+  const items = query.data?.items;
+  React.useEffect(() => {
+    if (!items) return;
+    let fresh = false;
+    for (const n of items) {
+      if (!seen.has(n.id)) {
+        seen.add(n.id);
+        if (seeded && !n.read_at) fresh = true;
+      }
+    }
+    seeded = true;
+    if (fresh) playSfx("notification");
+  }, [items]);
+  return query;
 }
 
 export function useNotificationActions() {

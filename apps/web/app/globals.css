@@ -15,6 +15,9 @@
 @custom-variant data-checked (&[data-state="checked"]);
 @custom-variant data-unchecked (&[data-state="unchecked"]);
 @custom-variant data-selected (&[data-selected="true"]);
+@custom-variant data-horizontal (&[data-orientation="horizontal"]);
+@custom-variant data-vertical (&[data-orientation="vertical"]);
+@custom-variant data-disabled (&[data-disabled]);
 
 /*
  * Notely design system — dark-first "quiet glass".

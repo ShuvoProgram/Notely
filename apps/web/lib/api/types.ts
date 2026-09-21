@@ -11,6 +11,8 @@ export interface User {
   created_at: string;
   /** In-app notification switches by kind group; a missing key means on. */
   notifications: Record<string, boolean>;
+  /** UI sound effects: master switch and 0–1 volume. */
+  sound: { enabled: boolean; volume: number };
 }
 
 export interface UserSession {
@@ -49,6 +51,7 @@ export interface UpdateProfileInput {
   display_name?: string;
   avatar_url?: string | null;
   notifications?: Record<string, boolean>;
+  sound?: { enabled: boolean; volume: number };
 }
 
 // --- notes (mirrors apps/api/app/schemas/notes.py) ---------------------------------------------
