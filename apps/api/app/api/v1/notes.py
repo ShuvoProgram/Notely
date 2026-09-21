@@ -8,8 +8,13 @@ from fastapi import APIRouter, Depends, Query, status
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
-from app.models.note import Folder, Note, Tag
+from app.models.note import Folder, Note, NoteCollaborator, Tag
+from app.models.user import User
 from app.schemas.notes import (
+    ChecklistProgress,
+    CollaboratorInvite,
+    CollaboratorOut,
+    CollaboratorUpdate,
     FolderCreate,
     FolderOut,
     FolderUpdate,
@@ -18,6 +23,8 @@ from app.schemas.notes import (
     NoteOut,
     NoteSummary,
     NoteUpdate,
+    NoteVersionDetail,
+    NoteVersionOut,
     SearchHit,
     SearchResponse,
     SearchSource,
@@ -26,7 +33,7 @@ from app.schemas.notes import (
     TagUpdate,
 )
 from app.services.note_service import NoteService
-from app.services.rich_text import excerpt
+from app.services.rich_text import checklist_progress, excerpt
 
 notes_router = APIRouter(prefix="/notes", tags=["notes"])
 folders_router = APIRouter(prefix="/folders", tags=["folders"])
@@ -57,7 +64,8 @@ def folder_out(folder: Folder, count: int = 0) -> FolderOut:
     )
 
 
-def _common(note: Note) -> dict[str, Any]:
+def _common(note: Note, user: User) -> dict[str, Any]:
+    done, total = checklist_progress(note.content_json)
     return {
         "id": note.id,
         "title": note.title,
@@ -68,22 +76,34 @@ def _common(note: Note) -> dict[str, Any]:
         "archived_at": note.archived_at,
         "deleted_at": note.deleted_at,
         "version": note.version,
+        "color": note.color,
+        "reminder_at": note.reminder_at,
+        "checklist": ChecklistProgress(done=done, total=total) if total else None,
+        "shared": bool(note.collaborators),
+        "access": NoteService.access_of(user, note),
         "created_at": note.created_at,
         "updated_at": note.updated_at,
     }
 
 
-def note_summary(note: Note) -> NoteSummary:
-    return NoteSummary(**_common(note))
+def note_summary(note: Note, user: User) -> NoteSummary:
+    return NoteSummary(**_common(note, user))
 
 
-def note_out(note: Note) -> NoteOut:
+def collaborator_out(c: NoteCollaborator) -> CollaboratorOut:
+    return CollaboratorOut(
+        id=c.id, email=c.email, role=c.role, user_id=c.user_id, created_at=c.created_at
+    )
+
+
+def note_out(note: Note, user: User) -> NoteOut:
     return NoteOut(
-        **_common(note),
+        **_common(note, user),
         content_json=note.content_json,
         plain_text=note.plain_text,
         summary=note.summary,
         metadata=note.metadata_,
+        collaborators=[collaborator_out(c) for c in note.collaborators],
     )
 
 
@@ -95,34 +115,34 @@ async def list_notes(
     ctx: CurrentAuth, service: ServiceDep, query: Annotated[NoteListQuery, Query()]
 ) -> dict[str, Any]:
     notes, next_cursor = await service.list_notes(ctx.user, query)
-    return ok([note_summary(n) for n in notes], {"next_cursor": next_cursor})
+    return ok([note_summary(n, ctx.user) for n in notes], {"next_cursor": next_cursor})
 
 
 @notes_router.post("", status_code=status.HTTP_201_CREATED, response_model=Envelope[NoteOut])
 async def create_note(payload: NoteCreate, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
-    return ok(note_out(await service.create_note(ctx.user, payload)))
+    return ok(note_out(await service.create_note(ctx.user, payload), ctx.user))
 
 
 @notes_router.get("/{note_id}", response_model=Envelope[NoteOut])
 async def get_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
-    return ok(note_out(await service.get_note(ctx.user, note_id)))
+    return ok(note_out(await service.get_note(ctx.user, note_id), ctx.user))
 
 
 @notes_router.patch("/{note_id}", response_model=Envelope[NoteOut])
 async def update_note(
     note_id: uuid.UUID, payload: NoteUpdate, ctx: CurrentAuth, service: ServiceDep
 ) -> dict[str, Any]:
-    return ok(note_out(await service.update_note(ctx.user, note_id, payload)))
+    return ok(note_out(await service.update_note(ctx.user, note_id, payload), ctx.user))
 
 
 @notes_router.delete("/{note_id}", response_model=Envelope[NoteSummary])
 async def trash_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
-    return ok(note_summary(await service.trash_note(ctx.user, note_id)))
+    return ok(note_summary(await service.trash_note(ctx.user, note_id), ctx.user))
 
 
 @notes_router.post("/{note_id}/restore", response_model=Envelope[NoteSummary])
 async def restore_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
-    return ok(note_summary(await service.restore_note(ctx.user, note_id)))
+    return ok(note_summary(await service.restore_note(ctx.user, note_id), ctx.user))
 
 
 @notes_router.delete("/{note_id}/permanent", response_model=Envelope[dict[str, bool]])
@@ -137,7 +157,72 @@ async def purge_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) 
 async def duplicate_note(
     note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep
 ) -> dict[str, Any]:
-    return ok(note_out(await service.duplicate_note(ctx.user, note_id)))
+    return ok(note_out(await service.duplicate_note(ctx.user, note_id), ctx.user))
+
+
+# --- version history ---------------------------------------------------------------------------
+
+
+@notes_router.get("/{note_id}/versions", response_model=Envelope[list[NoteVersionOut]])
+async def list_versions(
+    note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    rows = await service.list_versions(ctx.user, note_id)
+    return ok([NoteVersionOut.model_validate(v) for v in rows])
+
+
+@notes_router.get("/{note_id}/versions/{version_id}", response_model=Envelope[NoteVersionDetail])
+async def get_version(
+    note_id: uuid.UUID, version_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    return ok(
+        NoteVersionDetail.model_validate(await service.get_version(ctx.user, note_id, version_id))
+    )
+
+
+@notes_router.post("/{note_id}/versions/{version_id}/restore", response_model=Envelope[NoteOut])
+async def restore_version(
+    note_id: uuid.UUID, version_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    return ok(note_out(await service.restore_version(ctx.user, note_id, version_id), ctx.user))
+
+
+# --- collaboration -----------------------------------------------------------------------------
+
+
+@notes_router.post(
+    "/{note_id}/collaborators",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Envelope[CollaboratorOut],
+)
+async def invite_collaborator(
+    note_id: uuid.UUID, payload: CollaboratorInvite, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    return ok(collaborator_out(await service.invite(ctx.user, note_id, payload)))
+
+
+@notes_router.patch(
+    "/{note_id}/collaborators/{collaborator_id}", response_model=Envelope[CollaboratorOut]
+)
+async def update_collaborator(
+    note_id: uuid.UUID,
+    collaborator_id: uuid.UUID,
+    payload: CollaboratorUpdate,
+    ctx: CurrentAuth,
+    service: ServiceDep,
+) -> dict[str, Any]:
+    row = await service.update_collaborator(ctx.user, note_id, collaborator_id, payload.role)
+    return ok(collaborator_out(row))
+
+
+@notes_router.delete(
+    "/{note_id}/collaborators/{collaborator_id}", response_model=Envelope[dict[str, bool]]
+)
+async def remove_collaborator(
+    note_id: uuid.UUID, collaborator_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep
+) -> dict[str, Any]:
+    await service.remove_collaborator(ctx.user, note_id, collaborator_id)
+    return ok({"removed": True})
 
 
 # --- folders ------------------------------------------------------------------------------------

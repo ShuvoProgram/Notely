@@ -12,7 +12,7 @@ from sqlalchemy import Select, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
-from app.models.note import Folder, Note, NoteTag, Tag
+from app.models.note import Folder, Note, NoteCollaborator, NoteTag, Tag
 from app.models.user import User
 
 
@@ -159,6 +159,17 @@ class NoteRepository:
     async def get(self, note_id: uuid.UUID, user_id: uuid.UUID) -> Note | None:
         return await self.session.scalar(self._base(user_id).where(Note.id == note_id))
 
+    async def get_shared(self, note_id: uuid.UUID, user_id: uuid.UUID) -> Note | None:
+        """A note someone else owns but shared with this user (by matched account)."""
+        return await self.session.scalar(
+            select(Note).where(
+                Note.id == note_id,
+                Note.id.in_(
+                    select(NoteCollaborator.note_id).where(NoteCollaborator.user_id == user_id)
+                ),
+            )
+        )
+
     async def create(self, user: User, **fields: Any) -> Note:
         note = Note(tenant_id=user.tenant_id, user_id=user.id, **fields)
         self.session.add(note)
@@ -176,8 +187,20 @@ class NoteRepository:
         cursor: str | None,
         limit: int,
     ) -> tuple[list[Note], str | None]:
-        stmt = self._base(user_id)
-        if view == "trash":
+        if view == "shared":
+            # Notes others shared with me (matched by account), never my own.
+            stmt = select(Note).where(
+                Note.user_id != user_id,
+                Note.deleted_at.is_(None),
+                Note.id.in_(
+                    select(NoteCollaborator.note_id).where(NoteCollaborator.user_id == user_id)
+                ),
+            )
+        else:
+            stmt = self._base(user_id)
+        if view == "shared":
+            pass
+        elif view == "trash":
             stmt = stmt.where(Note.deleted_at.is_not(None))
         else:
             stmt = stmt.where(Note.deleted_at.is_(None))

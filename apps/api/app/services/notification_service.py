@@ -41,6 +41,8 @@ PREF_FOR_KIND: dict[NotificationKind, str] = {
     NotificationKind.integration_auth_required: "integrations",
     NotificationKind.calendar_synced: "calendar_sync",
     NotificationKind.calendar_sync_failed: "calendar_sync",
+    NotificationKind.note_reminder: "note_reminders",
+    NotificationKind.note_shared: "sharing",
 }
 
 
@@ -130,6 +132,34 @@ class NotificationService:
         )
         await self.db.commit()
         return int(getattr(result, "rowcount", 0) or 0)
+
+    async def sweep_notes(self, user: User) -> None:
+        """Fire note reminders whose time has come (each exactly once)."""
+        from app.models.note import Note  # local import: avoid a models cycle at import time
+
+        now = utcnow()
+        due = list(
+            await self.db.scalars(
+                select(Note).where(
+                    Note.user_id == user.id,
+                    Note.deleted_at.is_(None),
+                    Note.reminder_at.is_not(None),
+                    Note.reminder_at <= now,
+                )
+            )
+        )
+        for note in due:
+            stamp = note.reminder_at.isoformat() if note.reminder_at else ""
+            await self.notify(
+                user,
+                NotificationKind.note_reminder,
+                f"Reminder: {note.title or 'Untitled note'}",
+                body=(note.plain_text or "")[:120] or None,
+                href=f"/app/notes/{note.id}",
+                dedupe_key=f"note:{note.id}:reminder:{stamp}",
+                commit=False,
+            )
+        await self.db.commit()
 
     async def sweep_tasks(self, user: User) -> None:
         """Derive due-soon / overdue notifications for open tasks with a due date."""

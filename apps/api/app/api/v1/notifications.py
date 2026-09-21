@@ -37,6 +37,7 @@ async def list_notifications(ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
     """The inbox. Time-based task reminders are derived here, so a poll is all a client needs."""
     service = NotificationService(db)
     await service.sweep_tasks(ctx.user)
+    await service.sweep_notes(ctx.user)
     items = await service.list(ctx.user)
     return ok(
         NotificationsOut(

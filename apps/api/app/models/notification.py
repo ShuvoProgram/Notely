@@ -18,6 +18,8 @@ class NotificationKind(enum.StrEnum):
     integration_auth_required = "integration_auth_required"
     calendar_synced = "calendar_synced"
     calendar_sync_failed = "calendar_sync_failed"
+    note_reminder = "note_reminder"
+    note_shared = "note_shared"
 
 
 class Notification(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):

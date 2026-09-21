@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -53,8 +54,39 @@ class AuthService:
             password_hash=hash_password(password),
             email_verified=False,
         )
+        await self._bind_pending_shares(user)
         await self.db.commit()
         return user
+
+    async def _bind_pending_shares(self, user: User) -> None:
+        """Notes shared with this address before the account existed become reachable now."""
+        from app.models.note import (
+            Note,
+            NoteCollaborator,  # local: keep auth free of note imports
+        )
+        from app.models.notification import NotificationKind
+        from app.services.notification_service import NotificationService
+
+        rows = list(
+            await self.db.scalars(
+                select(NoteCollaborator).where(
+                    NoteCollaborator.email == user.email, NoteCollaborator.user_id.is_(None)
+                )
+            )
+        )
+        for row in rows:
+            row.user_id = user.id
+            note = await self.db.get(Note, row.note_id)
+            if note is not None:
+                await NotificationService(self.db).notify(
+                    user,
+                    NotificationKind.note_shared,
+                    "A note was shared with you",
+                    body=note.title or "Untitled",
+                    href=f"/app/notes/{note.id}",
+                    dedupe_key=f"note:{note.id}:shared:{user.id}",
+                    commit=False,
+                )
 
     async def authenticate(self, *, email: str, password: str) -> User:
         user = await self.repo.get_by_email(email.lower().strip())
@@ -126,6 +158,7 @@ class AuthService:
                 password_hash=None,
                 email_verified=email_verified,
             )
+            await self._bind_pending_shares(user)
             user.avatar_url = avatar_url
         await self.repo.add_identity(user, provider, subject, email)
         await self.db.commit()

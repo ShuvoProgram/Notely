@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -13,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +26,7 @@ from app.db.base import (
     TimestampMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
+    utcnow,
 )
 
 
@@ -81,10 +85,75 @@ class Note(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     )
     is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Appearance + reminder. `color` is a named tint (see NOTE_COLORS), never a raw hex.
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="default")
+    reminder_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True, index=True)
 
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
+    collaborators: Mapped[list[NoteCollaborator]] = relationship(
+        back_populates="note", lazy="selectin", cascade="all, delete-orphan"
+    )
     tags: Mapped[list[Tag]] = relationship(
         secondary="note_tags", lazy="selectin", order_by=Tag.name
     )
+
+
+NOTE_COLORS = ("default", "cream", "yellow", "green", "blue", "purple", "rose")
+
+
+class NoteVersion(UUIDPrimaryKeyMixin, Base):
+    """A snapshot of a note's title + body. Written on meaningful changes (see NoteService),
+    not on every keystroke; `note_version` is the note's counter at snapshot time."""
+
+    __tablename__ = "note_versions"
+    __table_args__ = (Index("ix_note_versions_note_created", "note_id", "created_at"),)
+
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    note_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False, default=dict)
+    plain_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reason: Mapped[str] = mapped_column(String(40), nullable=False, default="edit")
+    created_at: Mapped[datetime] = mapped_column(
+        TZDateTime(), nullable=False, default=utcnow, server_default=func.now()
+    )
+
+
+class CollaboratorRole(enum.StrEnum):
+    viewer = "viewer"
+    editor = "editor"
+
+
+class NoteCollaborator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Someone besides the owner who may open (and, as editor, change) a note. Invitations are
+    by email; `user_id` is filled once the address matches an account in the workspace."""
+
+    __tablename__ = "note_collaborators"
+    __table_args__ = (
+        UniqueConstraint("note_id", "email", name="uq_note_collaborators_note_email"),
+    )
+
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[CollaboratorRole] = mapped_column(
+        Enum(CollaboratorRole, name="collaborator_role"),
+        nullable=False,
+        default=CollaboratorRole.viewer,
+    )
+    invited_by: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    note: Mapped[Note] = relationship(back_populates="collaborators")

@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.models.note import CollaboratorRole
 from app.services.rich_text import is_valid_doc
 
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -111,6 +112,9 @@ def _validate_doc(v: dict[str, Any] | None) -> dict[str, Any] | None:
     return v
 
 
+NoteColor = Literal["default", "cream", "yellow", "green", "blue", "purple", "rose"]
+
+
 class NoteCreate(BaseModel):
     title: str = Field(default="", max_length=300)
     content_json: dict[str, Any] | None = None
@@ -133,12 +137,55 @@ class NoteUpdate(BaseModel):
     tag_ids: list[uuid.UUID] | None = Field(default=None, max_length=50)
     is_favorite: bool | None = None
     archived: bool | None = None
+    color: NoteColor | None = None
+    reminder_at: datetime | None = None
+    clear_reminder: bool = False
     expected_version: int | None = Field(default=None, ge=1)
 
     @field_validator("content_json")
     @classmethod
     def _doc(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
         return _validate_doc(v)
+
+
+class ChecklistProgress(BaseModel):
+    done: int
+    total: int
+
+
+class CollaboratorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    role: CollaboratorRole
+    user_id: uuid.UUID | None
+    display_name: str | None = None
+    created_at: datetime
+
+
+class CollaboratorInvite(BaseModel):
+    email: EmailStr
+    role: CollaboratorRole = CollaboratorRole.viewer
+
+
+class CollaboratorUpdate(BaseModel):
+    role: CollaboratorRole
+
+
+class NoteVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    note_version: int
+    title: str
+    plain_text: str
+    reason: str
+    created_at: datetime
+
+
+class NoteVersionDetail(NoteVersionOut):
+    content_json: dict[str, Any]
 
 
 class NoteSummary(BaseModel):
@@ -155,6 +202,12 @@ class NoteSummary(BaseModel):
     archived_at: datetime | None
     deleted_at: datetime | None
     version: int
+    color: NoteColor = "default"
+    reminder_at: datetime | None = None
+    checklist: ChecklistProgress | None = None
+    # Who else can see it; owners see their invitees, invitees see they are a guest.
+    shared: bool = False
+    access: Literal["owner", "editor", "viewer"] = "owner"
     created_at: datetime
     updated_at: datetime
 
@@ -164,9 +217,10 @@ class NoteOut(NoteSummary):
     plain_text: str
     summary: str | None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    collaborators: list[CollaboratorOut] = Field(default_factory=list)
 
 
-NoteView = Literal["active", "favorites", "archived", "trash", "all"]
+NoteView = Literal["active", "favorites", "archived", "trash", "shared", "all"]
 
 
 class NoteListQuery(BaseModel):

@@ -5,12 +5,15 @@ from __future__ import annotations
 import copy
 import uuid
 from datetime import timedelta
+from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import APIError, Conflict, NotFound, ValidationFailed
 from app.db.base import utcnow
-from app.models.note import Folder, Note, Tag
+from app.models.note import CollaboratorRole, Folder, Note, NoteCollaborator, NoteVersion, Tag
+from app.models.notification import NotificationKind
 from app.models.user import User
 from app.repositories.note_repository import (
     FolderRepository,
@@ -19,6 +22,7 @@ from app.repositories.note_repository import (
     TagRepository,
 )
 from app.schemas.notes import (
+    CollaboratorInvite,
     FolderCreate,
     FolderUpdate,
     NoteCreate,
@@ -27,7 +31,13 @@ from app.schemas.notes import (
     TagCreate,
     TagUpdate,
 )
+from app.services.notification_service import NotificationService
 from app.services.rich_text import EMPTY_DOC, to_plain_text
+
+# A new version snapshot is taken when the previous one is older than this (or the change is a
+# restore). Keystroke-level autosaves therefore collapse into one version per writing session.
+VERSION_INTERVAL = timedelta(minutes=5)
+VERSIONS_KEPT = 50
 
 TRASH_RETENTION = timedelta(days=30)
 
@@ -155,9 +165,27 @@ class NoteService:
         )
 
     async def get_note(self, user: User, note_id: uuid.UUID) -> Note:
+        """The user's own note, or one shared with them (any role)."""
         note = await self.notes.get(note_id, user.id)
         if note is None:
+            note = await self.notes.get_shared(note_id, user.id)
+        if note is None:
             raise NotFound("Note not found.")
+        return note
+
+    @staticmethod
+    def access_of(user: User, note: Note) -> str:
+        if note.user_id == user.id:
+            return "owner"
+        for c in note.collaborators:
+            if c.user_id == user.id:
+                return c.role.value
+        return "viewer"
+
+    async def get_editable(self, user: User, note_id: uuid.UUID) -> Note:
+        note = await self.get_note(user, note_id)
+        if self.access_of(user, note) == "viewer":
+            raise Conflict("You can view this note but not change it.", code="NOTE_READ_ONLY")
         return note
 
     async def create_note(self, user: User, payload: NoteCreate) -> Note:
@@ -181,22 +209,35 @@ class NoteService:
         return note
 
     async def update_note(self, user: User, note_id: uuid.UUID, payload: NoteUpdate) -> Note:
-        note = await self.get_note(user, note_id)
+        note = await self.get_editable(user, note_id)
         if note.deleted_at is not None:
             raise Conflict("This note is in the trash. Restore it to edit.", code="NOTE_IN_TRASH")
         if payload.expected_version is not None and payload.expected_version != note.version:
             raise NoteVersionConflict(details={"current_version": note.version})
 
         changes = payload.model_dump(exclude_unset=True, exclude={"expected_version"})
+        # Only a *real* change to title or body counts as an edit: a client re-sending what the
+        # server already has (e.g. an editor normalising on mount) must not bump version /
+        # updated_at, or merely opening a note would move it to the top of the list.
         content_changed = False
+        before_title, before_body = note.title, note.content_json
 
         if "title" in changes and changes["title"] is not None:
-            note.title = changes["title"].strip()
-            content_changed = True
+            new_title = changes["title"].strip()
+            if new_title != note.title:
+                note.title = new_title
+                content_changed = True
         if "content_json" in changes and changes["content_json"] is not None:
-            note.content_json = changes["content_json"]
-            note.plain_text = to_plain_text(note.content_json)
-            content_changed = True
+            if changes["content_json"] != note.content_json:
+                note.content_json = changes["content_json"]
+                note.plain_text = to_plain_text(note.content_json)
+                content_changed = True
+        if "color" in changes and changes["color"] is not None:
+            note.color = changes["color"]
+        if changes.get("clear_reminder"):
+            note.reminder_at = None
+        elif "reminder_at" in changes and changes["reminder_at"] is not None:
+            note.reminder_at = changes["reminder_at"]
         if changes.get("clear_folder"):
             note.folder_id = None
         elif "folder_id" in changes and changes["folder_id"] is not None:
@@ -211,10 +252,159 @@ class NoteService:
             note.archived_at = utcnow() if changes["archived"] else None
 
         if content_changed:
+            await self._snapshot_if_due(user, note, before_title, before_body)
             await self.notes.mark_updated(note)
         await self.db.commit()
         await self.db.refresh(note)
         return note
+
+    # --- version history ---------------------------------------------------------------------
+
+    async def _snapshot_if_due(
+        self, user: User, note: Note, title: str, body: dict[str, Any], *, reason: str = "edit"
+    ) -> None:
+        """Record the *previous* state as a version unless one was taken very recently."""
+        latest = await self.db.scalar(
+            select(NoteVersion)
+            .where(NoteVersion.note_id == note.id)
+            .order_by(NoteVersion.created_at.desc())
+            .limit(1)
+        )
+        if (
+            reason == "edit"
+            and latest is not None
+            and utcnow() - latest.created_at < VERSION_INTERVAL
+        ):
+            return
+        self.db.add(
+            NoteVersion(
+                note_id=note.id,
+                user_id=user.id,
+                note_version=note.version,
+                title=title,
+                content_json=copy.deepcopy(body),
+                plain_text=to_plain_text(body),
+                reason=reason,
+            )
+        )
+        await self.db.flush()
+        stale = list(
+            await self.db.scalars(
+                select(NoteVersion)
+                .where(NoteVersion.note_id == note.id)
+                .order_by(NoteVersion.created_at.desc())
+                .offset(VERSIONS_KEPT)
+            )
+        )
+        for row in stale:
+            await self.db.delete(row)
+
+    async def list_versions(self, user: User, note_id: uuid.UUID) -> list[NoteVersion]:
+        note = await self.get_note(user, note_id)
+        return list(
+            await self.db.scalars(
+                select(NoteVersion)
+                .where(NoteVersion.note_id == note.id)
+                .order_by(NoteVersion.created_at.desc())
+            )
+        )
+
+    async def get_version(
+        self, user: User, note_id: uuid.UUID, version_id: uuid.UUID
+    ) -> NoteVersion:
+        note = await self.get_note(user, note_id)
+        row = await self.db.scalar(
+            select(NoteVersion).where(NoteVersion.id == version_id, NoteVersion.note_id == note.id)
+        )
+        if row is None:
+            raise NotFound("Version not found.")
+        return row
+
+    async def restore_version(self, user: User, note_id: uuid.UUID, version_id: uuid.UUID) -> Note:
+        """Put an older version back as the current body. The current state is snapshotted
+        first, so a restore is itself reversible."""
+        note = await self.get_editable(user, note_id)
+        row = await self.get_version(user, note_id, version_id)
+        await self._snapshot_if_due(
+            user, note, note.title, note.content_json, reason="before_restore"
+        )
+        note.title = row.title
+        note.content_json = copy.deepcopy(row.content_json)
+        note.plain_text = to_plain_text(note.content_json)
+        await self.notes.mark_updated(note)
+        await self.db.commit()
+        await self.db.refresh(note)
+        return note
+
+    # --- collaboration -----------------------------------------------------------------------
+
+    async def invite(
+        self, user: User, note_id: uuid.UUID, payload: CollaboratorInvite
+    ) -> NoteCollaborator:
+        note = await self.get_note(user, note_id)
+        if note.user_id != user.id:
+            raise Conflict("Only the owner can share this note.", code="NOTE_NOT_OWNER")
+        email = payload.email.lower()
+        if email == user.email.lower():
+            raise ValidationFailed("That is you.", details={"fields": {"email": ["That is you"]}})
+        # A share names a specific address, so it binds to that account wherever it lives
+        # (every personal signup is its own tenant).
+        match = await self.db.scalar(select(User).where(User.email == email))
+        existing = next((c for c in note.collaborators if c.email == email), None)
+        if existing is not None:
+            existing.role = payload.role
+            if existing.user_id is None and match is not None:
+                existing.user_id = match.id
+            await self.db.commit()
+            return existing
+        row = NoteCollaborator(
+            note_id=note.id,
+            user_id=match.id if match else None,
+            email=email,
+            role=payload.role,
+            invited_by=user.id,
+        )
+        self.db.add(row)
+        await self.db.flush()
+        if match is not None:
+            await NotificationService(self.db).notify(
+                match,
+                NotificationKind.note_shared,
+                f"{user.display_name} shared a note with you",
+                body=note.title or "Untitled",
+                href=f"/app/notes/{note.id}",
+                dedupe_key=f"note:{note.id}:shared:{match.id}",
+                commit=False,
+            )
+        await self.db.commit()
+        await self.db.refresh(note)
+        return row
+
+    async def update_collaborator(
+        self, user: User, note_id: uuid.UUID, collaborator_id: uuid.UUID, role: CollaboratorRole
+    ) -> NoteCollaborator:
+        note = await self.get_note(user, note_id)
+        if note.user_id != user.id:
+            raise Conflict("Only the owner can change access.", code="NOTE_NOT_OWNER")
+        row = next((c for c in note.collaborators if c.id == collaborator_id), None)
+        if row is None:
+            raise NotFound("Collaborator not found.")
+        row.role = role
+        await self.db.commit()
+        return row
+
+    async def remove_collaborator(
+        self, user: User, note_id: uuid.UUID, collaborator_id: uuid.UUID
+    ) -> None:
+        note = await self.get_note(user, note_id)
+        row = next((c for c in note.collaborators if c.id == collaborator_id), None)
+        if row is None:
+            raise NotFound("Collaborator not found.")
+        # Owners remove anyone; a collaborator may remove themselves (leave).
+        if note.user_id != user.id and row.user_id != user.id:
+            raise Conflict("Only the owner can change access.", code="NOTE_NOT_OWNER")
+        await self.db.delete(row)
+        await self.db.commit()
 
     async def _resolve_tags(self, user: User, tag_ids: list[uuid.UUID]) -> list[Tag]:
         unique = list(dict.fromkeys(tag_ids))

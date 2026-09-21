@@ -59,6 +59,25 @@ def to_plain_text(doc: dict[str, Any] | None) -> str:
     return "\n".join(line for line in lines if line)[:MAX_PLAIN_TEXT]
 
 
+def checklist_progress(doc: dict[str, Any] | None) -> tuple[int, int]:
+    """(checked, total) task items anywhere in the document; (0, 0) when there are none."""
+    done = total = 0
+
+    def walk(node: Any) -> None:
+        nonlocal done, total
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "taskItem":
+            total += 1
+            if (node.get("attrs") or {}).get("checked"):
+                done += 1
+        for child in node.get("content") or []:
+            walk(child)
+
+    walk(doc)
+    return done, total
+
+
 def excerpt(text: str, length: int = 160) -> str:
     text = " ".join(text.split())
     return text if len(text) <= length else text[: length - 1].rstrip() + "…"

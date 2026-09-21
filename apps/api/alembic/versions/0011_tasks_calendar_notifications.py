@@ -24,7 +24,9 @@ def upgrade() -> None:
     op.add_column("tasks", sa.Column("calendar_id", sa.String(length=255), nullable=True))
     op.add_column("tasks", sa.Column("calendar_event_id", sa.String(length=255), nullable=True))
     op.add_column("tasks", sa.Column("calendar_event_url", sa.String(length=1000), nullable=True))
-    op.add_column("tasks", sa.Column("calendar_synced_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "tasks", sa.Column("calendar_synced_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.add_column("tasks", sa.Column("calendar_error", sa.Text(), nullable=True))
 
     op.create_table(
@@ -39,10 +41,16 @@ def upgrade() -> None:
         sa.Column("dedupe_key", sa.String(length=200), nullable=True),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
