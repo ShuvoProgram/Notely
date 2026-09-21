@@ -49,10 +49,10 @@ test("walkthrough", async ({ page }, testInfo) => {
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/${tag}-selection.png` });
 
-  await page.goto("/app/connections");
+  await page.goto("/app/settings/connections");
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${OUT}/${tag}-connections.png`, fullPage: true });
-  await page.goto("/app/connections/notion");
+  await page.goto("/app/settings/connections/notion");
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${OUT}/${tag}-provider.png`, fullPage: true });
   await page.getByRole("button", { name: "Connect" }).first().click();

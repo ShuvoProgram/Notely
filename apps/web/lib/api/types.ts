@@ -9,6 +9,8 @@ export interface User {
   avatar_url: string | null;
   has_password: boolean;
   created_at: string;
+  /** In-app notification switches by kind group; a missing key means on. */
+  notifications: Record<string, boolean>;
 }
 
 export interface UserSession {
@@ -46,6 +48,7 @@ export interface ChangePasswordInput {
 export interface UpdateProfileInput {
   display_name?: string;
   avatar_url?: string | null;
+  notifications?: Record<string, boolean>;
 }
 
 // --- notes (mirrors apps/api/app/schemas/notes.py) ---------------------------------------------
@@ -164,11 +167,19 @@ export interface Task {
   title: string;
   description: string | null;
   due_date: string | null;
+  /** "HH:MM:SS" in `timezone`; null means all day. */
+  due_time: string | null;
+  timezone: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   source: "manual" | "ai";
   external_provider: string | null;
   external_task_id: string | null;
+  calendar_id: string | null;
+  calendar_event_id: string | null;
+  calendar_event_url: string | null;
+  calendar_synced_at: string | null;
+  calendar_error: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -178,6 +189,8 @@ export interface TaskCreateInput {
   title: string;
   description?: string | null;
   due_date?: string | null;
+  due_time?: string | null;
+  timezone?: string | null;
   priority?: TaskPriority;
   note_id?: string | null;
   source?: "manual" | "ai";
@@ -473,4 +486,39 @@ export interface ConnectionTestResult {
   healthy: boolean;
   steps: { name: string; ok: boolean; detail: string }[];
   connection: Connection;
+}
+
+// --- notifications (mirrors apps/api/app/api/v1/notifications.py) ------------------------------
+
+export type NotificationKind =
+  | "task_due_soon"
+  | "task_overdue"
+  | "task_completed"
+  | "integration_connected"
+  | "integration_disconnected"
+  | "integration_auth_required"
+  | "calendar_synced"
+  | "calendar_sync_failed";
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string | null;
+  href: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationsResponse {
+  items: AppNotification[];
+  unread: number;
+}
+
+export interface CalendarStatus {
+  connected: boolean;
+  healthy: boolean;
+  can_write: boolean;
+  account: string | null;
+  status: string | null;
 }

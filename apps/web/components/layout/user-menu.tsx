@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, Settings, UserRound } from "lucide-react";
+import { LifeBuoy, LogOut, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser, useLogout } from "@/features/auth/hooks";
+import { LEGAL } from "@/lib/legal";
 import type { User } from "@/lib/api/types";
 
 export function initialsOf(name: string): string {
@@ -49,13 +50,13 @@ export function UserMenu({ initialUser }: { initialUser: User }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/app/settings/profile">
-            <UserRound aria-hidden /> Profile
+            <UserRound aria-hidden /> Your account
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/app/settings">
-            <Settings aria-hidden /> Settings
-          </Link>
+          <a href={`mailto:${LEGAL.contactEmail}?subject=Notely%20help`}>
+            <LifeBuoy aria-hidden /> Help &amp; support
+          </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => logout.mutate()} disabled={logout.isPending}>

@@ -25,7 +25,7 @@ async function script(page: Page, replies: unknown[]) {
 }
 
 async function startMcpConnect(page: Page, url: string) {
-  await page.goto("/app/connections/mcp_server");
+  await page.goto("/app/settings/connections/mcp_server");
   await page.getByRole("button", { name: /^Connect (MCP server|Notion)$/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("You're in control")).toBeVisible();
@@ -41,12 +41,12 @@ async function connectMcp(page: Page) {
 
 test("marketplace lists providers with status and links to details", async ({ page }) => {
   await signup(page);
-  await page.goto("/app/connections");
+  await page.goto("/app/settings/connections");
   const card = page.getByRole("article").filter({ hasText: "MCP server" });
   await expect(card).toBeVisible();
   await expect(card.getByText("Not connected")).toBeVisible();
   await card.getByRole("link", { name: "MCP server details" }).click();
-  await expect(page).toHaveURL(/\/app\/connections\/mcp_server$/);
+  await expect(page).toHaveURL(/\/app\/settings\/connections\/mcp_server$/);
   await expect(page.getByRole("heading", { name: "MCP server" })).toBeVisible();
 });
 
@@ -64,7 +64,7 @@ test("connect an MCP server, test it, use its tools with approval, then disconne
   await expect(page.getByText("4 tool(s) available")).toBeVisible();
 
   // The marketplace now shows it under Connected.
-  await page.goto("/app/connections");
+  await page.goto("/app/settings/connections");
   await page.getByRole("button", { name: /^Connected/ }).click(); // category rail filter
   await expect(page.getByRole("article").filter({ hasText: "MCP server" }).getByText("Connected", { exact: true })).toBeVisible();
 
@@ -101,7 +101,7 @@ test("connect an MCP server, test it, use its tools with approval, then disconne
   await expect(page.getByText("create page on Demo Docs")).toBeVisible();
 
   // One dialog: disconnect, with local data deletion as a separate, explicit checkbox.
-  await page.goto("/app/connections/mcp_server");
+  await page.goto("/app/settings/connections/mcp_server");
   await page.getByRole("button", { name: "Disconnect" }).click();
   await expect(page.getByText(/Leave your data in MCP server untouched/)).toBeVisible();
   await page.getByLabel(/Also delete local data/).check();
@@ -120,7 +120,7 @@ test("an unreachable server yields a categorised error and an error status", asy
 
 test("marketplace only offers vendors you can connect to; connecting is always the vendor's consent screen", async ({ page }) => {
   await signup(page);
-  await page.goto("/app/connections");
+  await page.goto("/app/settings/connections");
   // Vendors with an official MCP server are always available (no app registration needed) ...
   for (const name of ["Notion", "Jira", "ClickUp", "Stripe", "PayPal", "MCP server"]) {
     await expect(page.getByRole("link", { name: `${name} details` })).toBeVisible();
@@ -132,7 +132,7 @@ test("marketplace only offers vendors you can connect to; connecting is always t
   await expect(page.getByText("Not available here")).toHaveCount(0);
 
   // One click: consent card → vendor screen. Nothing to type, nothing to paste.
-  await page.goto("/app/connections/notion");
+  await page.goto("/app/settings/connections/notion");
   await page.getByRole("button", { name: /^Connect (MCP server|Notion)$/ }).click();
   const consent = page.getByRole("dialog");
   await expect(consent.getByText("You're in control")).toBeVisible();

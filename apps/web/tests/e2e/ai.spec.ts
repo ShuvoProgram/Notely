@@ -84,8 +84,8 @@ test("write actions pause for review; approving one of two executes only that on
   await page.goto("/app/tasks");
   await expect(page.getByText("Finalize pricing")).toBeVisible();
   await expect(page.getByText("Email the team")).toHaveCount(0);
-  await expect(page.getByText("high priority")).toBeVisible();
-  await expect(page.getByText("AI", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("High", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("AI", { exact: true }).first()).toBeAttached(); // the AI badge is hidden on phones
 });
 
 test("note actions preview a suggestion and only change the note on Insert", async ({ page }) => {
@@ -124,7 +124,7 @@ test("extract tasks offers a checklist and adds the chosen ones", async ({ page 
   await page.goto("/app/tasks");
   await expect(page.getByText("Call Sam")).toBeVisible();
   await expect(page.getByText("Send the invoice")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "From note" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open source note" })).toBeVisible();
 });
 
 test("cross-app request: plan is shown and ticked off, writes are verified after approval", async ({ page }) => {

@@ -147,7 +147,7 @@ export function HomeDashboard({ user }: { user: User }) {
                 <ul className="flex flex-wrap gap-2">
                   {connected.map((p) => (
                     <li key={p.id}>
-                      <Link href={`/app/connections/${p.id}`} className="flex items-center gap-2 rounded-full bg-muted/40 py-1 pl-1 pr-3 text-xs ring-1 ring-glass-border hover:bg-muted/70" title={p.name}>
+                      <Link href={`/app/settings/connections/${p.id}`} className="flex items-center gap-2 rounded-full bg-muted/40 py-1 pl-1 pr-3 text-xs ring-1 ring-glass-border hover:bg-muted/70" title={p.name}>
                         <ProviderLogo provider={p} size="sm" className="size-6 rounded-md" /> {p.name}
                       </Link>
                     </li>
@@ -157,7 +157,7 @@ export function HomeDashboard({ user }: { user: User }) {
                 <p className="text-sm text-muted-foreground">Connect Gmail, Notion, Jira and more so the assistant can work across your tools.</p>
               )}
               <Button variant="link" asChild className="mt-2 px-0">
-                <Link href="/app/connections">
+                <Link href="/app/settings/connections">
                   {connected.length ? "Manage connections" : "Browse integrations"} <ArrowRight aria-hidden />
                 </Link>
               </Button>

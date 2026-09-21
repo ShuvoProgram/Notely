@@ -31,7 +31,7 @@ test("global search opens by click and shortcut, searches notes, navigates, and 
   const dialog = page.getByRole("dialog", { name: "Search and commands" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("option", { name: /New note/ })).toBeVisible();
-  await expect(dialog.getByRole("option", { name: /Connections/ })).toBeVisible();
+  await expect(dialog.getByRole("option", { name: /Settings/ })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 
@@ -49,7 +49,7 @@ test("global search opens by click and shortcut, searches notes, navigates, and 
   // No results: a calm empty state, not a crash.
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("zzz-nothing-here-zzz");
-  await expect(dialog.getByRole("option", { name: /Search everything for/ })).toBeVisible();
+  await expect(dialog.getByText("Nothing matches yet.")).toBeVisible();
   await page.keyboard.press("Escape");
 
   expect(errors).toEqual([]);

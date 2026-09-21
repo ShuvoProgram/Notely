@@ -44,12 +44,12 @@ test("create a note, autosave, reload, and find it via search", async ({ page })
   await expect(list.getByText("Product launch plan")).toBeVisible();
   await expect(list.getByText(/Ship the pricing page/)).toBeVisible();
 
-  // Search uses stemmed full-text search: "launch" matches "launching" in the body.
-  await page.goto("/app/search");
-  await page.getByRole("textbox", { name: "Search" }).fill("launching pricing");
-  const hit = page.getByRole("link", { name: /Product launch plan/ });
+  // Global search (⌘K) uses stemmed full-text search: "launch" matches "launching" in the body.
+  await page.goto("/app/tasks");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.keyboard.type("launching pricing");
+  const hit = page.getByRole("dialog").getByRole("option", { name: /Product launch plan/ });
   await expect(hit).toBeVisible();
-  await expect(hit.getByText("Notely")).toBeVisible();
   await hit.click();
   await expect(page.getByLabel("Note title")).toHaveValue("Product launch plan");
 });

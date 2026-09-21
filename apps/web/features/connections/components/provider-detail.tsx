@@ -60,7 +60,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
       toast.error("Access was refused by the vendor. If you saw “Access blocked … verification process”, this deployment's app is still in testing mode — see the status below.", { duration: 12_000 });
     } else if (error) toast.error(CALLBACK_ERRORS[error] ?? "This action couldn't be completed. Review the details and try again.");
     queryClient.invalidateQueries({ queryKey: ["integrations"] });
-    router.replace(`/app/connections/${providerId}`);
+    router.replace(`/app/settings/connections/${providerId}`);
   }, [params, providerId, queryClient, router]);
 
   const invalidate = () => {
@@ -118,7 +118,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
 
   return (
     <div className="space-y-6">
-      <Link href="/app/connections" className="inline-flex items-center gap-1 rounded text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/app/settings/connections" className="inline-flex items-center gap-1 rounded text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> All apps
       </Link>
 

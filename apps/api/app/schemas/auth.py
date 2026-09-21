@@ -64,6 +64,8 @@ class UserOut(BaseModel):
     avatar_url: str | None
     has_password: bool
     created_at: datetime
+    # In-app notification switches (per kind group); absent keys mean "on".
+    notifications: dict[str, bool] = {}
 
 
 class SessionOut(BaseModel):

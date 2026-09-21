@@ -22,8 +22,7 @@ export function SidebarNav({ nav, orientation = "vertical", onNavigate, classNam
   const pathname = usePathname();
   const items = navSets[nav];
   const phone = orientation === "horizontal";
-  // The bottom bar only has room for five; Settings is reachable from the account menu.
-  const visible = phone && nav === "primary" ? items.filter((i) => i.label !== "Settings" && i.label !== "Home") : items;
+  const visible = items;
   return (
     <ul className={cn(phone ? "grid auto-cols-fr grid-flow-col" : "flex flex-col gap-0.5", className)}>
       {visible.map((item) => {

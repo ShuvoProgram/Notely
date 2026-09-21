@@ -51,6 +51,11 @@ def user_out(user: Any) -> UserOut:
         avatar_url=user.avatar_url,
         has_password=user.password_hash is not None,
         created_at=user.created_at,
+        notifications=(
+            dict((user.preferences or {}).get("notifications") or {})
+            if isinstance(user.preferences, dict)
+            else {}
+        ),
     )
 
 

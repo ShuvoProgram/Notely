@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Plus, Search, Sparkles } from "lucide-react";
+import { ExternalLink, FileText, Plus, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -21,9 +21,10 @@ import {
 } from "@/components/ui/command";
 import { Kbd } from "@/components/ui/kbd";
 import { messageFor } from "@/features/auth/components/auth-form-error";
-import { notesApi } from "@/features/notes/api";
+import { notesApi, searchApi } from "@/features/notes/api";
 import { useCreateNote } from "@/features/notes/hooks";
 import { primaryNav } from "@/lib/navigation";
+import { PROVIDER_LABELS } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,13 +48,35 @@ export function CommandPalette({ className }: { className?: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // No query: recent notes. With a query: full-text search (stemmed, ranked) across notes and
+  // connected tools, so the palette is the one search box.
+  const searching = q.trim().length >= 2;
   const notes = useQuery({
-    queryKey: ["notes", "palette", q],
-    queryFn: () => notesApi.list({ q: q.trim() || undefined, limit: 6 }),
-    enabled: open,
+    queryKey: ["notes", "palette", "recent"],
+    queryFn: () => notesApi.list({ limit: 6 }),
+    enabled: open && !searching,
     staleTime: 10_000,
     retry: false,
   });
+
+  // Cross-app search (connected tools too) once there is a real query.
+  const everything = useQuery({
+    queryKey: ["search", "palette", q.trim()],
+    queryFn: () => searchApi.search(q.trim(), 12),
+    enabled: open && searching,
+    staleTime: 15_000,
+    retry: false,
+  });
+  const hits = everything.data?.hits ?? [];
+  const external = hits.filter((h) => h.source !== "notely");
+  const noteRows = searching
+    ? hits
+        .filter((h) => h.source === "notely" && h.url)
+        .map((h) => ({ id: h.id, title: h.title, excerpt: h.snippet, href: h.url as string }))
+    : (notes.data?.notes ?? []).map((n) => ({ id: n.id, title: n.title, excerpt: n.excerpt, href: `/app/notes/${n.id}` }));
+  const busy = notes.isFetching || everything.isFetching;
+  const failed = searching ? everything.isError : notes.isError;
+  const failure = searching ? everything.error : notes.error;
 
   const go = (href: string) => {
     setOpen(false);
@@ -80,12 +103,12 @@ export function CommandPalette({ className }: { className?: string }) {
         <Search aria-hidden />
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen} title="Search and commands" description="Jump to a page, create a note, or open one by title">
-        <CommandInput placeholder="Search notes, or type a command…" value={q} onValueChange={setQ} loading={notes.isFetching} />
+        <CommandInput placeholder="Search notes, or type a command…" value={q} onValueChange={setQ} loading={busy} />
         <CommandList>
-          <CommandEmpty>{notes.isFetching ? "Searching…" : "Nothing matches yet."}</CommandEmpty>
-          {notes.isError ? (
+          <CommandEmpty>{busy ? "Searching…" : "Nothing matches yet."}</CommandEmpty>
+          {failed ? (
             <p role="alert" className="px-3 py-2 text-xs text-destructive">
-              Notes couldn’t be searched right now ({messageFor(notes.error)}). Commands still work.
+              Notes couldn’t be searched right now ({messageFor(failure)}). Commands still work.
             </p>
           ) : null}
           <CommandGroup heading="Actions">
@@ -105,23 +128,38 @@ export function CommandPalette({ className }: { className?: string }) {
               <CommandItemText title="New note" />
               <CommandItemMeta>Action</CommandItemMeta>
             </CommandItem>
-            {q.trim() ? (
-              <CommandItem value={`search ${q}`} onSelect={() => go(`/app/search?q=${encodeURIComponent(q.trim())}`)}>
-                <Search aria-hidden />
-                <CommandItemText title={<>Search everything for “{q.trim()}”</>} />
-                <CommandItemMeta>Action</CommandItemMeta>
-              </CommandItem>
-            ) : null}
+
           </CommandGroup>
-          {notes.data?.notes.length ? (
+          {noteRows.length ? (
             <>
               <CommandSeparator />
-              <CommandGroup heading="Notes">
-                {notes.data.notes.map((n) => (
-                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)}>
+              <CommandGroup heading={searching ? "Notes" : "Recent notes"}>
+                {noteRows.map((n) => (
+                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(n.href)}>
                     <FileText aria-hidden />
                     <CommandItemText title={n.title || "Untitled"} description={n.excerpt || undefined} />
                     <CommandItemMeta>Note</CommandItemMeta>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          ) : null}
+          {external.length ? (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="From your tools">
+                {external.map((h) => (
+                  <CommandItem
+                    key={`${h.source}-${h.id}`}
+                    value={`ext ${h.title} ${h.snippet ?? ""} ${h.id}`}
+                    onSelect={() => {
+                      if (h.url) window.open(h.url, "_blank", "noopener,noreferrer");
+                      setOpen(false);
+                    }}
+                  >
+                    <ExternalLink aria-hidden />
+                    <CommandItemText title={h.title} description={h.snippet ?? undefined} />
+                    <CommandItemMeta>{PROVIDER_LABELS[h.source] ?? h.source}</CommandItemMeta>
                   </CommandItem>
                 ))}
               </CommandGroup>

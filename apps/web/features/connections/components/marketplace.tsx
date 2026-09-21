@@ -159,7 +159,7 @@ export function Marketplace() {
                   <ProviderCard
                     key={p.id}
                     provider={p}
-                    onOpen={() => router.push(`/app/connections/${p.id}`)}
+                    onOpen={() => router.push(`/app/settings/connections/${p.id}`)}
                     onConnect={() => setConnecting({ provider: p, method: p.connect_methods.includes("oauth") ? "oauth" : "mcp" })}
                   />
                 ))}
@@ -183,7 +183,7 @@ function ProviderCard({ provider, onOpen, onConnect }: { provider: Provider; onO
   return (
     <li className="min-w-0">
       <article className="glass lift group relative flex h-full min-w-0 flex-col rounded-2xl p-4">
-        <Link href={`/app/connections/${provider.id}`} className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${provider.name} details`} />
+        <Link href={`/app/settings/connections/${provider.id}`} className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${provider.name} details`} />
         <div className="flex items-start gap-3">
           <ProviderLogo provider={provider} />
           <div className="min-w-0 flex-1">

@@ -12,6 +12,7 @@ import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { FolderSidebar } from "@/features/folders/components/folder-sidebar";
+import { NotificationBell } from "@/features/notifications/components/notification-bell";
 import type { User } from "@/lib/api/types";
 
 /**
@@ -83,6 +84,7 @@ export function AppShell({ user, children }: { user: User; children: React.React
             <CommandPalette />
           </div>
           <div className="flex items-center gap-1">
+            <NotificationBell />
             <ThemeToggle />
             <UserMenu initialUser={user} />
           </div>
