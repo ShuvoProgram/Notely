@@ -485,3 +485,33 @@
   padding-left: 0.75rem;
   color: var(--muted-foreground);
 }
+
+/* --- Note tints ------------------------------------------------------------------------------- */
+/* Low-chroma paper colours: enough to tell notes apart, never enough to fight the text. */
+[data-note-color="default"] { --note-tint: transparent; --note-tint-strong: transparent; }
+[data-note-color="cream"] { --note-tint: oklch(0.86 0.045 85 / 0.09); --note-tint-strong: oklch(0.86 0.09 85); }
+[data-note-color="yellow"] { --note-tint: oklch(0.88 0.08 95 / 0.09); --note-tint-strong: oklch(0.88 0.14 95); }
+[data-note-color="green"] { --note-tint: oklch(0.8 0.08 150 / 0.09); --note-tint-strong: oklch(0.8 0.14 150); }
+[data-note-color="blue"] { --note-tint: oklch(0.8 0.08 240 / 0.1); --note-tint-strong: oklch(0.8 0.14 240); }
+[data-note-color="purple"] { --note-tint: oklch(0.78 0.09 300 / 0.1); --note-tint-strong: oklch(0.78 0.14 300); }
+[data-note-color="rose"] { --note-tint: oklch(0.8 0.08 10 / 0.1); --note-tint-strong: oklch(0.8 0.14 10); }
+.light [data-note-color="cream"] { --note-tint: oklch(0.96 0.03 85); }
+.light [data-note-color="yellow"] { --note-tint: oklch(0.97 0.05 95); }
+.light [data-note-color="green"] { --note-tint: oklch(0.96 0.04 150); }
+.light [data-note-color="blue"] { --note-tint: oklch(0.96 0.03 240); }
+.light [data-note-color="purple"] { --note-tint: oklch(0.96 0.03 300); }
+.light [data-note-color="rose"] { --note-tint: oklch(0.96 0.03 10); }
+.note-surface {
+  background-color: color-mix(in oklch, var(--background) 72%, var(--card));
+  background-image: linear-gradient(var(--note-tint), var(--note-tint));
+  border: 1px solid var(--glass-border);
+}
+/* Completed checklist items recede without turning into visual noise. */
+.notely-editor li[data-checked="true"] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+}
+.notely-editor ul[data-type="taskList"] li > label {
+  margin-top: 0.4em;
+}

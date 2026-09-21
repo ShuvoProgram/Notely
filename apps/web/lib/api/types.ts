@@ -82,6 +82,32 @@ export interface Folder {
   updated_at: string;
 }
 
+export type NoteColor = "default" | "cream" | "yellow" | "green" | "blue" | "purple" | "rose";
+export type CollaboratorRole = "viewer" | "editor";
+export type NoteAccess = "owner" | "editor" | "viewer";
+
+export interface Collaborator {
+  id: string;
+  email: string;
+  role: CollaboratorRole;
+  user_id: string | null;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface NoteVersion {
+  id: string;
+  note_version: number;
+  title: string;
+  plain_text: string;
+  reason: "edit" | "before_restore" | string;
+  created_at: string;
+}
+
+export interface NoteVersionDetail extends NoteVersion {
+  content_json: TipTapDoc;
+}
+
 export interface NoteSummary {
   id: string;
   title: string;
@@ -92,7 +118,13 @@ export interface NoteSummary {
   archived_at: string | null;
   deleted_at: string | null;
   version: number;
+  color: NoteColor;
+  reminder_at: string | null;
+  checklist: { done: number; total: number } | null;
+  shared: boolean;
+  access: NoteAccess;
   created_at: string;
+  /** Last real edit (title, body or metadata). Opening/reading a note never changes it. */
   updated_at: string;
 }
 
@@ -101,9 +133,10 @@ export interface Note extends NoteSummary {
   plain_text: string;
   summary: string | null;
   metadata: Record<string, unknown>;
+  collaborators: Collaborator[];
 }
 
-export type NoteView = "active" | "favorites" | "archived" | "trash" | "all";
+export type NoteView = "active" | "favorites" | "archived" | "trash" | "shared" | "all";
 
 export interface NoteListParams {
   view?: NoteView;
@@ -122,6 +155,9 @@ export interface NoteCreateInput {
 }
 
 export interface NoteUpdateInput {
+  color?: NoteColor;
+  reminder_at?: string | null;
+  clear_reminder?: boolean;
   title?: string;
   content_json?: TipTapDoc;
   folder_id?: string;
@@ -498,7 +534,9 @@ export type NotificationKind =
   | "integration_disconnected"
   | "integration_auth_required"
   | "calendar_synced"
-  | "calendar_sync_failed";
+  | "calendar_sync_failed"
+  | "note_reminder"
+  | "note_shared";
 
 export interface AppNotification {
   id: string;

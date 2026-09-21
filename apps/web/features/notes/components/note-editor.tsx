@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, Copy, Folder as FolderIcon, MoreHorizontal, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Bell, ChevronRight, Copy, Eye, Folder as FolderIcon, History, MoreHorizontal, Palette, RotateCcw, Sparkles, Star, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -29,18 +29,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NOTE_AI_ACTIONS, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
+import { ReminderPopover } from "@/features/notes/components/reminder-popover";
 import { RichTextEditor } from "@/features/notes/components/rich-text-editor";
 import { SaveStatusIndicator } from "@/features/notes/components/save-status";
+import { ShareDialog } from "@/features/notes/components/share-dialog";
 import { TagPicker } from "@/features/notes/components/tag-picker";
+import { VersionHistoryDialog } from "@/features/notes/components/version-history-dialog";
 import { clearDraft, readDraft, shouldRestoreDraft } from "@/features/notes/drafts";
 import { useFolders, useNote, useNoteActions, useUpdateNote } from "@/features/notes/hooks";
+import { editedLabel, NOTE_COLORS } from "@/features/notes/lib";
 import { useAutosave } from "@/features/notes/use-autosave";
 import type { Editor } from "@tiptap/react";
 
 import { ApiError } from "@/lib/api/client";
-import type { Note, NoteAIAction, TipTapDoc } from "@/lib/api/types";
+import type { Note, NoteAIAction, NoteColor, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export function NoteEditor({ noteId }: { noteId: string }) {
@@ -48,7 +53,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
 
   if (isPending) {
     return (
-      <div className="space-y-4" aria-busy>
+      <div className="mx-auto w-full max-w-6xl space-y-4" aria-busy>
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-6 w-1/3" />
         <Skeleton className="h-64 w-full" />
@@ -67,13 +72,43 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   return <LoadedNoteEditor key={note.id} note={note} />;
 }
 
+/** Swatch row used inside the "Change background" submenu. */
+function ColorSwatches({ value, onPick }: { value: NoteColor; onPick: (c: NoteColor) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 p-2" role="radiogroup" aria-label="Note background">
+      {NOTE_COLORS.map((c) => (
+        <Tooltip key={c.value}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={value === c.value}
+              aria-label={c.label}
+              onClick={() => onPick(c.value)}
+              className={cn(
+                "size-6 rounded-full outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover",
+                c.swatch,
+                value === c.value && "ring-2 ring-foreground ring-offset-2 ring-offset-popover",
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipContent>{c.label}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
+  );
+}
+
 function LoadedNoteEditor({ note }: { note: Note }) {
   const router = useRouter();
   const autosave = useAutosave(note);
   const update = useUpdateNote();
   const actions = useNoteActions();
   const { data: folders = [] } = useFolders();
-  const readOnly = note.deleted_at !== null;
+  const inTrash = note.deleted_at !== null;
+  const viewer = note.access === "viewer";
+  const owner = note.access !== "viewer" && note.access !== "editor"; // absent on older cache rows → owner
+  const readOnly = inTrash || viewer;
 
   // Restore an unsaved local draft (e.g. after a crash) before the editor mounts.
   const [initial] = React.useState(() => {
@@ -87,6 +122,9 @@ function LoadedNoteEditor({ note }: { note: Note }) {
     return { title, content: body, restored: false };
   });
   const [title, setTitle] = React.useState(initial.title);
+  // A restore swaps the whole document; bumping this key remounts the editor with it.
+  const [docKey, setDocKey] = React.useState(0);
+  const [content, setContent] = React.useState(initial.content);
   const editorRef = React.useRef<Editor | null>(null);
   const [editorInstance, setEditorInstance] = React.useState<Editor | null>(null);
   const [aiAction, setAiAction] = React.useState<NoteAIAction | null>(null);
@@ -109,60 +147,177 @@ function LoadedNoteEditor({ note }: { note: Note }) {
     update.mutate({ id: note.id, input }, { onSuccess: () => ok && toast.success(ok), onError: (e) => toast.error(messageFor(e)) });
 
   const [confirmPurge, setConfirmPurge] = React.useState(false);
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [reminderOpen, setReminderOpen] = React.useState(false);
 
   const folderName = note.folder_id ? folders.find((f) => f.id === note.folder_id)?.name : null;
+  const collaborators = note.collaborators ?? [];
   const suggestion = aiAction ? (
     <NoteAIPanel key={aiAction} noteId={note.id} action={aiAction} editor={editorInstance} onClose={() => setAiAction(null)} />
   ) : null;
 
+  const setReminder = (iso: string | null) => meta(iso ? { reminder_at: iso } : { clear_reminder: true }, iso ? "Reminder set" : "Reminder removed");
+
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-6 2xl:grid-cols-[minmax(0,1fr)_300px]">
-    <div className="surface flex min-h-full min-w-0 flex-col rounded-2xl px-5 py-6 sm:px-8 sm:py-8">
-      <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
-        <Link href="/app/notes" className="inline-flex items-center gap-1 rounded hover:text-foreground">
-          <ArrowLeft className="size-3.5 md:hidden" aria-hidden /> Notes
-        </Link>
-        {folderName ? (
-          <>
-            <ChevronRight className="size-3" aria-hidden />
-            <Link href={`/app/notes?folder=${note.folder_id}`} className="rounded hover:text-foreground">
-              {folderName}
+      <article data-note-color={note.color} className="note-surface flex min-h-full min-w-0 flex-col rounded-2xl px-5 py-5 sm:px-10 sm:py-7">
+        {/* Top row: where you are on the left, what you can do on the right. */}
+        <div className="mb-6 flex items-center gap-2">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <Link href="/app/notes" className="inline-flex items-center gap-1 rounded hover:text-foreground">
+              <ArrowLeft className="size-3.5 md:hidden" aria-hidden /> Notes
             </Link>
-          </>
-        ) : null}
-      </nav>
-      {readOnly ? (
-        <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-          <span>This note is in the trash. Restore it to keep editing.</span>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => actions.restore.mutate(note.id, { onSuccess: () => toast.success("Note restored") })}>
-              <RotateCcw aria-hidden /> Restore
+            {folderName ? (
+              <>
+                <ChevronRight className="size-3 shrink-0" aria-hidden />
+                <Link href={`/app/notes?folder=${note.folder_id}`} className="truncate rounded hover:text-foreground">
+                  {folderName}
+                </Link>
+              </>
+            ) : null}
+          </nav>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <Button variant="outline" size="sm" onClick={() => setShareOpen(true)} disabled={inTrash} className="h-8 rounded-lg bg-background/60">
+              <Users aria-hidden /> Share
+              {collaborators.length ? <span className="text-muted-foreground">{collaborators.length}</span> : null}
             </Button>
-            <Button size="sm" variant="destructive" onClick={() => setConfirmPurge(true)}>
-              Delete forever
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={note.is_favorite}
+              disabled={readOnly}
+              onClick={() => meta({ is_favorite: !note.is_favorite })}
+            >
+              <Star className={cn(note.is_favorite && "fill-warning text-warning")} aria-hidden />
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Note actions">
+                  <MoreHorizontal aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger disabled={readOnly}>
+                    <Palette aria-hidden /> Change background
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto">
+                    <ColorSwatches value={note.color} onPick={(color) => meta({ color })} />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem disabled={readOnly} onSelect={() => setReminderOpen(true)}>
+                  <Bell aria-hidden /> {note.reminder_at ? "Edit reminder" : "Remind me"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                  <History aria-hidden /> Version history
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={inTrash}
+                  onSelect={() =>
+                    actions.duplicate.mutate(note.id, {
+                      onSuccess: (copy) => {
+                        toast.success("Duplicated");
+                        router.push(`/app/notes/${copy.id}`);
+                      },
+                      onError: (e) => toast.error(messageFor(e)),
+                    })
+                  }
+                >
+                  <Copy aria-hidden /> Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger disabled={readOnly || !owner}>
+                    <FolderIcon aria-hidden /> Move to folder
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-56">
+                    <DropdownMenuRadioGroup value={note.folder_id ?? ""} onValueChange={(v) => meta(v ? { folder_id: v } : { clear_folder: true }, "Moved")}>
+                      <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
+                      {folders.length ? <DropdownMenuSeparator /> : null}
+                      {folders.map((f) => (
+                        <DropdownMenuRadioItem key={f.id} value={f.id}>
+                          {f.name}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem disabled={readOnly || !owner} onSelect={() => meta({ archived: !note.archived_at }, note.archived_at ? "Unarchived" : "Archived")}>
+                  {note.archived_at ? <ArchiveRestore aria-hidden /> : <Archive aria-hidden />}
+                  {note.archived_at ? "Unarchive" : "Archive"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {inTrash ? (
+                  <>
+                    <DropdownMenuItem onSelect={() => actions.restore.mutate(note.id)}>
+                      <RotateCcw aria-hidden /> Restore
+                    </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onSelect={() => setConfirmPurge(true)}>
+                      <Trash2 aria-hidden /> Delete forever
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={!owner}
+                    onSelect={() =>
+                      void autosave.flush().then(() =>
+                        actions.trash.mutate(note.id, {
+                          onSuccess: () => {
+                            toast.success("Moved to trash", {
+                              action: { label: "Undo", onClick: () => actions.restore.mutate(note.id) },
+                            });
+                            router.push("/app/notes");
+                          },
+                        }),
+                      )
+                    }
+                  >
+                    <Trash2 aria-hidden /> Move to trash
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
-      ) : null}
 
-      {autosave.status === "conflict" ? (
-        <Alert className="mb-4 border-warning/40 bg-warning/10">
-          <AlertTitle>This note changed in another tab or device</AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>Your local edits are safe until you choose.</span>
-            <span className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => void autosave.loadTheirs()}>
-                Load latest
+        {inTrash ? (
+          <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+            <span>This note is in the trash. Restore it to keep editing.</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => actions.restore.mutate(note.id, { onSuccess: () => toast.success("Note restored") })}>
+                <RotateCcw aria-hidden /> Restore
               </Button>
-              <Button size="sm" onClick={() => void autosave.keepMine()}>
-                Keep mine
+              <Button size="sm" variant="destructive" onClick={() => setConfirmPurge(true)}>
+                Delete forever
               </Button>
-            </span>
-          </AlertDescription>
-        </Alert>
-      ) : null}
+            </div>
+          </div>
+        ) : viewer ? (
+          <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-glass-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            <Eye className="size-4" aria-hidden /> Shared with you as a viewer — you can read this note but not change it.
+          </div>
+        ) : null}
 
-      <div className="mb-2 flex items-start gap-2">
+        {autosave.status === "conflict" ? (
+          <Alert className="mb-4 border-warning/40 bg-warning/10">
+            <AlertTitle>This note changed in another tab or device</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>Your local edits are safe until you choose.</span>
+              <span className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => void autosave.loadTheirs()}>
+                  Load latest
+                </Button>
+                <Button size="sm" onClick={() => void autosave.keepMine()}>
+                  Keep mine
+                </Button>
+              </span>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <input
           aria-label="Note title"
           placeholder="Untitled"
@@ -179,153 +334,104 @@ function LoadedNoteEditor({ note }: { note: Note }) {
               }
             }
           }}
-          className={cn(
-            "min-w-0 flex-1 bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/40 sm:text-4xl",
-          )}
+          className="mb-3 w-full min-w-0 bg-transparent text-3xl font-semibold leading-tight tracking-tight outline-none placeholder:text-muted-foreground/40 sm:text-[2.125rem]"
         />
-        <div className="flex shrink-0 items-center gap-1">
-          <SaveStatusIndicator status={autosave.status} message={autosave.errorMessage} />
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={note.is_favorite ? "Remove from favorites" : "Add to favorites"}
-            aria-pressed={note.is_favorite}
+
+        {/* Meta row: tags · folder · reminder · shared · edited · save state. Quiet by design. */}
+        <div className="mb-7 flex flex-wrap items-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
+          <TagPicker selected={note.tags ?? []} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
+          <span aria-hidden className="px-1 opacity-50">·</span>
+          <span className="inline-flex h-7 items-center gap-1 px-1">
+            <FolderIcon className="size-3.5" aria-hidden />
+            {folderName ?? "No folder"}
+          </span>
+          <span aria-hidden className="px-1 opacity-50">·</span>
+          <ReminderPopover
+            value={note.reminder_at}
+            onChange={setReminder}
             disabled={readOnly}
-            onClick={() => meta({ is_favorite: !note.is_favorite })}
-          >
-            <Star className={cn(note.is_favorite && "fill-warning text-warning")} aria-hidden />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Note actions">
-                <MoreHorizontal aria-hidden />
+            open={reminderOpen}
+            onOpenChange={setReminderOpen}
+          />
+          {note.shared || collaborators.length ? (
+            <>
+              <span aria-hidden className="px-1 opacity-50">·</span>
+              <button type="button" onClick={() => setShareOpen(true)} className="inline-flex h-7 items-center gap-1 rounded-md px-1 hover:text-foreground">
+                <Users className="size-3.5" aria-hidden />
+                {owner ? `Shared with ${collaborators.length}` : "Shared with you"}
+              </button>
+            </>
+          ) : null}
+          <span aria-hidden className="px-1 opacity-50">·</span>
+          <time dateTime={note.updated_at} title={new Date(note.updated_at).toLocaleString()} className="px-1">
+            Edited {editedLabel(note.updated_at)}
+          </time>
+          {autosave.status !== "idle" ? (
+            <>
+              <span aria-hidden className="px-1 opacity-50">·</span>
+              <SaveStatusIndicator status={autosave.status} message={autosave.errorMessage} />
+            </>
+          ) : null}
+        </div>
+
+        {suggestion ? <div className="mb-6 2xl:hidden">{suggestion}</div> : null}
+
+        <RichTextEditor
+          key={docKey}
+          documentKey={`${note.id}:${docKey}`}
+          content={content}
+          editable={!readOnly}
+          onChange={onBodyChange}
+          onAskAI={readOnly ? undefined : (action) => setAiAction(action)}
+          onReady={(editor) => {
+            editorRef.current = editor;
+            setEditorInstance(editor);
+          }}
+        />
+
+        <ShareDialog note={note} open={shareOpen} onOpenChange={setShareOpen} />
+        <VersionHistoryDialog
+          note={note}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          onRestored={(restored) => {
+            autosave.adopt(restored);
+            setTitle(restored.title);
+            setContent(restored.content_json);
+            setDocKey((k) => k + 1);
+          }}
+        />
+
+        <Dialog open={confirmPurge} onOpenChange={setConfirmPurge}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete this note forever?</DialogTitle>
+              <DialogDescription>“{note.title || "Untitled"}” will be permanently removed. This cannot be undone.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmPurge(false)}>
+                Cancel
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger disabled={readOnly}>
-                  <FolderIcon aria-hidden /> Move to folder
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-56">
-                  <DropdownMenuRadioGroup
-                    value={note.folder_id ?? ""}
-                    onValueChange={(v) => meta(v ? { folder_id: v } : { clear_folder: true }, "Moved")}
-                  >
-                    <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
-                    {folders.length ? <DropdownMenuSeparator /> : null}
-                    {folders.map((f) => (
-                      <DropdownMenuRadioItem key={f.id} value={f.id}>
-                        {f.name}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-              <DropdownMenuItem
-                disabled={readOnly}
-                onSelect={() =>
-                  actions.duplicate.mutate(note.id, {
-                    onSuccess: (copy) => {
-                      toast.success("Duplicated");
-                      router.push(`/app/notes/${copy.id}`);
+              <Button
+                variant="destructive"
+                disabled={actions.purge.isPending}
+                onClick={() =>
+                  actions.purge.mutate(note.id, {
+                    onSuccess: () => {
+                      clearDraft(note.id);
+                      toast.success("Note deleted");
+                      router.push("/app/notes?view=trash");
                     },
+                    onError: (e) => toast.error(messageFor(e)),
                   })
                 }
               >
-                <Copy aria-hidden /> Duplicate
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={readOnly} onSelect={() => meta({ archived: !note.archived_at }, note.archived_at ? "Unarchived" : "Archived")}>
-                {note.archived_at ? <ArchiveRestore aria-hidden /> : <Archive aria-hidden />}
-                {note.archived_at ? "Unarchive" : "Archive"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {readOnly ? (
-                <>
-                  <DropdownMenuItem onSelect={() => actions.restore.mutate(note.id)}>
-                    <RotateCcw aria-hidden /> Restore
-                  </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onSelect={() => setConfirmPurge(true)}>
-                    <Trash2 aria-hidden /> Delete forever
-                  </DropdownMenuItem>
-                </>
-              ) : (
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() =>
-                    void autosave.flush().then(() =>
-                      actions.trash.mutate(note.id, {
-                        onSuccess: () => {
-                          toast.success("Moved to trash", {
-                            action: { label: "Undo", onClick: () => actions.restore.mutate(note.id) },
-                          });
-                          router.push("/app/notes");
-                        },
-                      }),
-                    )
-                  }
-                >
-                  <Trash2 aria-hidden /> Move to trash
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-        <TagPicker selected={note.tags ?? []} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
-        <span className="inline-flex items-center gap-1">
-          <FolderIcon className="size-3.5" aria-hidden />
-          {folderName ?? "No folder"}
-        </span>
-        <span aria-hidden>·</span>
-        <span>Edited {new Date(note.updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
-      </div>
-
-      {suggestion ? <div className="mb-6 2xl:hidden">{suggestion}</div> : null}
-
-      <RichTextEditor
-        documentKey={note.id}
-        content={initial.content}
-        editable={!readOnly}
-        onChange={onBodyChange}
-        onAskAI={readOnly ? undefined : (action) => setAiAction(action)}
-        onReady={(editor) => {
-          editorRef.current = editor;
-          setEditorInstance(editor);
-        }}
-      />
-
-      <Dialog open={confirmPurge} onOpenChange={setConfirmPurge}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete this note forever?</DialogTitle>
-            <DialogDescription>“{note.title || "Untitled"}” will be permanently removed. This cannot be undone.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmPurge(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={actions.purge.isPending}
-              onClick={() =>
-                actions.purge.mutate(note.id, {
-                  onSuccess: () => {
-                    clearDraft(note.id);
-                    toast.success("Note deleted");
-                    router.push("/app/notes?view=trash");
-                  },
-                  onError: (e) => toast.error(messageFor(e)),
-                })
-              }
-            >
-              Delete forever
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+                Delete forever
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </article>
 
       <aside aria-label="AI assistant" className="hidden 2xl:block">
         <div className="sticky top-2 space-y-4">

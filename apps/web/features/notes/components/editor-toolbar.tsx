@@ -4,15 +4,20 @@ import type { Editor } from "@tiptap/react";
 import { useEditorState } from "@tiptap/react";
 import {
   Bold,
+  ChevronDown,
   Code,
+  Eraser,
   Heading1,
   Heading2,
+  Heading3,
   Italic,
   Link as LinkIcon,
   List,
   ListChecks,
   ListOrdered,
   type LucideIcon,
+  MoreHorizontal,
+  Pilcrow,
   Quote,
   Redo2,
   SquareCode,
@@ -22,6 +27,7 @@ import {
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -52,7 +58,7 @@ function Tool({ icon: Icon, label, shortcut, active, disabled, onClick }: ToolPr
           disabled={disabled}
           onMouseDown={(e) => e.preventDefault()} // keep editor selection
           onClick={onClick}
-          className={cn("rounded-lg", active && "bg-ai-soft text-ai hover:bg-ai-soft hover:text-ai")}
+          className={cn("rounded-md text-muted-foreground hover:text-foreground", active && "bg-accent text-foreground hover:bg-accent")}
         >
           <Icon aria-hidden />
         </Button>
@@ -65,6 +71,18 @@ function Tool({ icon: Icon, label, shortcut, active, disabled, onClick }: ToolPr
   );
 }
 
+const BLOCKS: { id: "p" | 1 | 2 | 3; label: string; icon: LucideIcon }[] = [
+  { id: "p", label: "Text", icon: Pilcrow },
+  { id: 1, label: "Heading 1", icon: Heading1 },
+  { id: 2, label: "Heading 2", icon: Heading2 },
+  { id: 3, label: "Heading 3", icon: Heading3 },
+];
+
+/**
+ * Compact formatting bar: the things people reach for every minute are one click away, the
+ * rest sit in a small overflow. It is contextual — the block menu and the marks reflect the
+ * caret — but it stays put so it never covers the text.
+ */
 export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (action: NoteAIAction) => void }) {
   const state = useEditorState({
     editor,
@@ -73,8 +91,7 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
       code: e.isActive("code"),
-      h1: e.isActive("heading", { level: 1 }),
-      h2: e.isActive("heading", { level: 2 }),
+      heading: e.isActive("heading", { level: 1 }) ? 1 : e.isActive("heading", { level: 2 }) ? 2 : e.isActive("heading", { level: 3 }) ? 3 : ("p" as const),
       bullet: e.isActive("bulletList"),
       ordered: e.isActive("orderedList"),
       task: e.isActive("taskList"),
@@ -92,30 +109,45 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
 
   const applyLink = () => {
     const href = linkValue.trim();
-    if (!href) {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-    } else {
-      editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
-    }
+    if (!href) editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    else editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
     setLinkOpen(false);
   };
 
+  const block = BLOCKS.find((b) => b.id === state.heading) ?? { id: "p" as const, label: "Text", icon: Pilcrow };
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+
   return (
-    <div
-      role="toolbar"
-      aria-label="Formatting"
-      className="glass-2 sticky top-2 z-20 mb-6 flex flex-wrap items-center gap-0.5 rounded-xl p-1"
-    >
+    <div role="toolbar" aria-label="Formatting" className="sticky top-0 z-20 -mx-1 mb-6 flex items-center gap-0.5 overflow-x-auto rounded-lg border border-glass-border bg-background/85 px-1 py-1 backdrop-blur-md [scrollbar-width:none]">
       <Tool icon={Undo2} label="Undo" shortcut="⌘Z" disabled={!state.canUndo} onClick={() => editor.chain().focus().undo().run()} />
       <Tool icon={Redo2} label="Redo" shortcut="⌘⇧Z" disabled={!state.canRedo} onClick={() => editor.chain().focus().redo().run()} />
-      <Separator orientation="vertical" className="mx-1 h-5" />
-      <Tool icon={Heading1} label="Heading 1" active={state.h1} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} />
-      <Tool icon={Heading2} label="Heading 2" active={state.h2} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
-      <Separator orientation="vertical" className="mx-1 h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" aria-label={`Block: ${block.label}`} onMouseDown={keep} className="h-7 gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+            <block.icon aria-hidden className="size-3.5" />
+            <span className="hidden sm:inline">{block.label}</span>
+            <ChevronDown className="size-3 opacity-60" aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-44" onCloseAutoFocus={(e) => e.preventDefault()}>
+          {BLOCKS.map((b) => (
+            <DropdownMenuCheckboxItem
+              key={String(b.id)}
+              checked={state.heading === b.id}
+              onSelect={() => (b.id === "p" ? editor.chain().focus().setParagraph().run() : editor.chain().focus().toggleHeading({ level: b.id }).run())}
+            >
+              <b.icon aria-hidden className="mr-2 size-4 text-muted-foreground" /> {b.label}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Separator orientation="vertical" className="mx-1 h-4" />
+
       <Tool icon={Bold} label="Bold" shortcut="⌘B" active={state.bold} onClick={() => editor.chain().focus().toggleBold().run()} />
       <Tool icon={Italic} label="Italic" shortcut="⌘I" active={state.italic} onClick={() => editor.chain().focus().toggleItalic().run()} />
-      <Tool icon={Strikethrough} label="Strikethrough" active={state.strike} onClick={() => editor.chain().focus().toggleStrike().run()} />
-      <Tool icon={Code} label="Inline code" shortcut="⌘E" active={state.code} onClick={() => editor.chain().focus().toggleCode().run()} />
+      <Tool icon={Strikethrough} label="Strikethrough" shortcut="⌘⇧S" active={state.strike} onClick={() => editor.chain().focus().toggleStrike().run()} />
       <Popover
         open={linkOpen}
         onOpenChange={(open) => {
@@ -124,15 +156,7 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
         }}
       >
         <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Link"
-            aria-pressed={state.link}
-            onMouseDown={(e) => e.preventDefault()}
-            className={cn(state.link && "bg-accent text-accent-foreground")}
-          >
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Link" aria-pressed={state.link} onMouseDown={keep} className={cn("rounded-md text-muted-foreground hover:text-foreground", state.link && "bg-accent text-foreground")}>
             <LinkIcon aria-hidden />
           </Button>
         </PopoverTrigger>
@@ -144,27 +168,44 @@ export function EditorToolbar({ editor, onAskAI }: { editor: Editor; onAskAI?: (
               applyLink();
             }}
           >
-            <Input
-              aria-label="Link URL"
-              placeholder="https://"
-              value={linkValue}
-              onChange={(e) => setLinkValue(e.target.value)}
-              autoFocus
-            />
+            <Input aria-label="Link URL" placeholder="https://" value={linkValue} onChange={(e) => setLinkValue(e.target.value)} autoFocus />
             <Button type="submit" size="sm">
               {linkValue.trim() ? "Set" : "Remove"}
             </Button>
           </form>
         </PopoverContent>
       </Popover>
-      <Separator orientation="vertical" className="mx-1 h-5" />
-      <Tool icon={List} label="Bullet list" active={state.bullet} onClick={() => editor.chain().focus().toggleBulletList().run()} />
-      <Tool icon={ListOrdered} label="Numbered list" active={state.ordered} onClick={() => editor.chain().focus().toggleOrderedList().run()} />
-      <Tool icon={ListChecks} label="Task list" active={state.task} onClick={() => editor.chain().focus().toggleTaskList().run()} />
-      <Tool icon={Quote} label="Quote" active={state.quote} onClick={() => editor.chain().focus().toggleBlockquote().run()} />
-      <Tool icon={SquareCode} label="Code block" active={state.codeBlock} onClick={() => editor.chain().focus().toggleCodeBlock().run()} />
+      <Separator orientation="vertical" className="mx-1 h-4" />
+
+      <Tool icon={List} label="Bullet list" shortcut="⌘⇧8" active={state.bullet} onClick={() => editor.chain().focus().toggleBulletList().run()} />
+      <Tool icon={ListOrdered} label="Numbered list" shortcut="⌘⇧7" active={state.ordered} onClick={() => editor.chain().focus().toggleOrderedList().run()} />
+      <Tool icon={ListChecks} label="Checklist" shortcut="⌘⇧9" active={state.task} onClick={() => editor.chain().focus().toggleTaskList().run()} />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="More formatting" onMouseDown={keep} className={cn("rounded-md text-muted-foreground hover:text-foreground", (state.quote || state.code || state.codeBlock) && "bg-accent text-foreground")}>
+            <MoreHorizontal aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-52" onCloseAutoFocus={(e) => e.preventDefault()}>
+          <DropdownMenuCheckboxItem checked={state.quote} onSelect={() => editor.chain().focus().toggleBlockquote().run()}>
+            <Quote aria-hidden className="mr-2 size-4 text-muted-foreground" /> Quote
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem checked={state.code} onSelect={() => editor.chain().focus().toggleCode().run()}>
+            <Code aria-hidden className="mr-2 size-4 text-muted-foreground" /> Inline code
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem checked={state.codeBlock} onSelect={() => editor.chain().focus().toggleCodeBlock().run()}>
+            <SquareCode aria-hidden className="mr-2 size-4 text-muted-foreground" /> Code block
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>
+            <Eraser aria-hidden className="mr-2 size-4 text-muted-foreground" /> Clear formatting
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       {onAskAI ? (
-        <span className="ml-auto" onMouseDown={(e) => e.preventDefault()}>
+        <span className="ml-auto pl-2" onMouseDown={keep}>
           <NoteAIMenu onPick={onAskAI} />
         </span>
       ) : null}

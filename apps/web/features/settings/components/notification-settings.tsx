@@ -13,6 +13,8 @@ import { useCurrentUser, useUpdateProfile } from "@/features/auth/hooks";
 const GROUPS: { key: string; label: string; description: string }[] = [
   { key: "task_reminders", label: "Task reminders", description: "When a task is due within 24 hours, and when it becomes overdue." },
   { key: "task_completed", label: "Task completed", description: "A quiet confirmation when you finish a task." },
+  { key: "note_reminders", label: "Note reminders", description: "When a reminder you set on a note comes due." },
+  { key: "sharing", label: "Sharing", description: "When someone shares a note with you." },
   { key: "calendar_sync", label: "Calendar sync", description: "When a task is added to Google Calendar, and if syncing fails." },
   { key: "integrations", label: "Connected tools", description: "Connected, disconnected, or an authorization that needs renewing." },
 ];

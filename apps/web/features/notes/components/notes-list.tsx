@@ -1,6 +1,6 @@
 "use client";
 
-import { Inbox, Plus, Search, Star } from "lucide-react";
+import { Bell, Inbox, ListChecks, Plus, Search, Star, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { TagChip } from "@/features/notes/components/tag-picker";
+import { editedLabel, reminderLabel } from "@/features/notes/lib";
 import { useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
 import type { NoteSummary, NoteView } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 const VIEWS: { value: NoteView; label: string }[] = [
   { value: "active", label: "Notes" },
   { value: "favorites", label: "Favorites" },
+  { value: "shared", label: "Shared" },
   { value: "archived", label: "Archived" },
   { value: "trash", label: "Trash" },
 ];
@@ -32,20 +34,12 @@ export function useNoteListFilters() {
   return { view: VIEWS.some((v) => v.value === view) ? view : "active", folderId, tagId };
 }
 
-function relative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.round(diff / 60_000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.round(h / 24);
-  return d < 7 ? `${d}d` : new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
   // A summary from an older API or a partial cache patch may lack tags; never crash the list.
   const tags = note.tags ?? [];
+  const reminder = note.reminder_at ? reminderLabel(note.reminder_at) : null;
+  const checklist = note.checklist && note.checklist.total > 0 ? note.checklist : null;
+  const tinted = note.color && note.color !== "default";
   return (
     <li>
       <Link
@@ -58,19 +52,38 @@ function NoteRow({ note, active }: { note: NoteSummary; active: boolean }) {
       >
         <span aria-hidden className={cn("absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-ai transition-opacity", active ? "opacity-100" : "opacity-0")} />
         <div className="flex items-start gap-2">
+          {tinted ? <span aria-hidden data-note-color={note.color} className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--note-tint-strong)]" /> : null}
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{note.title || "Untitled"}</p>
           {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 fill-warning text-warning" aria-label="Favorite" /> : null}
-          <time className="shrink-0 text-xs text-muted-foreground" dateTime={note.updated_at}>
-            {relative(note.updated_at)}
+          <time className="shrink-0 text-[11px] text-muted-foreground" dateTime={note.updated_at} title={new Date(note.updated_at).toLocaleString()}>
+            {editedLabel(note.updated_at)}
           </time>
         </div>
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.excerpt || "No additional text"}</p>
-        {tags.length ? (
-          <div className="mt-1.5 flex flex-wrap gap-1">
+        {tags.length || reminder || checklist || note.shared ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            {reminder ? (
+              <span className={cn("inline-flex items-center gap-1", !reminder.passed && "text-ai")}>
+                <Bell className="size-3" aria-hidden />
+                {reminder.passed ? "Passed" : reminder.text}
+              </span>
+            ) : null}
+            {checklist ? (
+              <span className={cn("inline-flex items-center gap-1", checklist.done === checklist.total && "text-success")} aria-label={`${checklist.done} of ${checklist.total} done`}>
+                <ListChecks className="size-3" aria-hidden />
+                {checklist.done}/{checklist.total}
+              </span>
+            ) : null}
+            {note.shared ? (
+              <span className="inline-flex items-center gap-1" aria-label="Shared">
+                <Users className="size-3" aria-hidden />
+                {note.access === "owner" ? "Shared" : "Shared with you"}
+              </span>
+            ) : null}
             {tags.slice(0, 3).map((t) => (
               <TagChip key={t.id} tag={t} />
             ))}
-            {tags.length > 3 ? <span className="text-[11px] text-muted-foreground">+{tags.length - 3}</span> : null}
+            {tags.length > 3 ? <span>+{tags.length - 3}</span> : null}
           </div>
         ) : null}
       </Link>
@@ -177,8 +190,8 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           <EmptyState
             icon={Inbox}
             className="py-8"
-            title={debouncedQ ? "No matching notes" : view === "trash" ? "Trash is empty" : "No notes here yet"}
-            description={debouncedQ ? "Try a different word, or search everything from the top bar." : view === "active" ? "Your first note is one click away." : undefined}
+            title={debouncedQ ? "No matching notes" : view === "trash" ? "Trash is empty" : view === "shared" ? "Nothing shared with you yet" : "No notes here yet"}
+            description={debouncedQ ? "Try a different word, or search everything from the top bar." : view === "active" ? "Your first note is one click away." : view === "shared" ? "Notes other people share with you show up here." : undefined}
             action={
               !debouncedQ && view === "active" ? (
                 <Button variant="outline" size="sm" onClick={onCreate} disabled={create.isPending}>

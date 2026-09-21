@@ -1,5 +1,9 @@
 import { api, apiEnvelope } from "@/lib/api/client";
 import type {
+  Collaborator,
+  CollaboratorRole,
+  NoteVersion,
+  NoteVersionDetail,
   Folder,
   Note,
   NoteCreateInput,
@@ -38,6 +42,15 @@ export const notesApi = {
   restore: (id: string) => api.post<NoteSummary>(`/notes/${id}/restore`),
   purge: (id: string) => api.delete<{ deleted: boolean }>(`/notes/${id}/permanent`),
   duplicate: (id: string) => api.post<Note>(`/notes/${id}/duplicate`),
+  versions: (id: string) => api.get<NoteVersion[]>(`/notes/${id}/versions`),
+  version: (id: string, versionId: string) => api.get<NoteVersionDetail>(`/notes/${id}/versions/${versionId}`),
+  restoreVersion: (id: string, versionId: string) => api.post<Note>(`/notes/${id}/versions/${versionId}/restore`),
+  invite: (id: string, input: { email: string; role: CollaboratorRole }) =>
+    api.post<Collaborator>(`/notes/${id}/collaborators`, input),
+  updateCollaborator: (id: string, collaboratorId: string, role: CollaboratorRole) =>
+    api.patch<Collaborator>(`/notes/${id}/collaborators/${collaboratorId}`, { role }),
+  removeCollaborator: (id: string, collaboratorId: string) =>
+    api.delete<{ removed: boolean }>(`/notes/${id}/collaborators/${collaboratorId}`),
 };
 
 export const foldersApi = {

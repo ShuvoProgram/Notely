@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import * as React from "react";
 
 import { EditorToolbar } from "@/features/notes/components/editor-toolbar";
+import { ListItemMove } from "@/features/notes/extensions/list-item-move";
 import { SelectionAIMenu } from "@/features/notes/components/selection-ai-menu";
 import type { NoteAIAction, TipTapDoc } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ export function RichTextEditor({
         TaskItem.configure({ nested: true }),
         Typography,
         CharacterCount,
+        ListItemMove,
         Placeholder.configure({ placeholder }),
       ],
       content,
@@ -74,7 +76,11 @@ export function RichTextEditor({
           "aria-multiline": "true",
         },
       },
-      onUpdate: ({ editor: e }) => {
+      onUpdate: ({ editor: e, transaction }) => {
+        // `setEditable()` and other non-document transactions also emit `update`; only a
+        // transaction that changed the document is an edit. Otherwise every open would
+        // autosave the untouched body and the note would jump to the top of the list.
+        if (!transaction.docChanged) return;
         onChangeRef.current?.(e.getJSON() as TipTapDoc);
       },
       onCreate: ({ editor: e }) => onReady?.(e),
@@ -83,7 +89,7 @@ export function RichTextEditor({
   );
 
   React.useEffect(() => {
-    editor?.setEditable(editable);
+    if (editor && editor.isEditable !== editable) editor.setEditable(editable, false);
   }, [editor, editable]);
 
   return (

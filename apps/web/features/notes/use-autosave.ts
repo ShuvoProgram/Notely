@@ -28,6 +28,8 @@ export interface Autosave {
   keepMine: () => Promise<void>;
   /** Conflict resolution: discard local changes and reload the server copy. */
   loadTheirs: () => Promise<void>;
+  /** The server replaced the document (e.g. a version restore): continue from that state. */
+  adopt: (note: Note) => void;
   errorMessage: string | null;
 }
 
@@ -172,6 +174,24 @@ export function useAutosave(note: Note): Autosave {
     await save(true);
   }, [save]);
 
+  const adopt = React.useCallback(
+    (next: Note) => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      pendingRef.current = {};
+      latestRef.current = { title: next.title, content_json: next.content_json ?? { type: "doc", content: [] } };
+      versionRef.current = next.version;
+      savedVersionByNote.set(note.id, next.version);
+      setVersion(next.version);
+      clearDraft(note.id);
+      setConflictVersion(null);
+      setStatus("idle");
+    },
+    [note.id],
+  );
+
   const loadTheirs = React.useCallback(async () => {
     pendingRef.current = {};
     clearDraft(note.id);
@@ -208,6 +228,7 @@ export function useAutosave(note: Note): Autosave {
     flush,
     keepMine,
     loadTheirs,
+    adopt,
     errorMessage,
   };
 }

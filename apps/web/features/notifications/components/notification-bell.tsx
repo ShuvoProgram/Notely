@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bell, CalendarCheck, CalendarX, Check, CheckCheck, Clock, KeyRound, Plug, Unplug, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Bell, BellRing, CalendarCheck, CalendarX, Check, CheckCheck, Clock, KeyRound, Plug, Unplug, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
@@ -21,6 +21,8 @@ const KIND: Record<NotificationKind, { icon: LucideIcon; tone: string }> = {
   integration_auth_required: { icon: KeyRound, tone: "text-warning" },
   calendar_synced: { icon: CalendarCheck, tone: "text-success" },
   calendar_sync_failed: { icon: CalendarX, tone: "text-destructive" },
+  note_reminder: { icon: BellRing, tone: "text-ai" },
+  note_shared: { icon: Users, tone: "text-info" },
 };
 
 export function relativeTime(iso: string): string {
