@@ -15,11 +15,12 @@ x-api-env: &api-env
   REDIS_URL: redis://redis:6379/0
   SESSION_SECRET: ${SESSION_SECRET}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-  # PUBLIC_URL = https://your-domain (set it explicitly in Coolify; falls back to the domain
-  # Coolify generates for the `web` service). The API refuses to start without an https origin.
-  FRONTEND_ORIGIN: ${PUBLIC_URL:-${SERVICE_FQDN_WEB}}
-  ALLOWED_ORIGINS: ${PUBLIC_URL:-${SERVICE_FQDN_WEB}}
-  API_PUBLIC_URL: ${PUBLIC_URL:-${SERVICE_FQDN_WEB}}
+  # PUBLIC_URL = https://your-domain, set explicitly in Coolify (the same domain as the `web`
+  # service). Kept as a plain variable: Coolify rewrites compose files and does not reliably
+  # handle nested ${A:-${B}} defaults. The API refuses to start without an https origin.
+  FRONTEND_ORIGIN: ${PUBLIC_URL}
+  ALLOWED_ORIGINS: ${PUBLIC_URL}
+  API_PUBLIC_URL: ${PUBLIC_URL}
   LITELLM_API_BASE: http://litellm:4000
   LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
   METRICS_TOKEN: ${METRICS_TOKEN}
