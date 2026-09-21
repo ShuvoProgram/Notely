@@ -14,6 +14,8 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandItemMeta,
+  CommandItemText,
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
@@ -99,12 +101,15 @@ export function CommandPalette({ className }: { className?: string }) {
                 )
               }
             >
-              <Plus aria-hidden /> New note
-              <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">Action</span>
+              <Plus aria-hidden />
+              <CommandItemText title="New note" />
+              <CommandItemMeta>Action</CommandItemMeta>
             </CommandItem>
             {q.trim() ? (
               <CommandItem value={`search ${q}`} onSelect={() => go(`/app/search?q=${encodeURIComponent(q.trim())}`)}>
-                <Search aria-hidden /> Search everything for “{q.trim()}”
+                <Search aria-hidden />
+                <CommandItemText title={<>Search everything for “{q.trim()}”</>} />
+                <CommandItemMeta>Action</CommandItemMeta>
               </CommandItem>
             ) : null}
           </CommandGroup>
@@ -113,13 +118,10 @@ export function CommandPalette({ className }: { className?: string }) {
               <CommandSeparator />
               <CommandGroup heading="Notes">
                 {notes.data.notes.map((n) => (
-                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)} className="h-11">
+                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)}>
                     <FileText aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{n.title || "Untitled"}</span>
-                      {n.excerpt ? <span className="block truncate text-xs text-muted-foreground">{n.excerpt}</span> : null}
-                    </span>
-                    <span className="hidden text-[11px] text-muted-foreground sm:inline">Note</span>
+                    <CommandItemText title={n.title || "Untitled"} description={n.excerpt || undefined} />
+                    <CommandItemMeta>Note</CommandItemMeta>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -129,24 +131,28 @@ export function CommandPalette({ className }: { className?: string }) {
           <CommandGroup heading="Go to">
             {primaryNav.map((item) => (
               <CommandItem key={item.href} value={`go ${item.label}`} onSelect={() => go(item.href)}>
-                <item.icon aria-hidden /> {item.label}
-                <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">Go to</span>
+                <item.icon aria-hidden />
+                <CommandItemText title={item.label} />
+                <CommandItemMeta>Go to</CommandItemMeta>
               </CommandItem>
             ))}
           </CommandGroup>
         </CommandList>
         <CommandFooter>
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1">
             <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> navigate
+            <Kbd>↓</Kbd>
+            <span className="ml-0.5">navigate</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Kbd>↵</Kbd> open
+          <span className="inline-flex items-center gap-1">
+            <Kbd>↵</Kbd>
+            <span className="ml-0.5">open</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Kbd>esc</Kbd> close
+          <span className="inline-flex items-center gap-1">
+            <Kbd>esc</Kbd>
+            <span className="ml-0.5">close</span>
           </span>
-          <span className="ml-auto hidden items-center gap-1.5 sm:inline-flex">
+          <span className="ml-auto hidden items-center gap-1 sm:inline-flex">
             <Sparkles className="size-3 text-ai" aria-hidden /> Notely
           </span>
         </CommandFooter>

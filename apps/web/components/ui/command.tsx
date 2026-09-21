@@ -60,7 +60,7 @@ function CommandDialog({
       <DialogContent
         className={cn(
           // Anchored near the top like a spotlight, full-width with gutters on phones.
-          "glass-3 top-[12vh] w-[calc(100%-1.5rem)] max-w-2xl translate-y-0 overflow-hidden rounded-2xl! p-0 sm:top-[16vh] sm:w-full sm:max-w-2xl",
+          "glass-3 top-[12vh] w-[calc(100%-1.5rem)] max-w-xl translate-y-0 overflow-hidden rounded-2xl! p-0 sm:top-[16vh] sm:w-full sm:max-w-xl",
           className
         )}
         showCloseButton={showCloseButton}
@@ -81,7 +81,7 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-14 items-center gap-3 border-b border-glass-border px-4"
+      className="flex h-13 items-center gap-3 border-b border-glass-border pl-4 pr-3"
     >
       {loading ? (
         <Loader2Icon className="size-4 shrink-0 animate-spin text-ai" aria-hidden />
@@ -109,7 +109,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "scrollbar-thin max-h-[min(60vh,28rem)] scroll-py-2 overflow-x-hidden overflow-y-auto p-2 outline-none",
+        "scrollbar-thin max-h-[min(60vh,26rem)] scroll-py-1.5 overflow-x-hidden overflow-y-auto px-1.5 py-1.5 outline-none",
         className
       )}
       {...props}
@@ -138,7 +138,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-3 **:[[cmdk-group-heading]]:pt-3 **:[[cmdk-group-heading]]:pb-1.5 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.12em] **:[[cmdk-group-heading]]:text-muted-foreground/80",
+        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.1em] **:[[cmdk-group-heading]]:text-muted-foreground/70",
         className
       )}
       {...props}
@@ -153,7 +153,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn("mx-2 my-1 h-px bg-glass-border", className)}
+      className={cn("mx-2.5 my-1 h-px bg-glass-border", className)}
       {...props}
     />
   )
@@ -162,13 +162,16 @@ function CommandSeparator({
 function CommandItem({
   className,
   children,
+  checkable = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Item>) {
+}: React.ComponentProps<typeof CommandPrimitive.Item> & { checkable?: boolean }) {
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex h-10 cursor-default items-center gap-3 rounded-xl px-3 text-sm outline-hidden select-none transition-colors duration-100",
+        // icon | text | metadata: the same three columns in every row, so labels and the
+        // secondary column line up across sections instead of floating on auto margins.
+        "group/command-item relative grid min-h-10 cursor-default grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg py-2 pl-2.5 pr-3 text-sm outline-hidden select-none transition-colors duration-100",
         "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
         // Highlight: soft accent fill, a thin emerald bar on the left, icon tinted.
         "data-[selected=true]:bg-ai-soft data-[selected=true]:text-foreground data-[selected=true]:before:absolute data-[selected=true]:before:left-0 data-[selected=true]:before:top-1/2 data-[selected=true]:before:h-5 data-[selected=true]:before:w-0.5 data-[selected=true]:before:-translate-y-1/2 data-[selected=true]:before:rounded-full data-[selected=true]:before:bg-ai",
@@ -178,7 +181,7 @@ function CommandItem({
       {...props}
     >
       {children}
-      <CheckIcon className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+      {checkable ? <CheckIcon className="col-start-3 opacity-0 group-data-[checked=true]/command-item:opacity-100" /> : null}
     </CommandPrimitive.Item>
   )
 }
@@ -191,7 +194,38 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground group-data-[selected=true]/command-item:text-foreground",
+        "col-start-3 text-xs tracking-widest text-muted-foreground group-data-[selected=true]/command-item:text-foreground",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/** Primary text (and optional secondary line) of an item; occupies the middle column. */
+function CommandItemText({
+  className,
+  title,
+  description,
+  ...props
+}: Omit<React.ComponentProps<"span">, "title"> & { title: React.ReactNode; description?: React.ReactNode }) {
+  return (
+    <span data-slot="command-item-text" className={cn("col-start-2 min-w-0", className)} {...props}>
+      <span className="block truncate leading-5">{title}</span>
+      {description ? (
+        <span className="block truncate text-xs leading-4 text-muted-foreground">{description}</span>
+      ) : null}
+    </span>
+  )
+}
+
+/** Quiet right-hand metadata (kind, shortcut hint). Hidden on phones where width is scarce. */
+function CommandItemMeta({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      data-slot="command-item-meta"
+      className={cn(
+        "col-start-3 hidden justify-self-end text-[11px] text-muted-foreground/70 group-data-[selected=true]/command-item:text-muted-foreground sm:inline",
         className
       )}
       {...props}
@@ -205,7 +239,7 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="command-footer"
       className={cn(
-        "flex items-center gap-4 border-t border-glass-border px-4 py-2 text-[11px] text-muted-foreground",
+        "flex items-center gap-3 border-t border-glass-border px-3 py-1.5 text-[11px] text-muted-foreground",
         className
       )}
       {...props}
@@ -221,6 +255,8 @@ export {
   CommandEmpty,
   CommandGroup,
   CommandItem,
+  CommandItemText,
+  CommandItemMeta,
   CommandShortcut,
   CommandSeparator,
   CommandFooter,
