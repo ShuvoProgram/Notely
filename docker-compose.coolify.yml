@@ -130,10 +130,12 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/live || exit 1"]
-      interval: 15s
+      # Short interval: Coolify compose deploys are not zero-downtime, and Traefik only routes
+      # to `web` once it is healthy, so every second here is visible downtime on redeploy.
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 30
+      start_period: 10s
 
   worker:
     build:
@@ -171,9 +173,9 @@ services:
       # 127.0.0.1, not localhost: Alpine resolves localhost to ::1 first and busybox wget only
       # tries that address, while Next binds IPv4 only -> the check would fail forever.
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
-      interval: 15s
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
 
 volumes:
   postgres-data:
