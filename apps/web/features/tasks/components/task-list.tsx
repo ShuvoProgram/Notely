@@ -22,6 +22,7 @@ import { messageFor } from "@/features/auth/components/auth-form-error";
 import { tasksApi } from "@/features/tasks/api";
 import { TaskDialog } from "@/features/tasks/components/task-dialog";
 import { dueAt, dueState, formatDue, localTimeZone, priorityMeta, type DueState } from "@/features/tasks/lib";
+import { useSelection } from "@/hooks/use-selection";
 import { playSfx } from "@/lib/sfx/player";
 import type { Task, TaskStatus } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -113,34 +114,23 @@ export function TaskList() {
     },
     onError: (e) => toast.error(messageFor(e)),
   });
-  // Selection mode: pick several tasks, delete them together (after confirming).
-  const [selecting, setSelecting] = React.useState(false);
-  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  // Selection mode: pick several tasks (shift-click for a range), delete them together.
+  const list = tasks.data ?? [];
+  const visibleIds = React.useMemo(() => (tasks.data ?? []).map((t) => t.id), [tasks.data]);
+  const selection = useSelection(visibleIds);
   const [confirmBulk, setConfirmBulk] = React.useState(false);
-  const exitSelection = () => {
-    setSelecting(false);
-    setSelected(new Set());
-  };
   const removeMany = useMutation({
     mutationFn: tasksApi.removeMany,
     onSuccess: ({ deleted }) => {
       playSfx("delete");
       toast.success(`Deleted ${deleted} ${deleted === 1 ? "task" : "tasks"}`);
       setConfirmBulk(false);
-      exitSelection();
+      selection.exit();
       invalidate();
     },
     onError: (e) => toast.error(messageFor(e)),
   });
-  const toggleSelected = (id: string, checked: boolean) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
 
-  const list = tasks.data ?? [];
   const sections = view === "open" ? groupOpen(list) : [{ key: "done", label: "Completed", tasks: list }];
   const openCount = view === "open" ? list.length : undefined;
 
@@ -186,7 +176,7 @@ export function TaskList() {
       </form>
 
       <div className="flex items-center justify-between gap-3">
-        <Tabs value={view} onValueChange={(v) => { exitSelection(); setView(v); }}>
+        <Tabs value={view} onValueChange={(v) => { selection.exit(); setView(v); }}>
           <TabsList className="rounded-full">
             <TabsTrigger value="open" className="rounded-full">
               Open{openCount !== undefined ? <span className="ml-1.5 text-xs text-muted-foreground">{openCount}</span> : null}
@@ -196,14 +186,23 @@ export function TaskList() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        {list.length ? (
-          <Button variant="ghost" size="sm" aria-label={selecting ? "Cancel selection" : "Select tasks"} aria-pressed={selecting} onClick={() => (selecting ? exitSelection() : setSelecting(true))} className="rounded-full text-muted-foreground">
-            <ListChecks aria-hidden /> {selecting ? "Done" : "Select"}
+        {list.length && !selection.selecting ? (
+          <Button variant="ghost" size="sm" aria-label="Select tasks" onClick={selection.enter} className="rounded-full text-muted-foreground">
+            <ListChecks aria-hidden /> Select
           </Button>
         ) : null}
       </div>
-      {selecting ? (
-        <SelectionBar selected={selected.size} total={list.length} noun="tasks" onSelectAll={(all) => setSelected(all ? new Set(list.map((t) => t.id)) : new Set())} onClear={exitSelection} onDelete={() => setConfirmBulk(true)} />
+      {selection.selecting ? (
+        <SelectionBar
+          className="rounded-xl border border-glass-border bg-muted/30 px-3 py-1"
+          allState={selection.allState}
+          count={selection.count}
+          total={selection.visibleTotal}
+          noun="tasks"
+          onSelectAll={selection.selectAll}
+          onCancel={selection.exit}
+          action={{ label: "Delete", icon: Trash2, onClick: () => setConfirmBulk(true) }}
+        />
       ) : null}
 
       {tasks.isPending ? (
@@ -241,7 +240,7 @@ export function TaskList() {
               </h2>
               <ul className="glass divide-y divide-glass-border rounded-2xl">
                 {section.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} onToggle={() => toggle.mutate(t)} onEdit={() => setEditing({ task: t, open: true })} onDelete={() => remove.mutate(t.id)} selectable={selecting} selected={selected.has(t.id)} onSelect={(checked) => toggleSelected(t.id, checked)} />
+                  <TaskRow key={t.id} task={t} onToggle={() => toggle.mutate(t)} onEdit={() => setEditing({ task: t, open: true })} onDelete={() => remove.mutate(t.id)} selectable={selection.selecting} selected={selection.has(t.id)} onSelect={(checked, shift) => selection.toggle(t.id, checked, { shift })} />
                 ))}
               </ul>
             </section>
@@ -253,25 +252,33 @@ export function TaskList() {
       <ConfirmDialog
         open={confirmBulk}
         onOpenChange={setConfirmBulk}
-        title={`Delete ${selected.size} ${selected.size === 1 ? "task" : "tasks"}?`}
+        title={`Delete ${selection.count} ${selection.count === 1 ? "task" : "tasks"}?`}
         description="This can't be undone. Tasks linked to Google Calendar are removed from the calendar too."
         confirmLabel="Delete"
         pending={removeMany.isPending}
-        onConfirm={() => removeMany.mutate([...selected])}
+        onConfirm={() => removeMany.mutate([...selection.ids])}
       />
     </div>
   );
 }
 
-function TaskRow({ task, onToggle, onEdit, onDelete, selectable, selected, onSelect }: { task: Task; onToggle: () => void; onEdit: () => void; onDelete: () => void; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean) => void }) {
+function TaskRow({ task, onToggle, onEdit, onDelete, selectable, selected, onSelect }: { task: Task; onToggle: () => void; onEdit: () => void; onDelete: () => void; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean, shift: boolean) => void }) {
   const done = task.status === "done";
   const state = dueState(task);
   const due = formatDue(task);
   const prio = priorityMeta(task.priority);
   return (
-    <li className={cn("group flex items-start gap-3 px-3 py-2.5 transition-colors first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/30 sm:items-center", done && "opacity-80", selected && "bg-accent/40")}>
+    <li className={cn("group flex items-start gap-3 px-3 py-2.5 transition-[background-color,box-shadow] first:rounded-t-2xl last:rounded-b-2xl hover:bg-muted/30 sm:items-center", done && "opacity-80", selectable && selected && "bg-primary/10 ring-1 ring-inset ring-primary/40 hover:bg-primary/15")}>
       {selectable ? (
-        <Checkbox checked={Boolean(selected)} onCheckedChange={(v) => onSelect?.(v === true)} aria-label={`Select ${task.title}`} className="mt-1 size-[18px] sm:mt-0" />
+        <Checkbox
+          checked={Boolean(selected)}
+          aria-label={`Select ${task.title}`}
+          className="mt-1 size-[18px] sm:mt-0"
+          onClick={(e) => {
+            e.preventDefault();
+            onSelect?.(!selected, e.shiftKey);
+          }}
+        />
       ) : (
         <Checkbox
           checked={done}
@@ -280,7 +287,7 @@ function TaskRow({ task, onToggle, onEdit, onDelete, selectable, selected, onSel
           className="mt-1 size-[18px] rounded-full sm:mt-0"
         />
       )}
-      <button type="button" onClick={selectable ? () => onSelect?.(!selected) : onEdit} aria-pressed={selectable ? selected : undefined} className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <button type="button" onClick={selectable ? (e) => onSelect?.(!selected, e.shiftKey) : onEdit} aria-pressed={selectable ? selected : undefined} className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className={cn("block truncate text-sm", done && "text-muted-foreground line-through")}>{task.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
           {due ? (

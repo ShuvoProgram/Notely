@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Users } from "lucide-react";
+import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -21,6 +21,7 @@ import { TagChip } from "@/features/notes/components/tag-picker";
 import { editedLabel, noteColorProps, reminderLabel } from "@/features/notes/lib";
 import { useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
 import type { NoteSummary, NoteView } from "@/lib/api/types";
+import { useSelection } from "@/hooks/use-selection";
 import { playSfx } from "@/lib/sfx/player";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +41,7 @@ export function useNoteListFilters() {
   return { view: VIEWS.some((v) => v.value === view) ? view : "active", folderId, tagId };
 }
 
-function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteSummary; active: boolean; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean) => void }) {
+function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteSummary; active: boolean; selectable?: boolean; selected?: boolean; onSelect?: (checked: boolean, shift: boolean) => void }) {
   // A summary from an older API or a partial cache patch may lack tags; never crash the list.
   const tags = note.tags ?? [];
   const reminder = note.reminder_at ? reminderLabel(note.reminder_at) : null;
@@ -50,7 +51,20 @@ function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteS
     <>
         <span aria-hidden className={cn("absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-ai transition-opacity", active && !selectable ? "opacity-100" : "opacity-0")} />
         <div className="flex items-start gap-2">
-          {selectable ? <Checkbox checked={Boolean(selected)} onCheckedChange={(v) => onSelect?.(v === true)} aria-label={`Select ${note.title || "Untitled"}`} className="mt-0.5" onClick={(e) => e.stopPropagation()} /> : null}
+          {selectable ? (
+            <Checkbox
+              checked={Boolean(selected)}
+              aria-label={`Select ${note.title || "Untitled"}`}
+              className="mt-0.5"
+              // The row itself handles the toggle (so shift-click sees the modifier); the box is
+              // here for pointer precision and screen readers.
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelect?.(!selected, e.shiftKey);
+              }}
+            />
+          ) : null}
           {tinted ? <span aria-hidden {...noteColorProps(note.color)} className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--note-tint-strong)]" /> : null}
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{note.title || "Untitled"}</p>
           {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 fill-warning text-warning" aria-label="Favorite" /> : null}
@@ -88,14 +102,15 @@ function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteS
     </>
   );
   const rowClass = cn(
-    "relative block w-full rounded-xl px-3 py-2.5 text-left outline-none transition-colors duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
+    "relative block w-full rounded-xl px-3 py-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring",
     active && !selectable && "bg-accent/80 shadow-1 ring-1 ring-glass-border",
-    selected && "bg-accent/60 ring-1 ring-glass-border",
+    selectable && selected && "bg-primary/10 ring-1 ring-primary/40 hover:bg-primary/15",
   );
   return (
     <li>
       {selectable ? (
-        <div role="button" tabIndex={0} aria-pressed={selected} onClick={() => onSelect?.(!selected)} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onSelect?.(!selected); } }} className={cn(rowClass, "cursor-pointer")}>
+        // The checkbox is the accessible control; the whole row is a larger pointer target for it.
+        <div onClick={(e) => onSelect?.(!selected, e.shiftKey)} className={cn(rowClass, "cursor-pointer select-none")}>
           {body}
         </div>
       ) : (
@@ -122,21 +137,18 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
   const list = useNotesList({ view, folder_id: folderId, tag_id: tagId, q: debouncedQ || undefined });
   const create = useCreateNote();
   const queryClient = useQueryClient();
-  // Selection mode: pick several notes, then move them to the trash in one go.
-  const [selecting, setSelecting] = React.useState(false);
-  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const notes = React.useMemo(() => list.data?.pages.flatMap((p) => p.notes) ?? [], [list.data]);
+  const visibleIds = React.useMemo(() => notes.map((n) => n.id), [notes]);
+  // Selection mode: pick several notes (shift-click for a range), then trash them in one go.
+  const selection = useSelection(visibleIds);
   const [confirmBulk, setConfirmBulk] = React.useState(false);
-  const exitSelection = () => {
-    setSelecting(false);
-    setSelected(new Set());
-  };
   const bulkTrash = useMutation({
     mutationFn: (ids: string[]) => notesApi.trashMany(ids),
     onSuccess: ({ moved }) => {
       playSfx("delete");
       toast.success(`Moved ${moved} ${moved === 1 ? "note" : "notes"} to trash`);
       setConfirmBulk(false);
-      exitSelection();
+      selection.exit();
       queryClient.invalidateQueries({ queryKey: ["notes"] });
     },
     onError: (e) => toast.error(messageFor(e)),
@@ -152,7 +164,6 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
     router.replace(`${pathname}?${next.toString()}`);
   };
 
-  const notes = list.data?.pages.flatMap((p) => p.notes) ?? [];
   const folderName = folderId ? folders.find((f) => f.id === folderId)?.name : undefined;
   const tag = tagId ? tags.find((t) => t.id === tagId) : undefined;
 
@@ -164,32 +175,33 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 px-4 pt-4">
-        <h2 className="text-base font-semibold tracking-tight">Notes</h2>
-        <div className="flex items-center gap-1">
-          {view !== "trash" && notes.length ? (
-            <Button variant="ghost" size="sm" aria-label={selecting ? "Cancel selection" : "Select notes"} aria-pressed={selecting} onClick={() => (selecting ? exitSelection() : setSelecting(true))} className="rounded-full text-muted-foreground">
-              <CheckSquare aria-hidden /> {selecting ? "Done" : "Select"}
+      {selection.selecting ? (
+        // The header becomes the selection toolbar: same height, no extra card.
+        <SelectionBar
+          className="px-3 pt-3"
+          allState={selection.allState}
+          count={selection.count}
+          total={selection.visibleTotal}
+          noun="notes"
+          onSelectAll={selection.selectAll}
+          onCancel={selection.exit}
+          action={{ label: "Move to trash", icon: Trash2, onClick: () => setConfirmBulk(true) }}
+        />
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-4 pt-4">
+          <h2 className="text-base font-semibold tracking-tight">Notes</h2>
+          <div className="flex items-center gap-1">
+            {view !== "trash" && notes.length ? (
+              <Button variant="ghost" size="sm" aria-label="Select notes" onClick={selection.enter} className="rounded-full text-muted-foreground">
+                <CheckSquare aria-hidden /> Select
+              </Button>
+            ) : null}
+            <Button size="sm" aria-label="New note" onClick={onCreate} disabled={create.isPending} className="rounded-full">
+              <Plus aria-hidden /> New
             </Button>
-          ) : null}
-          <Button size="sm" aria-label="New note" onClick={onCreate} disabled={create.isPending || selecting} className="rounded-full">
-            <Plus aria-hidden /> New
-          </Button>
+          </div>
         </div>
-      </div>
-      {selecting ? (
-        <div className="px-3 pt-3">
-          <SelectionBar
-            selected={selected.size}
-            total={notes.length}
-            noun="notes"
-            onSelectAll={(all) => setSelected(all ? new Set(notes.map((n) => n.id)) : new Set())}
-            onClear={exitSelection}
-            onDelete={() => setConfirmBulk(true)}
-            deleteLabel="Move to trash"
-          />
-        </div>
-      ) : null}
+      )}
       <div className="px-3 pt-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -200,7 +212,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
         <Tabs
           value={view}
           onValueChange={(v) => {
-            exitSelection();
+            selection.exit();
             setParam("view", v === "active" ? undefined : v);
           }}
         >
@@ -267,21 +279,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           <>
             <ul className="space-y-0.5">
               {notes.map((n) => (
-                <NoteRow
-                  key={n.id}
-                  note={n}
-                  active={n.id === activeNoteId}
-                  selectable={selecting}
-                  selected={selected.has(n.id)}
-                  onSelect={(checked) =>
-                    setSelected((prev) => {
-                      const next = new Set(prev);
-                      if (checked) next.add(n.id);
-                      else next.delete(n.id);
-                      return next;
-                    })
-                  }
-                />
+                <NoteRow key={n.id} note={n} active={n.id === activeNoteId} selectable={selection.selecting} selected={selection.has(n.id)} onSelect={(checked, shift) => selection.toggle(n.id, checked, { shift })} />
               ))}
             </ul>
             {list.hasNextPage ? (
@@ -295,11 +293,11 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
       <ConfirmDialog
         open={confirmBulk}
         onOpenChange={setConfirmBulk}
-        title={`Delete ${selected.size} ${selected.size === 1 ? "note" : "notes"}?`}
-        description="These notes will be moved to Trash. You can restore them from there."
-        confirmLabel="Move to Trash"
+        title={`Move ${selection.count} ${selection.count === 1 ? "note" : "notes"} to trash?`}
+        description={selection.count === 1 ? "It can be restored from Trash." : "They can be restored from Trash."}
+        confirmLabel="Move to trash"
         pending={bulkTrash.isPending}
-        onConfirm={() => bulkTrash.mutate([...selected])}
+        onConfirm={() => bulkTrash.mutate([...selection.ids])}
       />
     </div>
   );

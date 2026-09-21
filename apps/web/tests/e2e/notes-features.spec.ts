@@ -213,25 +213,33 @@ test("select several notes and move them to trash in one go", async ({ page, isM
   if (isMobile) await page.goto("/app/notes");
   const list = page.getByRole("complementary", { name: "Notes list" });
   await list.getByRole("button", { name: "Select notes" }).click();
-  await list.getByRole("checkbox", { name: "Select Bin one" }).click();
   await list.getByRole("checkbox", { name: "Select Bin two" }).click();
+  await list.getByRole("checkbox", { name: "Select Bin one" }).click({ modifiers: ["Shift"] }); // range: Bin two → Bin one
   await expect(list.getByText("2 selected")).toBeVisible();
+  await expect(list.getByRole("checkbox", { name: "Select Keep me" })).not.toBeChecked();
   await list.getByRole("button", { name: "Move to trash" }).click();
-  const confirm = page.getByRole("dialog", { name: "Delete 2 notes?" });
-  await expect(confirm.getByText(/moved to Trash/)).toBeVisible();
-  await confirm.getByRole("button", { name: "Move to Trash" }).click();
+  const confirm = page.getByRole("dialog", { name: "Move 2 notes to trash?" });
+  await expect(confirm.getByText(/restored from Trash/)).toBeVisible();
+  await confirm.getByRole("button", { name: "Move to trash" }).click();
   await expect(confirm).toBeHidden();
   await expect(listTitles(page)).toHaveText(["Keep me"]);
   await page.getByRole("tab", { name: "Trash" }).click();
-  await expect(listTitles(page)).toHaveText(["Bin two", "Bin one"]);
+  await expect(listTitles(page)).toHaveCount(2); // trashed together → same timestamp, order not guaranteed
+  expect((await listTitles(page).allTextContents()).sort()).toEqual(["Bin one", "Bin two"]);
 
   // Select all + cancel leaves everything untouched; an invalid invitation link is explained.
   await page.getByRole("tab", { name: "Notes" }).click();
   await list.getByRole("button", { name: "Select notes" }).click();
   await list.getByRole("checkbox", { name: "Select all" }).click();
-  await expect(list.getByText("1 selected")).toBeVisible();
-  await list.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(list.getByRole("checkbox", { name: "Select all" })).toHaveCount(0);
+  await expect(list.getByText("The only note selected")).toBeVisible();
+  await list.getByRole("checkbox", { name: "Deselect all" }).click();
+  await expect(list.getByText("Select notes")).toBeVisible();
+  // Escape leaves selection mode; so does Cancel.
+  await page.keyboard.press("Escape");
+  await expect(list.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
+  await list.getByRole("button", { name: "Select notes" }).click();
+  await list.getByRole("button", { name: "Cancel selection" }).click();
+  await expect(list.getByRole("toolbar", { name: "Selection" })).toHaveCount(0);
   await page.goto("/invite/not-a-real-token");
   await expect(page.getByRole("heading", { name: /invitation link isn’t valid/ })).toBeVisible();
 });

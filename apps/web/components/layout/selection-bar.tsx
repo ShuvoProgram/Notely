@@ -1,53 +1,55 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { X, type LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 /**
- * The bar shown while a list is in selection mode: select-all, the count, one destructive
- * action and Cancel. Shared by Notes and Tasks so bulk actions feel identical.
+ * Contextual toolbar shown in place of a list's header while selecting. One row where it fits:
+ * the tri-state "select all" box with the count, the destructive action and Cancel. On narrow
+ * panels the actions wrap under the count instead of squeezing.
  */
 export function SelectionBar({
-  selected,
+  allState,
+  count,
   total,
   noun,
   onSelectAll,
-  onClear,
-  onDelete,
-  deleteLabel = "Delete",
+  onCancel,
+  action,
   className,
 }: {
-  selected: number;
+  allState: boolean | "indeterminate";
+  count: number;
   total: number;
   noun: string;
   onSelectAll: (all: boolean) => void;
-  onClear: () => void;
-  onDelete: () => void;
-  deleteLabel?: string;
+  onCancel: () => void;
+  action: { label: string; icon: LucideIcon; onClick: () => void };
   className?: string;
 }) {
-  const all = total > 0 && selected === total;
+  const all = allState === true;
+  const one = noun.replace(/s$/, "");
+  const label = count === 0 ? `Select ${noun}` : all ? (total === 1 ? `The only ${one} selected` : `All ${total} ${noun} selected`) : `${count} selected`;
   return (
-    <div role="toolbar" aria-label="Selection" className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-glass-border bg-muted/40 px-3 py-2 text-sm", className)}>
-      <label className="flex cursor-pointer items-center gap-2">
-        <Checkbox checked={all ? true : selected > 0 ? "indeterminate" : false} onCheckedChange={(v) => onSelectAll(v === true)} aria-label="Select all" />
-        <span className="text-muted-foreground">Select all</span>
+    <div role="toolbar" aria-label="Selection" className={cn("flex flex-wrap items-center gap-x-2 gap-y-1.5", className)}>
+      <label className="flex cursor-pointer items-center gap-2.5 py-1">
+        <Checkbox checked={allState} onCheckedChange={(v) => onSelectAll(v === true)} aria-label={all ? "Deselect all" : "Select all"} />
+        <span className="whitespace-nowrap text-sm font-medium tabular-nums" aria-live="polite">
+          {label}
+        </span>
       </label>
-      <span className="tabular-nums" aria-live="polite">
-        {selected} selected
-      </span>
-      <div className="ml-auto flex items-center gap-1.5">
-        <Button variant="destructive" size="sm" disabled={selected === 0} onClick={onDelete}>
-          <Trash2 aria-hidden /> {deleteLabel}
+      {/* Actions sit on the same row when there is room, and drop under the count when not. */}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <Button variant="ghost" size="sm" disabled={count === 0} onClick={action.onClick} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+          <action.icon aria-hidden /> {action.label}
         </Button>
-        <Button variant="ghost" size="sm" onClick={onClear}>
-          Cancel
+        <Button variant="ghost" size="sm" onClick={onCancel} aria-label="Cancel selection" className="text-muted-foreground">
+          <X aria-hidden /> Cancel
         </Button>
       </div>
-      <span className="sr-only">{noun}</span>
     </div>
   );
 }

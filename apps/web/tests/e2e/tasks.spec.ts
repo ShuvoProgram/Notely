@@ -97,6 +97,10 @@ test("select several tasks and delete them together", async ({ page }) => {
   await page.getByRole("checkbox", { name: "Select Alpha task" }).click();
   await page.getByRole("checkbox", { name: "Select Beta task" }).click();
   await expect(page.getByText("2 selected")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Select all" }).click();
+  await expect(page.getByText("All 3 tasks selected")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Select Gamma task" }).click();
+  await expect(page.getByText("2 selected")).toBeVisible();
   await page.getByRole("toolbar", { name: "Selection" }).getByRole("button", { name: "Delete" }).click();
   const confirm = page.getByRole("dialog", { name: "Delete 2 tasks?" });
   await confirm.getByRole("button", { name: "Delete" }).click();
