@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Plus, Search } from "lucide-react";
+import { FileText, Plus, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import {
   CommandDialog,
   CommandEmpty,
+  CommandFooter,
   CommandGroup,
   CommandInput,
   CommandItem,
@@ -76,9 +77,9 @@ export function CommandPalette({ className }: { className?: string }) {
       <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open command palette" className="sm:hidden">
         <Search aria-hidden />
       </Button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Search and commands" description="Jump to a page, create a note, or open one by title" className="glass-3">
-        <CommandInput placeholder="Type a command or search notes…" value={q} onValueChange={setQ} />
-        <CommandList className="max-h-[60vh]">
+      <CommandDialog open={open} onOpenChange={setOpen} title="Search and commands" description="Jump to a page, create a note, or open one by title">
+        <CommandInput placeholder="Search notes, or type a command…" value={q} onValueChange={setQ} loading={notes.isFetching} />
+        <CommandList>
           <CommandEmpty>{notes.isFetching ? "Searching…" : "Nothing matches yet."}</CommandEmpty>
           {notes.isError ? (
             <p role="alert" className="px-3 py-2 text-xs text-destructive">
@@ -87,7 +88,7 @@ export function CommandPalette({ className }: { className?: string }) {
           ) : null}
           <CommandGroup heading="Actions">
             <CommandItem
-              value="new note"
+              value="new note create"
               onSelect={() =>
                 create.mutate(
                   {},
@@ -99,6 +100,7 @@ export function CommandPalette({ className }: { className?: string }) {
               }
             >
               <Plus aria-hidden /> New note
+              <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">Action</span>
             </CommandItem>
             {q.trim() ? (
               <CommandItem value={`search ${q}`} onSelect={() => go(`/app/search?q=${encodeURIComponent(q.trim())}`)}>
@@ -111,10 +113,13 @@ export function CommandPalette({ className }: { className?: string }) {
               <CommandSeparator />
               <CommandGroup heading="Notes">
                 {notes.data.notes.map((n) => (
-                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)}>
+                  <CommandItem key={n.id} value={`note ${n.title || "Untitled"} ${n.excerpt ?? ""} ${n.id}`} onSelect={() => go(`/app/notes/${n.id}`)} className="h-11">
                     <FileText aria-hidden />
-                    <span className="truncate">{n.title || "Untitled"}</span>
-                    {n.excerpt ? <span className="ml-auto max-w-[40%] truncate text-xs text-muted-foreground">{n.excerpt}</span> : null}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{n.title || "Untitled"}</span>
+                      {n.excerpt ? <span className="block truncate text-xs text-muted-foreground">{n.excerpt}</span> : null}
+                    </span>
+                    <span className="hidden text-[11px] text-muted-foreground sm:inline">Note</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -125,10 +130,26 @@ export function CommandPalette({ className }: { className?: string }) {
             {primaryNav.map((item) => (
               <CommandItem key={item.href} value={`go ${item.label}`} onSelect={() => go(item.href)}>
                 <item.icon aria-hidden /> {item.label}
+                <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">Go to</span>
               </CommandItem>
             ))}
           </CommandGroup>
         </CommandList>
+        <CommandFooter>
+          <span className="inline-flex items-center gap-1.5">
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> navigate
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Kbd>↵</Kbd> open
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Kbd>esc</Kbd> close
+          </span>
+          <span className="ml-auto hidden items-center gap-1.5 sm:inline-flex">
+            <Sparkles className="size-3 text-ai" aria-hidden /> Notely
+          </span>
+        </CommandFooter>
       </CommandDialog>
     </>
   );

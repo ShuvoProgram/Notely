@@ -4,6 +4,19 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * Radix/cmdk state variants. The shadcn "radix-nova" components are written against these
+ * shorthand names, which map onto the data-state attributes the primitives actually render.
+ * Without them `data-open:` etc. would only match a literal `data-open` attribute.
+ */
+@custom-variant data-open (&[data-state="open"]);
+@custom-variant data-closed (&[data-state="closed"]);
+@custom-variant data-active (&[data-state="active"]);
+@custom-variant data-inactive (&[data-state="inactive"]);
+@custom-variant data-checked (&[data-state="checked"]);
+@custom-variant data-unchecked (&[data-state="unchecked"]);
+@custom-variant data-selected (&[data-selected="true"]);
+
+/*
  * Notely design system — dark-first "quiet glass".
  *
  * Surfaces are translucent layers over a deep, softly lit background. Blur and transparency are
