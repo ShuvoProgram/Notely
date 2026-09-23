@@ -6,7 +6,7 @@
 export const LEGAL = {
   productName: "Notely AI",
   companyName: "Notely AI",
-  contactEmail: process.env.NEXT_PUBLIC_LEGAL_CONTACT_EMAIL ?? "support@notely.app",
+  contactEmail: process.env.NEXT_PUBLIC_LEGAL_CONTACT_EMAIL ?? "support@brainix.co",
   jurisdiction: process.env.NEXT_PUBLIC_LEGAL_JURISDICTION ?? "Bangladesh",
   /** ISO date of the last substantive change to either document. */
   lastUpdated: "2026-09-24",
