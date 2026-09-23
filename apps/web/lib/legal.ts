@@ -9,7 +9,7 @@ export const LEGAL = {
   contactEmail: process.env.NEXT_PUBLIC_LEGAL_CONTACT_EMAIL ?? "support@notely.app",
   jurisdiction: process.env.NEXT_PUBLIC_LEGAL_JURISDICTION ?? "Bangladesh",
   /** ISO date of the last substantive change to either document. */
-  lastUpdated: "2026-09-21",
+  lastUpdated: "2026-09-24",
 } as const;
 
 export function formatLegalDate(iso: string): string {

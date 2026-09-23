@@ -76,7 +76,7 @@ export default function TermsPage() {
       <LegalSection id="connected-tools" title="4. Connected tools and integrations">
         <p>
           You may connect third-party tools (such as Gmail, Google Calendar, Google Drive, Microsoft 365, Notion, Slack,
-          Jira, Dropbox, ClickUp, Stripe or PayPal). Doing so is optional and uses the vendor’s own authorization flow.
+          Jira, Dropbox or ClickUp). Doing so is optional and uses the vendor’s own authorization flow.
           You are responsible for having the right to connect the account you connect, for complying with the vendor’s
           terms, and for the actions you approve. We access connected accounts only as your Privacy Policy describes and
           only to the extent of the permissions you granted. You can disconnect any tool at any time, which revokes and
@@ -101,7 +101,7 @@ export default function TermsPage() {
           Content solely to operate and improve the Service for you, including sending relevant excerpts to the AI model
           provider configured for your account. We do not use Your Content to train machine-learning models, and we do not
           claim any other rights in it. You are responsible for Your Content and for having the rights needed to use it
-          with the Service. You can export Your Content at any time and delete it by deleting notes or your account.
+          with the Service. You can delete Your Content at any time by deleting it in the Service, and you can ask us for a copy of it or to delete your account by contacting us.
         </p>
       </LegalSection>
 
@@ -164,9 +164,9 @@ export default function TermsPage() {
 
       <LegalSection id="termination" title="13. Termination">
         <p>
-          You may stop using the Service and delete your account at any time from <em>Settings</em>. We may suspend or
+          You may stop using the Service at any time and ask us to delete your account by contacting us. We may suspend or
           terminate your access if you materially breach these terms, if required by law, or if continuing would create
-          risk for us or other users; where practical we will notify you and give you a chance to export Your Content.
+          risk for us or other users; where practical we will notify you and give you a chance to get a copy of Your Content.
           Sections 6 through 12 and 15 survive termination.
         </p>
       </LegalSection>
