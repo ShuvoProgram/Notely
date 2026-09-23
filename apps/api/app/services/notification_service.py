@@ -43,6 +43,7 @@ PREF_FOR_KIND: dict[NotificationKind, str] = {
     NotificationKind.calendar_sync_failed: "calendar_sync",
     NotificationKind.note_reminder: "note_reminders",
     NotificationKind.note_shared: "sharing",
+    NotificationKind.automation: "automations",
 }
 
 
@@ -95,7 +96,7 @@ class NotificationService:
     async def list(self, user: User, *, limit: int = 50) -> list[Notification]:
         stmt = (
             select(Notification)
-            .where(Notification.user_id == user.id)
+            .where(Notification.user_id == user.id, Notification.dismissed_at.is_(None))
             .order_by(Notification.created_at.desc())
             .limit(limit)
         )
@@ -105,29 +106,56 @@ class NotificationService:
         return int(
             await self.db.scalar(
                 select(func.count()).where(
-                    Notification.user_id == user.id, Notification.read_at.is_(None)
+                    Notification.user_id == user.id,
+                    Notification.read_at.is_(None),
+                    Notification.dismissed_at.is_(None),
                 )
             )
             or 0
         )
 
-    async def mark_read(self, user: User, notification_id: uuid.UUID) -> Notification:
+    async def _own(self, user: User, notification_id: uuid.UUID) -> Notification:
         row = await self.db.scalar(
             select(Notification).where(
-                Notification.id == notification_id, Notification.user_id == user.id
+                Notification.id == notification_id,
+                Notification.user_id == user.id,
+                Notification.dismissed_at.is_(None),
             )
         )
         if row is None:
             raise NotFound("Notification not found.")
+        return row
+
+    async def mark_read(self, user: User, notification_id: uuid.UUID) -> Notification:
+        row = await self._own(user, notification_id)
         if row.read_at is None:
             row.read_at = utcnow()
             await self.db.commit()
         return row
 
+    async def mark_unread(self, user: User, notification_id: uuid.UUID) -> Notification:
+        row = await self._own(user, notification_id)
+        if row.read_at is not None:
+            row.read_at = None
+            await self.db.commit()
+        return row
+
+    async def dismiss(self, user: User, notification_id: uuid.UUID) -> None:
+        """Remove from the inbox; the row stays so a derived reminder isn't raised again."""
+        row = await self._own(user, notification_id)
+        now = utcnow()
+        row.dismissed_at = now
+        row.read_at = row.read_at or now
+        await self.db.commit()
+
     async def mark_all_read(self, user: User) -> int:
         result = await self.db.execute(
             update(Notification)
-            .where(Notification.user_id == user.id, Notification.read_at.is_(None))
+            .where(
+                Notification.user_id == user.id,
+                Notification.read_at.is_(None),
+                Notification.dismissed_at.is_(None),
+            )
             .values(read_at=utcnow())
         )
         await self.db.commit()

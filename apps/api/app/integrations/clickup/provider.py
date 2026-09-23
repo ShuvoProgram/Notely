@@ -9,11 +9,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.integrations.base.http import ProviderHttpClient
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -287,6 +289,15 @@ class ClickUpProvider(RestOAuthProvider):
                 Capability.read,
                 list_tasks,
                 lambda a: "List ClickUp tasks",
+                outputs=(
+                    listing(
+                        "tasks",
+                        "Tasks",
+                        F("name", "Task"),
+                        F("status", "Status"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "list_lists",

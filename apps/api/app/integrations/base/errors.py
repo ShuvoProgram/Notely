@@ -4,6 +4,7 @@ retry behaviour and the user-facing messages from the PRD (section 34)."""
 from __future__ import annotations
 
 import enum
+import re
 
 from app.core.exceptions import APIError
 
@@ -18,6 +19,9 @@ class ProviderErrorKind(enum.StrEnum):
     invalid_request = "invalid_request"  # 4xx we caused
     not_found = "not_found"
     misconfigured = "misconfigured"  # provider not configured on this deployment
+    # The vendor API itself is switched off for this deployment's app (e.g. the Google Sheets
+    # API not enabled in the Google Cloud project). Not the user's fault; reconnecting won't help.
+    api_disabled = "api_disabled"
     unknown = "unknown"
 
 
@@ -51,6 +55,11 @@ USER_MESSAGES: dict[ProviderErrorKind, tuple[str, str]] = {
         "Not available",
         "{provider} isn't configured on this Notely deployment yet.",
     ),
+    ProviderErrorKind.api_disabled: (
+        "API turned off",
+        "The {provider} API is turned off for this Notely app. An administrator needs to enable "
+        "it in the Google Cloud project, then this step can be retried.",
+    ),
     ProviderErrorKind.unknown: (
         "This action couldn't be completed",
         "Review the details and try again.",
@@ -79,7 +88,7 @@ class ProviderError(Exception):
 
     def user_message(self) -> tuple[str, str]:
         title, body = USER_MESSAGES[self.kind]
-        return title, body.format(provider=self.provider.title())
+        return title, body.format(provider=self.provider.replace("_", " ").title())
 
     def as_api_error(self) -> APIError:
         """The same categorised envelope the global handler produces (one mapping, see
@@ -96,12 +105,27 @@ class ProviderError(Exception):
         )
 
 
+# Google's wording when an API isn't enabled for the OAuth client's Cloud project.
+_API_DISABLED = re.compile(
+    r"service_disabled|accessnotconfigured|has not been used in project|api .* is disabled|"
+    r"it is disabled"
+)
+_ENABLE_URL = re.compile(r"https://console\.(?:developers|cloud)\.google\.com/[^\s\"'\\]+")
+
+
 def classify_http_status(
     status: int, *, provider: str, body_hint: str | None = None
 ) -> ProviderError:
     text = (body_hint or "").lower()
     if status == 401:
         kind = ProviderErrorKind.expired if "expired" in text else ProviderErrorKind.auth_failed
+    elif status == 403 and _API_DISABLED.search(text):
+        url = _ENABLE_URL.search(body_hint or "")
+        return ProviderError(
+            ProviderErrorKind.api_disabled,
+            url.group(0) if url else f"HTTP {status}",
+            provider=provider,
+        )
     elif status == 403:
         kind = (
             ProviderErrorKind.admin_approval_required

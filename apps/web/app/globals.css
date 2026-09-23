@@ -22,119 +22,326 @@
 /*
  * Notely design system — dark-first "quiet glass".
  *
- * Surfaces are translucent layers over a deep, softly lit background. Blur and transparency are
- * used on chrome (sidebar, top bar, panels, popovers, dialogs) and never on reading surfaces
- * such as the editor body, so text stays crisp. Three glass levels, three shadow levels, one
- * accent: the Notely green, reserved for AI affordances and primary actions.
+ * Surfaces are translucent layers over a background the user chooses (Settings → Appearance),
+ * with a scrim between the two that keeps text readable. Blur and transparency are used on
+ * chrome (sidebar, top bar, panels, popovers, dialogs) and never on reading surfaces such as the
+ * editor body, so text stays crisp. One accent: the Notely green, for AI and primary actions.
  *
- *   --glass-1   base panels (sidebar, cards)          --blur-md
- *   --glass-2   floating chrome (popovers, toolbars)  --blur-lg
- *   --glass-3   modal surfaces (dialogs, sheets)      --blur-xl
+ *   background → scrim → glass-nav (sidebar, top bar)   --blur-lg   .glass-nav
+ *                      → glass-1   (cards, panels)      --blur-md   .glass
+ *                      → glass-2   (popovers, menus)    --blur-lg   .glass-2
+ *                      → glass-3   (dialogs, sheets)    --blur-xl   .glass-3
+ *
+ * Each layer is more solid than the one below it at every user setting, so depth survives.
  */
 :root,
 .dark {
   --background: oklch(0.165 0.008 262);
-  --foreground: oklch(0.95 0.005 260);
-  --card: oklch(0.22 0.008 262 / 0.62);
-  --card-foreground: oklch(0.95 0.005 260);
-  --popover: oklch(0.21 0.008 262 / 0.9);
-  --popover-foreground: oklch(0.95 0.005 260);
+  /*
+   * Foreground roles — solid neutral colours, never translucent, so their contrast doesn't
+   * depend on what happens to be behind them. White family here, black family in .light.
+   *   --foreground            primary: titles, body, values            (white)
+   *   --foreground-secondary  descriptions, list previews, labels      (light grey)
+   *   --foreground-muted      metadata: times, counts, hints           (readable grey)
+   * Components use them via text-foreground / text-muted-foreground / text-tertiary.
+   */
+  --foreground: oklch(0.99 0 0);
+  --foreground-secondary: oklch(0.88 0 0);
+  --foreground-muted: oklch(0.79 0 0);
+  --card: var(--glass-1);
+  --card-foreground: var(--foreground);
+  --popover: var(--glass-2);
+  --popover-foreground: var(--foreground);
   --primary: oklch(0.78 0.16 155);
   --primary-foreground: oklch(0.16 0.03 155);
-  --secondary: oklch(0.28 0.008 262 / 0.7);
-  --secondary-foreground: oklch(0.93 0.005 260);
-  --muted: oklch(0.28 0.008 262 / 0.6);
-  --muted-foreground: oklch(0.7 0.01 260);
-  --accent: oklch(0.32 0.01 262 / 0.6);
-  --accent-foreground: oklch(0.96 0.005 260);
+  --secondary: oklch(0.3 0.008 262 / 0.8);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.3 0.008 262 / 0.72);
+  /* Every role reads at ≥4.5:1 on the lightest surface it sits on (disabled ≥3:1). Never fade
+     text with /opacity in components; pick the role instead. */
+  --muted-foreground: var(--foreground-secondary);
+  --text-tertiary: var(--foreground-muted);
+  --text-placeholder: oklch(0.72 0 0);
+  --text-disabled: oklch(0.62 0 0);
+  --link: oklch(0.8 0.15 155); /* accent as text */
+  --accent: oklch(0.34 0.01 262 / 0.72);
+  --accent-foreground: var(--foreground);
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(1 0 0 / 0.09);
-  --input: oklch(1 0 0 / 0.12);
+  --border: oklch(1 0 0 / 0.12);
+  --input: oklch(1 0 0 / 0.16);
   --ring: oklch(0.78 0.16 155 / 0.6);
-  --sidebar: oklch(0.19 0.008 262 / 0.55);
-  --sidebar-foreground: oklch(0.9 0.005 260);
+  --sidebar: var(--glass-nav);
+  --sidebar-foreground: var(--foreground);
   --sidebar-accent: oklch(1 0 0 / 0.07);
-  --sidebar-accent-foreground: oklch(0.97 0.005 260);
+  --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(1 0 0 / 0.08);
   --ai: oklch(0.78 0.16 155);
   --ai-soft: oklch(0.78 0.16 155 / 0.14);
   --success: oklch(0.75 0.15 155);
   --warning: oklch(0.8 0.15 80);
   --info: oklch(0.75 0.12 235);
-  --radius: 0.875rem;
+  --radius: 0.75rem;
 
-  /* glass */
-  --glass-1: oklch(0.22 0.008 262 / 0.55);
-  --glass-2: oklch(0.23 0.008 262 / 0.78);
-  --glass-3: oklch(0.21 0.008 262 / 0.9);
-  --glass-border: oklch(1 0 0 / 0.09);
-  --glass-border-strong: oklch(1 0 0 / 0.14);
-  --glass-highlight: oklch(1 0 0 / 0.06);
-  --blur-sm: 8px;
-  --blur-md: 16px;
-  --blur-lg: 24px;
-  --blur-xl: 40px;
+  /* glass — tint and ink per theme; strength from the user's Appearance settings (0–1 each) */
+  --glass-tint: 0.19 0.01 262;
+  --glass-tint-color: oklch(0.19 0.01 262);
+  --glass-ink: 1 0 0;
+  /* Floors keep text readable over the brightest photo even at "Strong"; each layer stays more solid than the one below. */
+  --glass-1: oklch(var(--glass-tint) / calc(0.64 + 0.32 * var(--glass-opacity)));
+  --glass-nav: oklch(var(--glass-tint) / calc(0.7 + 0.27 * var(--glass-opacity)));
+  --glass-2: oklch(var(--glass-tint) / calc(0.82 + 0.16 * var(--glass-opacity)));
+  --glass-3: oklch(var(--glass-tint) / calc(0.87 + 0.12 * var(--glass-opacity)));
+  --glass-border: oklch(var(--glass-ink) / calc(0.04 + 0.12 * var(--glass-edge)));
+  --glass-border-strong: oklch(var(--glass-ink) / calc(0.07 + 0.16 * var(--glass-edge)));
+  --glass-highlight: oklch(1 0 0 / calc(0.02 + 0.08 * var(--glass-edge)));
+  --field: oklch(0 0 0 / 0.22);
+  /* liquid edge: a soft reflection across the top, a lit rim above and a shaded one below */
+  --glass-sheen: linear-gradient(180deg, oklch(1 0 0 / calc(0.02 + 0.05 * var(--glass-edge))) 0%, transparent 42%);
+  --glass-shade: oklch(0 0 0 / 0.22);
+  --scrim-color: oklch(0.13 0.01 262);
   --shadow-1: 0 1px 2px oklch(0 0 0 / 0.25), 0 0 0 1px oklch(0 0 0 / 0.08);
   --shadow-2: 0 8px 24px -8px oklch(0 0 0 / 0.5), 0 2px 6px oklch(0 0 0 / 0.25);
   --shadow-3: 0 24px 64px -16px oklch(0 0 0 / 0.65), 0 8px 24px -8px oklch(0 0 0 / 0.4);
   --glow-ai: 0 0 0 1px oklch(0.78 0.16 155 / 0.35), 0 8px 32px -8px oklch(0.78 0.16 155 / 0.35);
 
-  /* background lighting */
-  --bg-glow-1: oklch(0.6 0.14 160 / 0.16);
-  --bg-glow-2: oklch(0.55 0.1 250 / 0.12);
-
   /* motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  /* settles like a spring without a visible bounce: menus, dialogs, selection pills */
+  --ease-liquid: cubic-bezier(0.2, 0.9, 0.2, 1.04);
   --dur-fast: 120ms;
   --dur-base: 200ms;
   --dur-slow: 320ms;
+  /* One disabled treatment for every control: clearly inactive, still legible (≥3:1). */
+  --disabled-opacity: 0.65;
 }
 
 .light {
   --background: oklch(0.975 0.004 250);
-  --foreground: oklch(0.2 0.006 260);
-  --card: oklch(1 0 0 / 0.72);
-  --card-foreground: oklch(0.2 0.006 260);
-  --popover: oklch(1 0 0 / 0.9);
-  --popover-foreground: oklch(0.2 0.006 260);
-  --primary: oklch(0.55 0.15 155);
+  --foreground: oklch(0.14 0 0);
+  --foreground-secondary: oklch(0.3 0 0);
+  --foreground-muted: oklch(0.4 0 0);
+  --card: var(--glass-1);
+  --card-foreground: var(--foreground);
+  --popover: var(--glass-2);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.49 0.13 155);
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.94 0.004 260 / 0.8);
-  --secondary-foreground: oklch(0.25 0.006 260);
+  --secondary-foreground: var(--foreground);
   --muted: oklch(0.94 0.004 260 / 0.8);
-  --muted-foreground: oklch(0.48 0.01 260);
+  --muted-foreground: var(--foreground-secondary);
+  --text-tertiary: var(--foreground-muted);
+  --text-placeholder: oklch(0.44 0 0);
+  --text-disabled: oklch(0.56 0 0);
+  --link: oklch(0.41 0.11 155);
   --accent: oklch(0.92 0.005 260 / 0.8);
-  --accent-foreground: oklch(0.2 0.006 260);
-  --destructive: oklch(0.55 0.2 25);
+  --accent-foreground: var(--foreground);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0 0 0 / 0.09);
-  --input: oklch(0 0 0 / 0.12);
-  --ring: oklch(0.55 0.15 155 / 0.5);
-  --sidebar: oklch(1 0 0 / 0.55);
-  --sidebar-foreground: oklch(0.25 0.006 260);
+  --border: oklch(0 0 0 / 0.12);
+  --input: oklch(0 0 0 / 0.16);
+  --ring: oklch(0.49 0.13 155 / 0.55);
+  --sidebar: var(--glass-nav);
+  --sidebar-foreground: var(--foreground);
   --sidebar-accent: oklch(0 0 0 / 0.05);
-  --sidebar-accent-foreground: oklch(0.15 0.006 260);
+  --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(0 0 0 / 0.08);
-  --ai: oklch(0.55 0.15 155);
-  --ai-soft: oklch(0.55 0.15 155 / 0.1);
-  --success: oklch(0.6 0.15 155);
-  --warning: oklch(0.7 0.15 80);
-  --info: oklch(0.55 0.12 235);
+  --ai: oklch(0.41 0.11 155);
+  --ai-soft: oklch(0.55 0.15 155 / 0.12);
+  /* status colours double as text, so they are dark enough to read on light glass */
+  --success: oklch(0.47 0.13 155);
+  --warning: oklch(0.52 0.13 70);
+  --info: oklch(0.48 0.12 240);
+  --destructive: oklch(0.52 0.2 25);
 
-  --glass-1: oklch(1 0 0 / 0.55);
-  --glass-2: oklch(1 0 0 / 0.78);
-  --glass-3: oklch(1 0 0 / 0.9);
-  --glass-border: oklch(0 0 0 / 0.08);
-  --glass-border-strong: oklch(0 0 0 / 0.12);
-  --glass-highlight: oklch(1 0 0 / 0.7);
+  --glass-tint: 0.99 0.004 250;
+  --glass-tint-color: oklch(0.99 0.004 250);
+  --glass-ink: 0.22 0.01 260;
+  --glass-1: oklch(var(--glass-tint) / calc(0.66 + 0.3 * var(--glass-opacity)));
+  --glass-nav: oklch(var(--glass-tint) / calc(0.72 + 0.25 * var(--glass-opacity)));
+  --glass-2: oklch(var(--glass-tint) / calc(0.84 + 0.14 * var(--glass-opacity)));
+  --glass-3: oklch(var(--glass-tint) / calc(0.89 + 0.1 * var(--glass-opacity)));
+  --glass-border: oklch(var(--glass-ink) / calc(0.04 + 0.1 * var(--glass-edge)));
+  --glass-border-strong: oklch(var(--glass-ink) / calc(0.07 + 0.13 * var(--glass-edge)));
+  --glass-highlight: oklch(1 0 0 / calc(0.35 + 0.45 * var(--glass-edge)));
+  --field: oklch(1 0 0 / 0.72);
+  --glass-sheen: linear-gradient(180deg, oklch(1 0 0 / calc(0.25 + 0.35 * var(--glass-edge))) 0%, transparent 50%);
+  --glass-shade: oklch(0 0 0 / 0.035);
+  --scrim-color: oklch(0.985 0.004 250);
   --shadow-1: 0 1px 2px oklch(0 0 0 / 0.06), 0 0 0 1px oklch(0 0 0 / 0.04);
   --shadow-2: 0 8px 24px -8px oklch(0 0 0 / 0.18), 0 2px 6px oklch(0 0 0 / 0.06);
   --shadow-3: 0 24px 64px -16px oklch(0 0 0 / 0.28), 0 8px 24px -8px oklch(0 0 0 / 0.12);
-  --glow-ai: 0 0 0 1px oklch(0.55 0.15 155 / 0.3), 0 8px 32px -8px oklch(0.55 0.15 155 / 0.3);
-  --bg-glow-1: oklch(0.7 0.12 160 / 0.18);
-  --bg-glow-2: oklch(0.7 0.08 250 / 0.16);
+  --glow-ai: 0 0 0 1px oklch(0.49 0.13 155 / 0.3), 0 8px 32px -8px oklch(0.49 0.13 155 / 0.3);
+}
+
+/*
+ * Appearance (Settings → Appearance; lib/appearance). Backgrounds are only the approved images in
+ * public/assets, served through Next's image optimiser as sized WebP. The app writes onto <html>:
+ *
+ *   data-bg           which image (and its scrim)
+ *   data-glass        off | subtle | medium | strong
+ *   --glass-blur      0–1  how frosted     ─┐ scaled per layer, so nav, cards, popovers and
+ *   --glass-opacity   0–1  how solid        │ dialogs keep distinct depths at every setting
+ *   --glass-edge      0–1  border/highlight ─┘
+ *
+ * Readability comes from three layers working together, never from making surfaces opaque:
+ * the photo is softened slightly, a scrim tuned per image × theme dims (or lightens) it, and the
+ * glass has a floor opacity. Text that sits straight on the photo uses `.on-backdrop`.
+ */
+:root {
+  --glass-blur: 0.6;
+  --glass-opacity: 0.55;
+  --glass-edge: 0.55;
+  --blur-device: 1;
+  --blur-sm: calc(var(--blur-device) * (2px + 10px * var(--glass-blur)));
+  --blur-md: calc(var(--blur-device) * (2px + 26px * var(--glass-blur)));
+  --blur-lg: calc(var(--blur-device) * (4px + 34px * var(--glass-blur)));
+  --blur-xl: calc(var(--blur-device) * (6px + 46px * var(--glass-blur)));
+  --bg-image: url("/_next/image?url=%2Fassets%2Fbg-2.png&w=1920&q=75");
+  --scrim: 0.2;
+}
+html[data-bg="forest"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-1.png&w=1920&q=75"); }
+html[data-bg="starry-moss"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-2.png&w=1920&q=75"); }
+html[data-bg="mossy-branch"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-3.png&w=1920&q=75"); }
+html[data-bg="mountain-lake"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-4.png&w=1920&q=75"); }
+html[data-bg="meadow"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-5.png&w=1920&q=75"); }
+@media (max-width: 767px) {
+  :root { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-2.png&w=1080&q=75"); }
+  html[data-bg="forest"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-1.png&w=1080&q=75"); }
+  html[data-bg="starry-moss"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-2.png&w=1080&q=75"); }
+  html[data-bg="mossy-branch"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-3.png&w=1080&q=75"); }
+  html[data-bg="mountain-lake"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-4.png&w=1080&q=75"); }
+  html[data-bg="meadow"] { --bg-image: url("/_next/image?url=%2Fassets%2Fbg-5.png&w=1080&q=75"); }
+}
+/*
+ * Scrim per image × theme, measured rather than chosen: the lowest veil at which primary text
+ * (white in dark, black in light) reaches 4.8:1 on the photo's most extreme 2% of pixels, plus a
+ * small margin. Secondary/muted text that sits straight on the photo gets a plate (.on-backdrop).
+ */
+html:not(.light)[data-bg="forest"] { --scrim: 0.58; }
+html:not(.light)[data-bg="mountain-lake"] { --scrim: 0.56; }
+html:not(.light)[data-bg="meadow"] { --scrim: 0.58; }
+html:not(.light)[data-bg="mossy-branch"] { --scrim: 0.56; }
+html.light { --scrim: 0.52; }
+html.light[data-bg="forest"] { --scrim: 0.5; }
+html.light[data-bg="mountain-lake"] { --scrim: 0.45; }
+html.light[data-bg="meadow"] { --scrim: 0.44; }
+html.light[data-bg="mossy-branch"] { --scrim: 0.46; }
+/*
+ * Text that sits straight on the photo (page headers, empty states) stands on a soft frosted
+ * plate in the theme's surface colour, so secondary and muted text keep full contrast. The plate
+ * pads outward with a matching negative margin, so it never moves the layout.
+ */
+.on-backdrop {
+  --plate-x: 0.875rem;
+  --plate-y: 0.625rem;
+  padding: var(--plate-y) var(--plate-x);
+  margin: calc(var(--plate-y) * -1) calc(var(--plate-x) * -1);
+  border-radius: calc(var(--radius) + 6px);
+  background-color: color-mix(in oklch, var(--glass-tint-color) 72%, transparent);
+  backdrop-filter: blur(calc(var(--blur-device) * 18px)) saturate(110%);
+}
+/* Inside a panel, the panel is the surface: no plate. */
+:is(.glass, .glass-nav, .glass-2, .glass-3, .app-canvas:not(:has([data-full-bleed])), [data-slot="card"], [role="dialog"]) .on-backdrop {
+  padding: 0;
+  margin: 0;
+  background: none;
+  backdrop-filter: none;
+}
+html[data-glass="off"] .on-backdrop:not(:is(.glass, .glass-nav, .glass-2, .glass-3, .app-canvas:not(:has([data-full-bleed])), [data-slot="card"], [role="dialog"]) *) { background-color: color-mix(in oklch, var(--glass-tint-color) 94%, transparent); backdrop-filter: none; }
+/* Off: solid surfaces and no backdrop filters at all (also the cheapest to render). */
+html[data-glass="off"] :is(.glass, .glass-nav, .glass-2, .glass-3) {
+  backdrop-filter: none;
+}
+html[data-glass="off"] {
+  --glass-1: oklch(var(--glass-tint) / 0.97);
+  --glass-nav: oklch(var(--glass-tint) / 0.98);
+  --glass-2: oklch(var(--glass-tint) / 0.99);
+  --glass-3: oklch(var(--glass-tint) / 0.99);
+}
+/*
+ * The content canvas: every page's content sits on one light frosted sheet, so no text is ever
+ * placed straight on the photo. Its strength is measured, not chosen: the least frost at which
+ * muted text reads at 4.6:1 over the most extreme 2% of every approved photo (≈0.45), with margin.
+ * It ignores the glass-strength setting on purpose (it's the readability layer, not decoration).
+ * Full-bleed screens (notes, AI) bring their own panels and opt out.
+ */
+.app-canvas:not(:has([data-full-bleed])) {
+  background-color: oklch(var(--glass-tint) / 0.5);
+  backdrop-filter: blur(calc(var(--blur-device) * 28px)) saturate(110%);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+@media (min-width: 640px) {
+  .app-canvas:not(:has([data-full-bleed])) {
+    margin-block: 1rem;
+    border-radius: calc(var(--radius) + 16px);
+  }
+}
+@media (max-width: 639px) {
+  .app-canvas:not(:has([data-full-bleed])) {
+    border-inline: 0;
+  }
+}
+html[data-glass="off"] .app-canvas:not(:has([data-full-bleed])) {
+  background-color: oklch(var(--glass-tint) / 0.96);
+  backdrop-filter: none;
+}
+/* Glass inside glass doesn't need a second blur: the outer surface already frosted the backdrop. */
+:is(.glass, .glass-nav, .glass-2, .glass-3, .app-canvas) :is(.glass, .glass-2) {
+  backdrop-filter: none;
+}
+/* With liquid effects off, reflections go too: surfaces are plain and solid. */
+html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
+  background-image: none;
+}
+/* Phones and small tablets: less blur (costly on mobile GPUs) and a touch more scrim. */
+@media (max-width: 767px) {
+  :root {
+    --blur-device: 0.6;
+  }
+  /* Small screens put more text over less picture: a touch more scrim. */
+  .app-scrim {
+    opacity: min(1, calc(var(--scrim) + 0.06));
+  }
+}
+/* People who ask the OS for less transparency get solid surfaces, whatever they picked here. */
+@media (prefers-reduced-transparency: reduce) {
+  html :is(.glass, .glass-nav, .glass-2, .glass-3) {
+    backdrop-filter: none;
+  }
+  html {
+    --glass-1: oklch(var(--glass-tint) / 0.97);
+    --glass-nav: oklch(var(--glass-tint) / 0.98);
+    --glass-2: oklch(var(--glass-tint) / 0.99);
+    --glass-3: oklch(var(--glass-tint) / 0.99);
+  }
+}
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background-color: var(--background);
+}
+/* The photo, softened a little so its fine detail never competes with text. */
+.app-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: -12px; /* hides the soft edge the blur leaves at the borders */
+  background: var(--bg-image) center / cover no-repeat;
+  filter: blur(3px) saturate(0.92);
+}
+.app-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 50% 40%, transparent 55%, color-mix(in oklch, var(--scrim-color) 35%, transparent)),
+    var(--scrim-color);
+  opacity: var(--scrim);
+  transition: opacity var(--dur-slow) var(--ease-out);
 }
 
 @theme inline {
@@ -168,17 +375,37 @@
   --color-warning: var(--warning);
   --color-info: var(--info);
   --color-glass-border: var(--glass-border);
+  --color-glass-border-strong: var(--glass-border-strong);
+  --color-field: var(--field);
+  --color-tertiary: var(--text-tertiary);
+  --color-foreground-secondary: var(--foreground-secondary);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-surface: var(--glass-1);
+  --color-surface-elevated: var(--glass-2);
+  --color-placeholder: var(--text-placeholder);
+  --color-disabled: var(--text-disabled);
+  --color-link: var(--link);
   --radius-sm: calc(var(--radius) - 6px);
   --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 10px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 14px);
   --shadow-1: var(--shadow-1);
   --shadow-2: var(--shadow-2);
   --shadow-3: var(--shadow-3);
   --ease-out: var(--ease-out);
   --ease-spring: var(--ease-spring);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --ease-liquid: var(--ease-liquid);
+  /* Satoshi everywhere (loaded from Fontshare in app/layout.tsx); system UI fonts while it loads. */
+  --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Satoshi ships 400 / 500 / 700 / 900: body, labels & navigation, headings, display.
+     "semibold" maps to 700 so no heading falls back to a synthesised weight. */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 700;
+  --font-weight-bold: 700;
+  --font-weight-black: 900;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
@@ -194,19 +421,79 @@
   }
   body {
     @apply text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
-    /* Deep background with two soft light sources; fixed so scrolling glass stays lit. */
+    font-family: var(--font-sans);
+    font-weight: 400;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    text-rendering: optimizeLegibility;
+    /* Long unbroken strings (URLs, IDs, pasted tokens) wrap instead of running off a phone screen.
+       `break-word` only breaks when a word would overflow and never changes layout sizing. */
+    overflow-wrap: break-word;
+    /* Plain theme colour; inside the app the chosen photo sits on top of it (.app-backdrop). */
     background-color: var(--background);
-    background-image:
-      radial-gradient(60rem 40rem at -10% -10%, var(--bg-glow-1), transparent 60%),
-      radial-gradient(50rem 36rem at 110% 110%, var(--bg-glow-2), transparent 60%);
-    background-attachment: fixed;
   }
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-ring;
   }
   ::selection {
     background: var(--ai-soft);
+  }
+  /*
+   * Responsive layout guard. A grid with no column template gets one implicit `auto` column,
+   * and that column grows to fit its content's min-content width: one `truncate` title or long
+   * unbroken word inside it and the grid (and the whole page) becomes wider than a phone. A single
+   * `minmax(0, 1fr)` column can't be widened by content. Every `grid-cols-*` utility (including
+   * `sm:` / `md:` variants) lives in the utilities layer, so it still overrides this.
+   */
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  ::placeholder {
+    color: var(--text-placeholder);
+    opacity: 1;
+  }
+  /* Typography: headings wrap into balanced lines, paragraphs avoid one-word last lines. */
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+    letter-spacing: -0.018em;
+    line-height: 1.25;
+  }
+  /*
+   * Pointer cursor for things that genuinely do something when clicked. Tailwind v4's preflight
+   * resets buttons to the default arrow, which made every button, tab, menu item and checkbox
+   * feel inert. Roles cover Radix/cmdk items; plain text and containers are untouched.
+   */
+  :is(
+      button,
+      a[href],
+      summary,
+      select,
+      label[for],
+      input[type="checkbox"],
+      input[type="radio"],
+      input[type="file"],
+      input[type="color"],
+      [role="button"],
+      [role="tab"],
+      [role="menuitem"],
+      [role="menuitemcheckbox"],
+      [role="menuitemradio"],
+      [role="option"],
+      [role="radio"],
+      [role="checkbox"],
+      [role="switch"],
+      [role="slider"]
+    ):not(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: pointer;
+  }
+  :is(button, input, select, textarea, [role="button"], [role="menuitem"], [role="option"], [role="tab"]):is(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: not-allowed;
+  }
+  /* Form controls don't inherit the page font by default. */
+  button, input, select, textarea {
+    font-family: inherit;
+  }
+  p, li, dd {
+    text-wrap: pretty;
   }
   @media (prefers-reduced-motion: reduce) {
     *,
@@ -223,24 +510,77 @@
 /* --- Glass surfaces ------------------------------------------------------------------------- */
 @utility glass {
   background-color: var(--glass-1);
+  background-image: var(--glass-sheen);
   border: 1px solid var(--glass-border);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-1);
-  backdrop-filter: blur(var(--blur-md)) saturate(140%);
-  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-shade), var(--shadow-1);
+  backdrop-filter: blur(var(--blur-md)) saturate(115%);
+}
+/* Navigation chrome (sidebar, top bar): a step more solid than cards, so content scrolls under it. */
+@utility glass-nav {
+  background-color: var(--glass-nav);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  backdrop-filter: blur(var(--blur-lg)) saturate(120%);
 }
 @utility glass-2 {
   background-color: var(--glass-2);
+  background-image: var(--glass-sheen);
   border: 1px solid var(--glass-border-strong);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-2);
-  backdrop-filter: blur(var(--blur-lg)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-shade), var(--shadow-2);
+  backdrop-filter: blur(var(--blur-lg)) saturate(120%);
 }
 @utility glass-3 {
   background-color: var(--glass-3);
+  background-image: var(--glass-sheen);
   border: 1px solid var(--glass-border-strong);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-3);
-  backdrop-filter: blur(var(--blur-xl)) saturate(160%);
-  -webkit-backdrop-filter: blur(var(--blur-xl)) saturate(160%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-shade), var(--shadow-3);
+  backdrop-filter: blur(var(--blur-xl)) saturate(125%);
+}
+/*
+ * Selected state: a liquid pill — a touch of the accent mixed into the glass, a lit top edge and
+ * a faint accent halo. Used for the active nav item and chosen options; never for decoration.
+ */
+@utility liquid-selected {
+  background-color: color-mix(in oklch, var(--ai) 11%, var(--glass-2));
+  background-image: var(--glass-sheen);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 0 0 1px color-mix(in oklch, var(--ai) 22%, transparent),
+    0 6px 18px -10px color-mix(in oklch, var(--ai) 50%, transparent);
+}
+/* Press feedback for anything tappable: a quick spring-back squeeze. */
+@utility liquid-press {
+  transition-property: transform, background-color, border-color, color, box-shadow, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: var(--ease-liquid);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+/*
+ * Surface-aware ink. A surface with a fixed light or dark fill (whatever the theme) sets the ink
+ * its text should use, and every text role inside it follows: primary, secondary, tertiary,
+ * placeholder and disabled all flip together.
+ */
+@utility ink-dark {
+  --foreground: oklch(0.14 0 0);
+  --foreground-secondary: oklch(0.3 0 0);
+  --foreground-muted: oklch(0.4 0 0);
+  --muted-foreground: var(--foreground-secondary);
+  --text-tertiary: var(--foreground-muted);
+  --text-placeholder: oklch(0.44 0 0);
+  --text-disabled: oklch(0.56 0 0);
+  color: var(--foreground);
+}
+@utility ink-light {
+  --foreground: oklch(0.99 0 0);
+  --foreground-secondary: oklch(0.88 0 0);
+  --foreground-muted: oklch(0.79 0 0);
+  --muted-foreground: var(--foreground-secondary);
+  --text-tertiary: var(--foreground-muted);
+  --text-placeholder: oklch(0.72 0 0);
+  --text-disabled: oklch(0.62 0 0);
+  color: var(--foreground);
 }
 /* Reading surface: opaque-ish, no blur, for long text. */
 @utility surface {
@@ -273,7 +613,12 @@
     box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-2);
   }
   &:active {
-    transform: translateY(0);
+    transform: translateY(0) scale(0.985);
+  }
+  /* Keyboard users get the same "this is the one" cue as a hover. */
+  &:has(:focus-visible) {
+    border-color: var(--glass-border-strong);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-2);
   }
 }
 /* Thin, unobtrusive scrollbars inside panels. */
@@ -327,20 +672,20 @@
 .notely-editor h1 {
   font-size: 1.75rem;
   line-height: 1.25;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin-top: 1.5em;
 }
 .notely-editor h2 {
   font-size: 1.375rem;
   line-height: 1.3;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.015em;
   margin-top: 1.4em;
 }
 .notely-editor h3 {
   font-size: 1.125rem;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1.2em;
 }
 .notely-editor p.is-editor-empty:first-child::before {
@@ -431,7 +776,7 @@
   padding: 0;
 }
 .notely-editor a {
-  color: var(--ai);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -462,7 +807,7 @@
 .notely-prose h1,
 .notely-prose h2,
 .notely-prose h3 {
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1em;
 }
 .notely-prose code {
@@ -479,7 +824,7 @@
   overflow-x: auto;
 }
 .notely-prose a {
-  color: var(--ai);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -530,4 +875,38 @@
 }
 .notely-editor ul[data-type="taskList"] li > label {
   margin-top: 0.4em;
+}
+
+/* AI composer (features/ai/components/prompt-bar.tsx) */
+@keyframes notely-pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes notely-sweep {
+  from { transform: translateX(0); opacity: 0.45; }
+  to { transform: translateX(400%); opacity: 0; }
+}
+@keyframes notely-eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* AI agent trace (features/ai/components/agent-trace.tsx) */
+@keyframes notely-pixel {
+  0%, 100% { opacity: 0.15; }
+  45% { opacity: 1; }
+}
+@keyframes notely-shimmer-text {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* AI approval card step counter (features/ai/components/approval-card.tsx) */
+@keyframes notely-roll-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes notely-roll-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: none; opacity: 1; }
 }

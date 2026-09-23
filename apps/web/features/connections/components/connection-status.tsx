@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Circle, Clock, Loader2, RefreshCw, WifiOff, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, Circle, Clock, Loader2, RefreshCw, WifiOff, type IconComponent } from "@/components/icons";
 
 import type { Connection, ConnectionStatus } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ export interface ConnectionView {
   shortLabel?: string;
   /** One supporting line: what happened, or when it was last checked. */
   detail: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   tone: string;
   spinning?: boolean;
   action: ConnectionAction;

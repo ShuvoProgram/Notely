@@ -158,6 +158,24 @@ async def trash_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -
     return ok({"moved": await service.trash_many(ctx.user, payload.ids)})
 
 
+@notes_router.post("/bulk/restore", response_model=Envelope[dict[str, int]])
+async def restore_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    """Bulk restore from the Trash view."""
+    return ok({"restored": await service.restore_many(ctx.user, payload.ids)})
+
+
+@notes_router.post("/bulk/purge", response_model=Envelope[dict[str, int]])
+async def purge_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    """Bulk "delete forever" from the Trash view. Notes not in the trash are skipped."""
+    return ok({"deleted": await service.purge_many(ctx.user, payload.ids)})
+
+
+@notes_router.post("/bulk/leave", response_model=Envelope[dict[str, int]])
+async def leave_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    """Bulk "leave" from the Shared view: drop the user's access to notes others shared."""
+    return ok({"left": await service.leave_many(ctx.user, payload.ids)})
+
+
 @notes_router.post("/{note_id}/restore", response_model=Envelope[NoteSummary])
 async def restore_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
     return ok(note_summary(await service.restore_note(ctx.user, note_id), ctx.user))

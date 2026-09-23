@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, CalendarPlus, ExternalLink, Loader2, Trash2 } from "lucide-react";
+import { CalendarCheck, CalendarPlus, ExternalLink, Loader2, Trash2 } from "@/components/icons";
 import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";

@@ -7,8 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -216,6 +218,15 @@ class GoogleDriveProvider(GoogleProvider):
                 Capability.search,
                 search_files,
                 lambda a: f"Search Drive for “{a.query}”",
+                outputs=(
+                    listing(
+                        "results",
+                        "Files",
+                        F("name", "Name"),
+                        F("modified_at", "Last edited", "date"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "read_text_file",
@@ -224,6 +235,7 @@ class GoogleDriveProvider(GoogleProvider):
                 Capability.read,
                 read_text_file,
                 lambda a: "Read a Drive file",
+                outputs=(F("name", "File name"), F("content", "File text", "long_text")),
             ),
             ProviderTool(
                 "upload_text_file",

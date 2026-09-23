@@ -1,6 +1,6 @@
 "use client";
 
-import { NotebookPen, Plus, Sparkles } from "lucide-react";
+import { NotebookPen, Plus, Sparkles } from "@/components/icons";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 

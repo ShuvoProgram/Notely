@@ -7,10 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
+from app.integrations.base.outputs import HIT_FIELDS, listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -279,6 +281,7 @@ class JiraProvider(RestOAuthProvider):
                 Capability.search,
                 search_issues,
                 lambda a: f"Search Jira: {a.jql[:60]}",
+                outputs=(listing("results", "Issues", *HIT_FIELDS),),
             ),
             ProviderTool(
                 "read_issue",
@@ -287,6 +290,13 @@ class JiraProvider(RestOAuthProvider):
                 Capability.read,
                 read_issue,
                 lambda a: f"Read Jira issue {a.issue_key}",
+                outputs=(
+                    F("key", "Issue key"),
+                    F("summary", "Summary"),
+                    F("status", "Status"),
+                    F("assignee", "Assignee"),
+                    F("description", "Description", "long_text"),
+                ),
             ),
             ProviderTool(
                 "create_issue",

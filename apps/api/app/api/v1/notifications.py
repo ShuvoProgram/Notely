@@ -53,6 +53,18 @@ async def mark_read(notification_id: uuid.UUID, ctx: CurrentAuth, db: DbDep) -> 
     return ok(NotificationOut.model_validate(row))
 
 
+@router.post("/{notification_id}/unread", response_model=Envelope[NotificationOut])
+async def mark_unread(notification_id: uuid.UUID, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    row = await NotificationService(db).mark_unread(ctx.user, notification_id)
+    return ok(NotificationOut.model_validate(row))
+
+
+@router.delete("/{notification_id}", response_model=Envelope[dict[str, bool]])
+async def dismiss(notification_id: uuid.UUID, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    await NotificationService(db).dismiss(ctx.user, notification_id)
+    return ok({"dismissed": True})
+
+
 @router.post("/read-all", response_model=Envelope[dict[str, int]])
 async def mark_all_read(ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
     return ok({"marked": await NotificationService(db).mark_all_read(ctx.user)})

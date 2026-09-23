@@ -32,6 +32,7 @@ dependencies = [
   "prometheus-client>=0.20",
   "langchain-anthropic>=0.3",
   "langchain-google-genai>=2.1",
+  "qrcode[pil]>=8.0",
 ]
 
 [dependency-groups]

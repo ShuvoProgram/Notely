@@ -8,8 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import HIT_FIELDS, listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -329,6 +331,7 @@ class OutlookProvider(MicrosoftGraphProvider):
                 Capability.search,
                 search_mail,
                 lambda a: f"Search Outlook mail for “{a.query}”",
+                outputs=(listing("results", "Emails", *HIT_FIELDS),),
             ),
             ProviderTool(
                 "read_mail",
@@ -337,6 +340,12 @@ class OutlookProvider(MicrosoftGraphProvider):
                 Capability.read,
                 read_mail,
                 lambda a: "Read an Outlook email",
+                outputs=(
+                    F("subject", "Subject"),
+                    F("from", "From"),
+                    F("received_at", "Received", "date"),
+                    F("content", "Email text", "long_text"),
+                ),
             ),
             ProviderTool(
                 "draft_mail",
@@ -363,6 +372,17 @@ class OutlookProvider(MicrosoftGraphProvider):
                 Capability.read,
                 list_events,
                 lambda a: "List Outlook calendar events",
+                outputs=(
+                    listing(
+                        "events",
+                        "Events",
+                        F("subject", "Title"),
+                        F("start", "Starts", "date"),
+                        F("end", "Ends", "date"),
+                        F("attendees", "Attendees", "list"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "create_event",

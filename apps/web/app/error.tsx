@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@/components/icons";
 import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2 } from "@/components/icons";
 import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -61,7 +61,7 @@ export function ModelPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button id={id} type="button" variant="outline" role="combobox" aria-expanded={open} aria-invalid={invalid || undefined} disabled={disabled} className="w-full justify-between bg-background/60 font-normal">
+        <Button id={id} type="button" variant="outline" role="combobox" aria-expanded={open} aria-invalid={invalid || undefined} disabled={disabled} className="w-full justify-between bg-field font-normal">
           <span className={cn("min-w-0 truncate text-left", !value && "text-muted-foreground")}>{selected ? selected.name : value || placeholder}</span>
           {loading ? <Loader2 className="size-4 shrink-0 animate-spin opacity-60" aria-hidden /> : <ChevronsUpDown className="size-4 shrink-0 opacity-60" aria-hidden />}
         </Button>

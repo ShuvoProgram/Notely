@@ -1,30 +1,19 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, Check, CircleDashed, ExternalLink, Loader2, ShieldCheck, ShieldQuestion, Sparkles, Square, XCircle } from "lucide-react";
-import Link from "next/link";
+import { Sparkles, XCircle } from "@/components/icons";
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { PlanTrace, ReplyFooter, ToolTrace, WorkingStatus } from "@/features/ai/components/agent-trace";
 import { ApprovalCard } from "@/features/ai/components/approval-card";
-import { type LiveAssistant, type StepState, useChat } from "@/features/ai/use-chat";
-import type { AIMessage, AIPlan, AISource, Verification } from "@/lib/api/types";
-import { providerLabel } from "@/lib/providers";
+import { PromptBar } from "@/features/ai/components/prompt-bar";
+import { type LiveAssistant, useChat } from "@/features/ai/use-chat";
+import type { AIMessage } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
-
-const SUGGESTIONS = [
-  "Summarize what I wrote this week",
-  "What open tasks do I have?",
-  "Find everything about pricing across my apps",
-  "Prepare a follow-up from my latest meeting note",
-];
 
 export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }: { threadId: string | null; noteId?: string | null; onThreadCreated?: (id: string) => void; compact?: boolean }) {
   const { state, send, decide, stop } = useChat(threadId);
-  const [draft, setDraft] = React.useState("");
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const notified = React.useRef<string | null>(null);
 
@@ -39,41 +28,51 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [state.messages.length, state.live?.text, state.live?.steps.length, state.approval]);
 
-  const submit = () => {
-    if (!draft.trim() || state.busy) return;
-    send(draft, noteId);
-    setDraft("");
-  };
-
   const empty = state.messages.length === 0 && !state.live;
+  const lastAssistant = state.messages.map((m) => m.role).lastIndexOf("assistant");
+  const composer = <PromptBar busy={state.busy} compact={compact} onSend={(text) => send(text, noteId)} onStop={() => void stop()} />;
+
+  // A fresh conversation: a big heading with the composer right under it, centred on the page.
+  if (empty && !compact) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center overflow-y-auto px-1 pb-[8vh]">
+        <div className="w-full motion-safe:animate-[notely-fade-up_420ms_cubic-bezier(0.23,1,0.32,1)_both]">
+          <h2 className="text-balance text-center text-3xl font-black leading-[1.08] tracking-[-0.03em] text-foreground sm:text-[2.6rem]">
+            Think it. Ask it.
+            <br />
+            Notely does the rest.
+          </h2>
+          {/* <p className="mx-auto mt-3 max-w-md text-balance text-center text-sm text-muted-foreground sm:text-[15px]">
+            Search, summarize and act across your notes, tasks and connected apps.
+          </p> */}
+          <div className="mt-8">{composer}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-1" aria-live="polite">
+      <div ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto px-1" aria-live="polite">
         {empty ? (
-          <div className={cn("flex h-full flex-col items-center justify-center text-center", compact ? "py-6" : "py-16")}>
-            <div className="grid size-12 place-items-center rounded-2xl bg-ai-soft text-ai ring-1 ring-ai/20">
-              <Sparkles className="size-5" aria-hidden />
-            </div>
-            <h2 className="mt-4 text-base font-semibold">Ask anything about your notes</h2>
-            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              I can search and read your notes, tasks and connected apps, and plan multi-step work across them. Anything that changes something waits for your approval first, and I check that it landed.
-            </p>
-            <ul className="mt-5 flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
-                <li key={s}>
-                  <Button variant="outline" size="sm" onClick={() => send(s, noteId)} disabled={state.busy}>
-                    {s}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+          <div className="flex h-full flex-col items-center justify-center py-6 text-center">
+            <h2 className="text-balance text-lg font-bold tracking-tight">Ask anything about this note</h2>
+            <p className="mt-1 max-w-xs text-balance text-sm text-muted-foreground">Summarize it, pull out tasks, or connect it to the rest of your work.</p>
           </div>
         ) : (
           <ol className="space-y-5 py-4">
-            {state.messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
-            ))}
+            {state.messages.map((m, i) => {
+              const latest = i === lastAssistant && !state.busy && !state.live;
+              const askedWith = [...state.messages.slice(0, i)].reverse().find((x) => x.role === "user")?.content;
+              return (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  onRetry={latest && askedWith ? () => send(askedWith, noteId) : undefined}
+                  onFollowUp={latest ? (text) => send(text, noteId) : undefined}
+                />
+              );
+            })}
             {state.live ? <LiveBubble live={state.live} waiting={state.runStatus === "waiting_for_approval"} /> : null}
             {state.approval ? (
               <li>
@@ -89,45 +88,12 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
         )}
       </div>
 
-      <form
-        className="glass-2 relative mt-2 rounded-2xl p-2 transition-shadow focus-within:glow-ai"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <Textarea
-          aria-label="Ask anything"
-          placeholder="Ask anything…"
-          value={draft}
-          rows={compact ? 2 : 3}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          className="min-h-0 resize-none border-0 bg-transparent p-2 shadow-none focus-visible:ring-0"
-        />
-        <div className="flex items-center justify-between px-1 pb-1">
-          <span className="text-[11px] text-muted-foreground">Enter to send · Shift+Enter for a new line</span>
-          {state.busy ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => void stop()}>
-              <Square className="size-3.5" aria-hidden /> Stop
-            </Button>
-          ) : (
-            <Button type="submit" size="icon-sm" aria-label="Send" disabled={!draft.trim()}>
-              <ArrowUp aria-hidden />
-            </Button>
-          )}
-        </div>
-      </form>
+      {composer}
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: AIMessage }) {
+function MessageBubble({ message, onRetry, onFollowUp }: { message: AIMessage; onRetry?: () => void; onFollowUp?: (text: string) => void }) {
   if (message.role === "user") {
     return (
       <li className="flex justify-end">
@@ -139,13 +105,23 @@ function MessageBubble({ message }: { message: AIMessage }) {
     <li className="flex gap-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1 space-y-2">
-        {message.plan ? <Plan plan={message.plan} /> : null}
-        {message.steps?.length ? <Steps steps={message.steps} waiting={false} /> : null}
+        {message.plan ? <PlanTrace plan={message.plan} working={false} durationMs={message.duration_ms} /> : null}
+        {message.steps?.length ? <ToolTrace steps={message.steps} working={false} /> : null}
         <Markdown text={message.content} />
-        {message.sources?.length ? <Sources sources={message.sources} /> : null}
+        <ReplyFooter content={message.content} sources={message.sources ?? []} onRetry={onRetry} onFollowUp={onFollowUp} />
       </div>
     </li>
   );
+}
+
+/** What the assistant is doing right now, in words: the running tool, the active plan step… */
+function liveLabel(live: LiveAssistant, waiting: boolean): string {
+  if (waiting) return "Waiting for your approval";
+  const running = [...live.steps].reverse().find((s) => s.status === "running");
+  if (running) return running.label;
+  const active = live.plan?.steps.find((s) => s.status === "active");
+  if (active) return active.title;
+  return live.steps.length ? "Putting it together" : "Thinking";
 }
 
 function LiveBubble({ live, waiting }: { live: LiveAssistant; waiting: boolean }) {
@@ -153,123 +129,18 @@ function LiveBubble({ live, waiting }: { live: LiveAssistant; waiting: boolean }
     <li className="flex gap-3">
       <AssistantAvatar pulse />
       <div className="min-w-0 flex-1 space-y-2">
-        {live.plan ? <Plan plan={live.plan} /> : null}
-        {live.steps.length ? <Steps steps={live.steps} waiting={waiting} /> : null}
-        {live.text ? <Markdown text={live.text} /> : !live.steps.length && !waiting ? <p className="text-sm text-muted-foreground">Thinking…</p> : null}
+        {live.plan ? <PlanTrace plan={live.plan} working /> : null}
+        {live.steps.length ? <ToolTrace steps={live.steps} working={!live.text} /> : null}
+        {live.text ? (
+          <div className="relative">
+            <Markdown text={live.text} />
+            {!waiting ? <span aria-hidden className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 rounded-full bg-foreground motion-safe:animate-pulse" /> : null}
+          </div>
+        ) : (
+          <WorkingStatus label={liveLabel(live, waiting)} since={live.startedAt} />
+        )}
       </div>
     </li>
-  );
-}
-
-/** The agent's declared plan, ticked off from execution metadata (PRD 62) — never chain-of-thought. */
-function Plan({ plan }: { plan: AIPlan }) {
-  const done = plan.steps.filter((s) => s.status === "done").length;
-  return (
-    <section aria-label="Plan" className="rounded-xl border border-ai/30 bg-ai-soft/40 px-3 py-2 text-sm">
-      <p className="flex items-center gap-2 font-medium">
-        <Sparkles className="size-3.5 text-ai" aria-hidden />
-        <span className="truncate">{plan.goal}</span>
-        <span className="ml-auto text-xs font-normal text-muted-foreground">
-          {done}/{plan.steps.length}
-        </span>
-      </p>
-      <ol className="mt-1.5 space-y-1">
-        {plan.steps.map((step, i) => (
-          <li key={`${i}-${step.title}`} className={cn("flex items-center gap-2", step.status === "skipped" && "text-muted-foreground line-through")} data-status={step.status}>
-            {step.status === "done" ? (
-              <Check className="size-3.5 text-success" aria-hidden />
-            ) : step.status === "active" ? (
-              <Loader2 className="size-3.5 animate-spin text-ai" aria-hidden />
-            ) : step.status === "waiting" ? (
-              <CircleDashed className="size-3.5 text-warning" aria-hidden />
-            ) : (
-              <CircleDashed className="size-3.5 text-muted-foreground" aria-hidden />
-            )}
-            <span>{step.title}</span>
-            {step.status === "waiting" ? <span className="text-xs text-muted-foreground">· needs your approval</span> : null}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-/** Safe execution metadata only — never chain-of-thought. */
-function Steps({ steps, waiting }: { steps: StepState[]; waiting: boolean }) {
-  return (
-    <ul className="glass space-y-1 rounded-xl px-3 py-2 text-sm" aria-label="Progress">
-      {steps.map((s) => (
-        <li key={s.call_id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          {s.status === "running" ? (
-            <Loader2 className="size-3.5 animate-spin text-ai" aria-hidden />
-          ) : s.status === "failed" ? (
-            <XCircle className="size-3.5 text-destructive" aria-hidden />
-          ) : (
-            <Check className="size-3.5 text-success" aria-hidden />
-          )}
-          <span className={cn(s.status === "failed" && "text-destructive")}>{s.label}</span>
-          {s.result_preview && s.status !== "running" ? <span className="text-xs text-muted-foreground">· {s.result_preview}</span> : null}
-          {s.verification ? <VerificationBadge verification={s.verification} /> : null}
-        </li>
-      ))}
-      {waiting ? (
-        <li className="flex items-center gap-2 text-muted-foreground">
-          <CircleDashed className="size-3.5" aria-hidden /> Waiting for your approval
-        </li>
-      ) : null}
-    </ul>
-  );
-}
-
-/** Outcome of the read-back after a write. Honest by construction: it is set by the server, never by the model. */
-function VerificationBadge({ verification }: { verification: Verification }) {
-  const label = verification.status === "verified" ? "Verified" : verification.status === "failed" ? "Check failed" : "Unverified";
-  const Icon = verification.status === "verified" ? ShieldCheck : verification.status === "failed" ? AlertTriangle : ShieldQuestion;
-  return (
-    <Badge variant={verification.status === "verified" ? "outline" : verification.status === "failed" ? "destructive" : "secondary"} className="gap-1 font-normal" title={verification.detail}>
-      <Icon className="size-3" aria-hidden />
-      {label}
-    </Badge>
-  );
-}
-
-/** "Based on N sources" (PRD 26). External items open in a new tab; items without a link are plain chips. */
-function Sources({ sources }: { sources: AISource[] }) {
-  const providers = [...new Set(sources.map((s) => s.provider))];
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" aria-label="Sources">
-      <span>
-        Based on {sources.length} source{sources.length === 1 ? "" : "s"}
-      </span>
-      {providers.map((p) => (
-        <Badge key={p} variant="outline" className="font-normal">
-          {providerLabel(p)}
-        </Badge>
-      ))}
-      {sources.slice(0, 6).map((s) => {
-        const cls = "inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 hover:bg-accent";
-        const key = `${s.provider}:${s.object_id}`;
-        if (!s.url) {
-          return (
-            <span key={key} className={cls}>
-              {s.title}
-            </span>
-          );
-        }
-        if (s.provider !== "notely") {
-          return (
-            <a key={key} href={s.url} target="_blank" rel="noopener noreferrer" className={cls}>
-              {s.title} <ExternalLink className="size-3" aria-hidden />
-            </a>
-          );
-        }
-        return (
-          <Link key={key} href={s.url} className={cls}>
-            {s.title}
-          </Link>
-        );
-      })}
-    </div>
   );
 }
 

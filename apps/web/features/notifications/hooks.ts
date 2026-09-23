@@ -64,5 +64,23 @@ export function useNotificationActions() {
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: notificationKeys.all }),
   });
-  return { markRead, markAllRead };
+  const markUnread = useMutation({
+    mutationFn: notificationsApi.markUnread,
+    onMutate: (id) =>
+      patch((prev) => ({
+        unread: prev.unread + (prev.items.find((n) => n.id === id && n.read_at) ? 1 : 0),
+        items: prev.items.map((n) => (n.id === id ? { ...n, read_at: null } : n)),
+      })),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: notificationKeys.all }),
+  });
+  const dismiss = useMutation({
+    mutationFn: notificationsApi.dismiss,
+    onMutate: (id) =>
+      patch((prev) => ({
+        unread: Math.max(0, prev.unread - (prev.items.find((n) => n.id === id && !n.read_at) ? 1 : 0)),
+        items: prev.items.filter((n) => n.id !== id),
+      })),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: notificationKeys.all }),
+  });
+  return { markRead, markUnread, dismiss, markAllRead };
 }

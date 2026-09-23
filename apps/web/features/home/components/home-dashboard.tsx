@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckSquare, FileText, Plug, Plus, Sparkles } from "lucide-react";
+import { ArrowRight, CheckSquare, FileText, Plug, Plus, Sparkles } from "@/components/icons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";

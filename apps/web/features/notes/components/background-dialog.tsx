@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "@/components/icons";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";

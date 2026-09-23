@@ -54,15 +54,17 @@ export async function apiEnvelope<T, M extends Record<string, unknown> = Record<
 ): Promise<{ data: T; meta: M }> {
   const { body, headers = {}, baseUrl, ...init } = options;
   const url = `${baseUrl ?? DEFAULT_BASE}${path}`;
+  // Files go as multipart: the browser sets the Content-Type (with its boundary) itself.
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(url, {
     ...init,
     credentials: "include",
     headers: {
       Accept: "application/json",
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(body !== undefined && !isForm ? { "Content-Type": "application/json" } : {}),
       ...headers,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
 
@@ -78,9 +80,14 @@ export async function apiEnvelope<T, M extends Record<string, unknown> = Record<
   }
 
   if (!response.ok) {
+    // No JSON error envelope means the API never answered (proxy timeout, API down or
+    // restarting) — say that, rather than a message that sounds like the request was wrong.
     const errorBody = (json as ApiErrorBody | null)?.error ?? {
-      code: "HTTP_ERROR",
-      message: "The request could not be completed.",
+      code: response.status >= 500 ? "SERVICE_UNAVAILABLE" : "HTTP_ERROR",
+      message:
+        response.status >= 500
+          ? "Notely took too long to respond or is restarting. Please try again in a moment."
+          : "The request could not be completed.",
       details: {},
     };
     throw new ApiError(response.status, errorBody);

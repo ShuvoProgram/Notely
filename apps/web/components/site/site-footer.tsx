@@ -12,8 +12,8 @@ const LINKS = [
 /** Public-site footer with the legal links. Rendered on the landing and legal pages. */
 export function SiteFooter() {
   return (
-    <footer className="mt-auto border-t">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+    <footer className="mt-auto border-t border-foreground/10">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
           <Logo compact />
           <span>© {new Date().getFullYear()} {LEGAL.companyName}. All rights reserved.</span>

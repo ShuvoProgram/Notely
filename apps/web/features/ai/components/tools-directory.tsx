@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Check, Eye, Pencil, Search, Send, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Check, Eye, Pencil, Search, Send, ShieldAlert, Trash2, type IconComponent } from "@/components/icons";
 import Link from "next/link";
 import * as React from "react";
 
@@ -50,7 +50,7 @@ export function humanize(name: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const RISK: Record<RiskLevel, { label: string; hint: string; icon: LucideIcon; tone: string; approval: boolean }> = {
+const RISK: Record<RiskLevel, { label: string; hint: string; icon: IconComponent; tone: string; approval: boolean }> = {
   read: { label: "Available", hint: "Read-only · runs on its own", icon: Check, tone: "text-success", approval: false },
   write: { label: "Requires approval", hint: "Changes your data", icon: Pencil, tone: "text-warning", approval: true },
   external_communication: { label: "Requires approval", hint: "Sends something outside Notely", icon: Send, tone: "text-warning", approval: true },
@@ -124,7 +124,7 @@ export function ToolsDirectory() {
             const risk = RISK[t.risk];
             const Icon = risk.icon;
             return (
-              <li key={t.name} className="flex flex-col rounded-2xl border border-glass-border bg-card/60 p-4">
+              <li key={t.name} className="flex flex-col glass rounded-2xl p-4">
                 <div className="flex items-start gap-3">
                   <span className={cn("mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted/60", risk.tone)} aria-hidden>
                     {t.risk === "read" ? <Eye className="size-4" /> : <Icon className="size-4" />}

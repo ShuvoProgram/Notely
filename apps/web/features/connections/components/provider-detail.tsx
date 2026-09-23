@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Check, ExternalLink, Loader2, RefreshCw, ShieldCheck, Stethoscope, Unplug, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, ExternalLink, Loader2, RefreshCw, ShieldCheck, Stethoscope, Unplug, XCircle } from "@/components/icons";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -360,7 +360,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                             <span className="sr-only">{granted ? "granted" : "not granted"}</span>
                           </span>
                           {perm.description ? <span className="block text-xs text-muted-foreground">{perm.description}</span> : null}
-                          <code className="mt-1 block truncate font-mono text-[11px] text-muted-foreground/70">{perm.scope}</code>
+                          <code className="mt-1 block truncate font-mono text-[11px] text-tertiary">{perm.scope}</code>
                         </span>
                       </li>
                     );

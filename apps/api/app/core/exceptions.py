@@ -121,6 +121,7 @@ PROVIDER_STATUS: dict[str, int] = {
     "invalid_request": 400,
     "not_found": 404,
     "misconfigured": 503,
+    "api_disabled": 503,
     "unknown": 502,
 }
 

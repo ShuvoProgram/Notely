@@ -16,6 +16,7 @@ const GROUPS: { key: string; label: string; description: string }[] = [
   { key: "note_reminders", label: "Note reminders", description: "When a reminder you set on a note comes due." },
   { key: "sharing", label: "Sharing", description: "When someone shares a note with you." },
   { key: "calendar_sync", label: "Calendar sync", description: "When a task is added to Google Calendar, and if syncing fails." },
+  { key: "automations", label: "Automations", description: "When an automation needs your approval, fails, or was paused after repeated failures." },
   { key: "integrations", label: "Connected tools", description: "Connected, disconnected, or an authorization that needs renewing." },
 ];
 

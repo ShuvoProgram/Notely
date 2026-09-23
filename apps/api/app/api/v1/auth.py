@@ -5,21 +5,26 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import RedirectResponse
+from pydantic import ValidationError
 
 from app.api.deps import (
     AuthServiceDep,
     CurrentAuth,
+    DbDep,
+    PendingAuth,
     SettingsDep,
     clear_session_cookie,
     set_session_cookie,
 )
 from app.core import metrics
 from app.core.config import Settings
-from app.core.exceptions import APIError, OAuthExchangeFailed
+from app.core.exceptions import APIError, OAuthExchangeFailed, Unauthorized
 from app.core.oauth import callback_uri
 from app.core.rate_limit import client_ip, rate_limit
 from app.core.responses import Envelope, ok
 from app.schemas.auth import (
+    BACKGROUNDS,
+    AppearancePreference,
     ChangePasswordRequest,
     LoginRequest,
     SessionOut,
@@ -27,7 +32,9 @@ from app.schemas.auth import (
     SignupRequest,
     SoundPreference,
     UserOut,
+    TOTPCodeRequest, TOTPSetupOut, RecoveryCodesOut,
 )
+from app.services.totp_service import TOTPService
 from app.services.auth_service import AuthService
 from app.services.sign_in_providers import (
     SIGN_IN_FLOW,
@@ -52,10 +59,25 @@ def user_out(user: Any) -> UserOut:
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         has_password=user.password_hash is not None,
+        two_factor_enabled=user.totp_secret_encrypted is not None,
         created_at=user.created_at,
         notifications=dict(prefs.get("notifications") or {}),
         sound=SoundPreference.model_validate(prefs.get("sound") or {}),
+        appearance=_appearance(prefs.get("appearance")),
     )
+
+
+def _appearance(raw: Any) -> AppearancePreference:
+    # A stored value from an older schema must never break sign-in. A retired background (the old
+    # gradient presets, solid colour, custom upload) falls back to the default image while the
+    # user's glass settings are kept; anything else unreadable falls back to the default look.
+    data = dict(raw) if isinstance(raw, dict) else {}
+    if data.get("background") not in BACKGROUNDS:
+        data.pop("background", None)
+    try:
+        return AppearancePreference.model_validate(data)
+    except ValidationError:
+        return AppearancePreference()
 
 
 @router.post(
@@ -94,7 +116,10 @@ async def login(
         user, user_agent=request.headers.get("user-agent"), ip_address=client_ip(request)
     )
     set_session_cookie(response, issued.token, settings)
-    return ok(user_out(user))
+    result = user_out(user)
+    if user.totp_secret_encrypted:
+        result.two_factor_required = True
+    return ok(result)
 
 
 @router.post("/logout", response_model=Envelope[dict[str, bool]])
@@ -214,11 +239,38 @@ async def complete_sign_in(
     issued = await auth.issue_session(
         user, user_agent=request.headers.get("user-agent"), ip_address=client_ip(request)
     )
-    response = RedirectResponse(
-        f"{settings.frontend_origin}/app", status_code=status.HTTP_302_FOUND
-    )
+    destination = "/login?two_factor=1" if user.totp_secret_encrypted else "/app"
+    response = RedirectResponse(f"{settings.frontend_origin}{destination}", status_code=status.HTTP_302_FOUND)
     set_session_cookie(response, issued.token, settings)
     return response
+
+@router.get("/2fa/status", response_model=Envelope[dict[str, bool]])
+async def two_factor_status(ctx: CurrentAuth) -> dict[str, Any]:
+    return ok({"enabled": ctx.user.totp_secret_encrypted is not None})
+
+@router.post("/2fa/setup", response_model=Envelope[TOTPSetupOut], dependencies=[Depends(auth_limit)])
+async def two_factor_setup(ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    import qrcode
+    from qrcode.image.svg import SvgPathImage
+    import io
+    secret, otp_uri = await TOTPService(db).begin(ctx.user)
+    image = qrcode.make(otp_uri, image_factory=SvgPathImage); out = io.BytesIO(); image.save(out)
+    return ok(TOTPSetupOut(otpauth_uri=otp_uri, qr_svg=out.getvalue().decode()))
+
+@router.post("/2fa/confirm", response_model=Envelope[RecoveryCodesOut], dependencies=[Depends(auth_limit)])
+async def two_factor_confirm(payload: TOTPCodeRequest, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    return ok(RecoveryCodesOut(recovery_codes=await TOTPService(db).confirm(ctx.user, payload.code)))
+
+@router.post("/2fa/verify", response_model=Envelope[dict[str, bool]], dependencies=[Depends(auth_limit)])
+async def two_factor_verify(payload: TOTPCodeRequest, ctx: PendingAuth, db: DbDep) -> dict[str, Any]:
+    service = TOTPService(db); accepted = await service.verify(ctx.user, payload.code) or await service.use_recovery_code(ctx.user, payload.code)
+    if not accepted: raise Unauthorized("That verification code is not valid.", code="INVALID_TOTP")
+    ctx.session.two_factor_verified_at = __import__("app.db.base", fromlist=["utcnow"]).utcnow(); await db.commit(); return ok({"verified": True})
+
+@router.post("/2fa/disable", response_model=Envelope[dict[str, bool]], dependencies=[Depends(auth_limit)])
+async def two_factor_disable(payload: TOTPCodeRequest, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    if ctx.session.two_factor_verified_at is None or not await TOTPService(db).verify(ctx.user, payload.code): raise Unauthorized("Enter a current authenticator code to disable 2FA.", code="RECENT_AUTH_REQUIRED")
+    await TOTPService(db).disable(ctx.user); return ok({"disabled": True})
 
 
 def login_redirect(settings: Settings, reason: str) -> RedirectResponse:

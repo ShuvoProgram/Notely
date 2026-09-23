@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, ChevronRight, Copy, Eye, Folder as FolderIcon, History, MoreHorizontal, Palette, RotateCcw, Sparkles, Star, Trash2, Users } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, ChevronRight, Copy, Eye, Folder as FolderIcon, History, MoreHorizontal, Palette, RotateCcw, Sparkles, Star, Trash2, Users } from "@/components/icons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -172,7 +172,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
             ) : null}
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            <Button variant="outline" size="sm" onClick={() => setShareOpen(true)} disabled={inTrash} className="h-8 rounded-lg bg-background/60">
+            <Button variant="outline" size="sm" onClick={() => setShareOpen(true)} disabled={inTrash} className="h-8 rounded-lg bg-field">
               <Users aria-hidden /> Share
               {collaborators.length ? <span className="text-muted-foreground">{collaborators.length}</span> : null}
             </Button>
@@ -184,7 +184,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
               disabled={readOnly}
               onClick={() => meta({ is_favorite: !note.is_favorite })}
             >
-              <Star className={cn(note.is_favorite && "fill-warning text-warning")} aria-hidden />
+              <Star className={cn(note.is_favorite && "text-warning [&_path]:fill-current")} aria-hidden />
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -328,7 +328,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
               }
             }
           }}
-          className="mb-3 w-full min-w-0 bg-transparent text-3xl font-semibold leading-tight tracking-tight outline-none placeholder:text-muted-foreground/40 sm:text-[2.125rem]"
+          className="mb-3 w-full min-w-0 bg-transparent text-3xl font-semibold leading-tight tracking-tight outline-none placeholder:text-tertiary sm:text-[2.125rem]"
         />
 
         {/* Meta row: tags · folder · reminder · shared · edited · save state. Quiet by design. */}
@@ -459,7 +459,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
                       type="button"
                       disabled={readOnly}
                       onClick={() => setAiAction(a.id)}
-                      className="lift flex w-full items-center gap-3 rounded-xl bg-muted/40 px-3 py-2.5 text-left text-sm ring-1 ring-glass-border outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                      className="lift flex w-full items-center gap-3 rounded-xl bg-muted/40 px-3 py-2.5 text-left text-sm ring-1 ring-glass-border outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-(--disabled-opacity)"
                     >
                       <a.icon className="size-4 shrink-0 text-ai" aria-hidden />
                       <span className="min-w-0">

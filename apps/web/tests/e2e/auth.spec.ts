@@ -29,11 +29,11 @@ test("signup → workspace → sign out → sign in", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("not the password");
+  await page.getByLabel("Password", { exact: true }).fill("not the password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert").filter({ hasText: /incorrect email or password/i })).toBeVisible();
 
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/app$/);
 });

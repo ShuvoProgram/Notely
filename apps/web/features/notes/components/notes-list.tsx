@@ -1,7 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Trash2, Users } from "lucide-react";
+import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Users } from "@/components/icons";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -11,18 +10,16 @@ import { EmptyState } from "@/components/layout/empty-state";
 import { SelectionBar } from "@/components/layout/selection-bar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
-import { notesApi } from "@/features/notes/api";
 import { TagChip } from "@/features/notes/components/tag-picker";
 import { editedLabel, noteColorProps, reminderLabel } from "@/features/notes/lib";
 import { useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
 import type { NoteSummary, NoteView } from "@/lib/api/types";
+import { useNoteBulkActions } from "@/features/notes/use-bulk-actions";
 import { useSelection } from "@/hooks/use-selection";
-import { playSfx } from "@/lib/sfx/player";
 import { cn } from "@/lib/utils";
 
 const VIEWS: { value: NoteView; label: string }[] = [
@@ -67,7 +64,7 @@ function NoteRow({ note, active, selectable, selected, onSelect }: { note: NoteS
           ) : null}
           {tinted ? <span aria-hidden {...noteColorProps(note.color)} className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--note-tint-strong)]" /> : null}
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{note.title || "Untitled"}</p>
-          {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 fill-warning text-warning" aria-label="Favorite" /> : null}
+          {note.is_favorite ? <Star className="mt-0.5 size-3.5 shrink-0 text-warning [&_path]:fill-current" aria-label="Favorite" /> : null}
           <time className="shrink-0 text-[11px] text-muted-foreground" dateTime={note.updated_at} title={new Date(note.updated_at).toLocaleString()}>
             {editedLabel(note.updated_at)}
           </time>
@@ -136,32 +133,41 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   const list = useNotesList({ view, folder_id: folderId, tag_id: tagId, q: debouncedQ || undefined });
   const create = useCreateNote();
-  const queryClient = useQueryClient();
   const notes = React.useMemo(() => list.data?.pages.flatMap((p) => p.notes) ?? [], [list.data]);
-  const visibleIds = React.useMemo(() => notes.map((n) => n.id), [notes]);
-  // Selection mode: pick several notes (shift-click for a range), then trash them in one go.
+  // While another view's rows are still on screen as a placeholder, nothing is selectable, so a
+  // quick "Select all" can't pick up notes from the view you just left.
+  const visibleIds = React.useMemo(() => (list.isPlaceholderData ? [] : notes.map((n) => n.id)), [notes, list.isPlaceholderData]);
+  // Selection mode: pick several notes (shift-click for a range), then act on them in one go.
+  // Every view supports it; what you can do depends on the view (see useNoteBulkActions).
   const selection = useSelection(visibleIds);
-  const [confirmBulk, setConfirmBulk] = React.useState(false);
-  const bulkTrash = useMutation({
-    mutationFn: (ids: string[]) => notesApi.trashMany(ids),
-    onSuccess: ({ moved }) => {
-      playSfx("delete");
-      toast.success(`Moved ${moved} ${moved === 1 ? "note" : "notes"} to trash`);
-      setConfirmBulk(false);
-      selection.exit();
-      queryClient.invalidateQueries({ queryKey: ["notes"] });
-    },
-    onError: (e) => toast.error(messageFor(e)),
-  });
+  // A selection belongs to the list it was started in (view + folder + tag). Anywhere else the
+  // toolbar and checkboxes simply don't show, and starting again always begins empty. (Keyed rather
+  // than cleared by an effect, so a transient URL change mid-navigation can't cancel a selection.)
+  const scopeKey = `${view}|${folderId ?? ""}|${tagId ?? ""}`;
+  const [selectionScope, setSelectionScope] = React.useState(scopeKey);
+  const selecting = selection.selecting && selectionScope === scopeKey;
+  const startSelection = () => {
+    selection.exit();
+    setSelectionScope(scopeKey);
+    selection.enter();
+  };
+  const bulkActions = useNoteBulkActions(view, selection.ids, selection.exit);
 
   const { data: folders = [] } = useFolders();
   const { data: tags = [] } = useTags();
 
+  // View / folder / tag are client-side list filters. Updating them through the history API (which
+  // Next keeps in sync with useSearchParams) is instant; router.replace would wait for a server round
+  // trip, leaving the tab showing one view while the list still reads the old one.
+  const replaceQuery = (next: URLSearchParams) => {
+    const query = next.toString();
+    window.history.replaceState(null, "", query ? `${pathname}?${query}` : pathname);
+  };
   const setParam = (key: string, value?: string) => {
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
-    router.replace(`${pathname}?${next.toString()}`);
+    replaceQuery(next);
   };
 
   const folderName = folderId ? folders.find((f) => f.id === folderId)?.name : undefined;
@@ -175,24 +181,25 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      {selection.selecting ? (
-        // The header becomes the selection toolbar: same height, no extra card.
+      {/* The header row and the selection toolbar share one fixed-height slot, so starting or
+          ending selection never moves the list. */}
+      <div className="px-3 pt-3">
+      {selecting ? (
         <SelectionBar
-          className="px-3 pt-3"
           allState={selection.allState}
           count={selection.count}
           total={selection.visibleTotal}
           noun="notes"
           onSelectAll={selection.selectAll}
           onCancel={selection.exit}
-          action={{ label: "Move to trash", icon: Trash2, onClick: () => setConfirmBulk(true) }}
+          actions={bulkActions}
         />
       ) : (
-        <div className="flex items-center justify-between gap-2 px-4 pt-4">
+        <div className="flex h-10 items-center justify-between gap-2 pl-1">
           <h2 className="text-base font-semibold tracking-tight">Notes</h2>
           <div className="flex items-center gap-1">
-            {view !== "trash" && notes.length ? (
-              <Button variant="ghost" size="sm" aria-label="Select notes" onClick={selection.enter} className="rounded-full text-muted-foreground">
+            {notes.length ? (
+              <Button variant="ghost" size="sm" aria-label="Select notes" onClick={startSelection} className="rounded-full text-muted-foreground">
                 <CheckSquare aria-hidden /> Select
               </Button>
             ) : null}
@@ -202,6 +209,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           </div>
         </div>
       )}
+      </div>
       <div className="px-3 pt-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -239,7 +247,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
               const next = new URLSearchParams(params.toString());
               next.delete("folder");
               next.delete("tag");
-              router.replace(`${pathname}?${next.toString()}`);
+              replaceQuery(next);
             }}
           >
             Clear
@@ -279,7 +287,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           <>
             <ul className="space-y-0.5">
               {notes.map((n) => (
-                <NoteRow key={n.id} note={n} active={n.id === activeNoteId} selectable={selection.selecting} selected={selection.has(n.id)} onSelect={(checked, shift) => selection.toggle(n.id, checked, { shift })} />
+                <NoteRow key={n.id} note={n} active={n.id === activeNoteId} selectable={selecting} selected={selection.has(n.id)} onSelect={(checked, shift) => selection.toggle(n.id, checked, { shift })} />
               ))}
             </ul>
             {list.hasNextPage ? (
@@ -290,15 +298,6 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           </>
         )}
       </div>
-      <ConfirmDialog
-        open={confirmBulk}
-        onOpenChange={setConfirmBulk}
-        title={`Move ${selection.count} ${selection.count === 1 ? "note" : "notes"} to trash?`}
-        description={selection.count === 1 ? "It can be restored from Trash." : "They can be restored from Trash."}
-        confirmLabel="Move to trash"
-        pending={bulkTrash.isPending}
-        onConfirm={() => bulkTrash.mutate([...selection.ids])}
-      />
     </div>
   );
 }

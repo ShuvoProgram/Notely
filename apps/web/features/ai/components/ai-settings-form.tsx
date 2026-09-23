@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import { toast } from "sonner";
 
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles } from "@/components/icons";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ export function AISettingsForm() {
               <div className="space-y-2">
                 <Label htmlFor="ai-model">Workspace model</Label>
                 <Select value={current.model ?? "__default"} onValueChange={(v) => setPrefs({ ...current, model: v === "__default" ? null : v })} disabled={Boolean(own)}>
-                  <SelectTrigger id="ai-model" className="w-full bg-background/60">
+                  <SelectTrigger id="ai-model" className="w-full bg-field">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -84,7 +84,7 @@ export function AISettingsForm() {
               <div className="space-y-2">
                 <Label htmlFor="ai-summary">Summary length</Label>
                 <Select value={current.summary_length} onValueChange={(v) => setPrefs({ ...current, summary_length: v as AIPreferences["summary_length"] })}>
-                  <SelectTrigger id="ai-summary" className="w-full bg-background/60">
+                  <SelectTrigger id="ai-summary" className="w-full bg-field">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

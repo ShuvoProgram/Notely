@@ -193,7 +193,7 @@ class NoteService:
             raise Conflict("You can view this note but not change it.", code="NOTE_READ_ONLY")
         return note
 
-    async def create_note(self, user: User, payload: NoteCreate) -> Note:
+    async def create_note(self, user: User, payload: NoteCreate, *, commit: bool = True) -> Note:
         if (
             payload.folder_id is not None
             and await self.folders.get(payload.folder_id, user.id) is None
@@ -209,11 +209,16 @@ class NoteService:
         )
         if payload.tag_ids:
             await self.notes.set_tags(note, await self._resolve_tags(user, payload.tag_ids))
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(note)
         return note
 
-    async def update_note(self, user: User, note_id: uuid.UUID, payload: NoteUpdate) -> Note:
+    async def update_note(
+        self, user: User, note_id: uuid.UUID, payload: NoteUpdate, *, commit: bool = True
+    ) -> Note:
         note = await self.get_editable(user, note_id)
         if note.deleted_at is not None:
             raise Conflict("This note is in the trash. Restore it to edit.", code="NOTE_IN_TRASH")
@@ -259,7 +264,10 @@ class NoteService:
         if content_changed:
             await self._snapshot_if_due(user, note, before_title, before_body)
             await self.notes.mark_updated(note)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(note)
         return note
 
@@ -523,6 +531,46 @@ class NoteService:
             moved += 1
         await self.db.commit()
         return moved
+
+    async def restore_many(self, user: User, ids: list[uuid.UUID]) -> int:
+        """Bring several of the user's trashed notes back. Stale or foreign ids are skipped."""
+        restored = 0
+        for nid in dict.fromkeys(ids):
+            note = await self.notes.get(nid, user.id)
+            if note is None or note.deleted_at is None:
+                continue
+            note.deleted_at = None
+            restored += 1
+        await self.db.commit()
+        return restored
+
+    async def purge_many(self, user: User, ids: list[uuid.UUID]) -> int:
+        """Delete several of the user's notes forever. Only notes already in the trash qualify,
+        so a stale selection can never permanently delete a live note."""
+        purged = 0
+        for nid in dict.fromkeys(ids):
+            note = await self.notes.get(nid, user.id)
+            if note is None or note.deleted_at is None:
+                continue
+            await self.notes.purge(note)
+            purged += 1
+        await self.db.commit()
+        return purged
+
+    async def leave_many(self, user: User, ids: list[uuid.UUID]) -> int:
+        """Drop the user's access to notes others shared with them (the owner keeps the note)."""
+        rows = (
+            await self.db.scalars(
+                select(NoteCollaborator).where(
+                    NoteCollaborator.note_id.in_(list(dict.fromkeys(ids))),
+                    NoteCollaborator.user_id == user.id,
+                )
+            )
+        ).all()
+        for row in rows:
+            await self.db.delete(row)
+        await self.db.commit()
+        return len(rows)
 
     async def restore_note(self, user: User, note_id: uuid.UUID) -> Note:
         note = await self.get_note(user, note_id)

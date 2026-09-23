@@ -52,6 +52,11 @@ export const notesApi = {
   invitation: (token: string) => api.get<Invitation>(`/invitations/${encodeURIComponent(token)}`),
   acceptInvitation: (token: string) => api.post<Note>(`/invitations/${encodeURIComponent(token)}/accept`, {}),
   trashMany: (ids: string[]) => api.post<{ moved: number }>("/notes/bulk/trash", { ids }),
+  restoreMany: (ids: string[]) => api.post<{ restored: number }>("/notes/bulk/restore", { ids }),
+  /** Delete forever. The server only purges notes that are already in the trash. */
+  purgeMany: (ids: string[]) => api.post<{ deleted: number }>("/notes/bulk/purge", { ids }),
+  /** Drop your access to notes others shared with you. */
+  leaveMany: (ids: string[]) => api.post<{ left: number }>("/notes/bulk/leave", { ids }),
   updateCollaborator: (id: string, collaboratorId: string, role: CollaboratorRole) =>
     api.patch<Collaborator>(`/notes/${id}/collaborators/${collaboratorId}`, { role }),
   removeCollaborator: (id: string, collaboratorId: string) =>

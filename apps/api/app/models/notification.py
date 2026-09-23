@@ -20,6 +20,7 @@ class NotificationKind(enum.StrEnum):
     calendar_sync_failed = "calendar_sync_failed"
     note_reminder = "note_reminder"
     note_shared = "note_shared"
+    automation = "automation"
 
 
 class Notification(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
@@ -38,3 +39,6 @@ class Notification(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base)
     href: Mapped[str | None] = mapped_column(String(500), nullable=True)
     dedupe_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     read_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    # Dismissed notifications leave the inbox but keep their row, so dedupe_key still stops
+    # a derived reminder (e.g. "task overdue") from being raised again on the next sweep.
+    dismissed_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)

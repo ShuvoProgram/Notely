@@ -1,0 +1,123 @@
+/*
+ * Landing page. Editorial and high-contrast: hairline rules for the content sections, soft rounded
+ * product cards in the hero, one accent (the brand green) used for meaning only.
+ * All colours come from the app tokens, so light and dark both work.
+ */
+
+.landing {
+  --landing-shadow: color-mix(in oklch, var(--foreground) 14%, transparent);
+  background-color: var(--background);
+}
+
+/* Pre-hydration states for everything GSAP animates in, so the first paint never flashes the
+   final layout and then jumps. Only when motion is allowed: with reduced motion (or no JS, see the
+   <noscript> in the page) everything simply renders in place. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Opacity only: a CSS transform here would be read by GSAP as the resting position. */
+  .landing :is([data-reveal], .landing-fade, [data-pop], [data-hero-word]) {
+    opacity: 0;
+  }
+  .landing [data-ring] {
+    stroke-dashoffset: 1;
+  }
+}
+
+/* The accent word in the hero: a solid bar under it, not a gradient wash. */
+.landing-mark {
+  background: linear-gradient(var(--ai), var(--ai)) no-repeat 0 92% / 100% 0.13em;
+}
+
+/* Hard offset shadow for the big product panels. */
+.landing-panel {
+  box-shadow: 10px 10px 0 0 var(--landing-shadow);
+}
+
+/* ───── Hero workflow cards (note → assistant → task → calendar) ───── */
+.landing-flowcard {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent),
+    0 14px 34px -18px rgb(0 0 0 / 0.5);
+  transition:
+    box-shadow 0.5s var(--ease-liquid, ease),
+    translate 0.5s var(--ease-liquid, ease);
+}
+.landing-flowcard[data-active] {
+  translate: 0 -3px;
+  box-shadow:
+    0 0 0 1.5px color-mix(in oklch, var(--ai) 70%, transparent),
+    0 0 26px -6px color-mix(in oklch, var(--ai) 40%, transparent),
+    0 18px 38px -18px rgb(0 0 0 / 0.55);
+}
+/* Assistant: the two proposed tasks tick, then the request is approved. */
+.landing-check {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease;
+}
+.landing-check svg {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.landing-flowcard[data-c1] [data-check="1"],
+.landing-flowcard[data-c2] [data-check="2"] {
+  background: var(--ai);
+  border-color: var(--ai);
+  color: var(--primary-foreground);
+}
+.landing-flowcard[data-c1] [data-check="1"] svg,
+.landing-flowcard[data-c2] [data-check="2"] svg {
+  opacity: 1;
+}
+.landing-approve {
+  background: var(--foreground);
+  color: var(--background);
+  transition:
+    background-color 0.35s ease,
+    color 0.35s ease;
+}
+.landing-flowcard[data-approved] .landing-approve {
+  background: var(--ai);
+  color: var(--primary-foreground);
+}
+.landing-flowcard:not([data-approved]) .landing-when-approved,
+.landing-flowcard[data-approved] .landing-when-pending,
+.landing-flowcard:not([data-new]) .landing-when-new,
+.landing-flowcard:not([data-synced]) .landing-when-synced,
+.landing-flowcard[data-synced] .landing-when-syncing {
+  display: none;
+}
+.landing-taskbox svg {
+  opacity: 0;
+}
+/* Calendar: the event bar fills in once synced. */
+.landing-event {
+  background: color-mix(in oklch, var(--foreground) 18%, transparent);
+  transition: background-color 0.4s ease;
+}
+.landing-flowcard[data-synced] .landing-event {
+  background: var(--ai);
+}
+/* The apps the assistant reads from, and the signal on the track. */
+.landing-app {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent),
+    0 6px 16px -8px rgb(0 0 0 / 0.45);
+  transition: box-shadow 0.35s ease;
+}
+.landing-app[data-live] {
+  box-shadow:
+    0 0 0 2px color-mix(in oklch, var(--ai) 75%, transparent),
+    0 0 16px color-mix(in oklch, var(--ai) 35%, transparent);
+}
+.landing-signal {
+  filter: drop-shadow(0 0 4px var(--ai));
+}
+/* Backdrop rings fade out before they reach the edges. */
+.landing-rings {
+  mask-image: radial-gradient(closest-side, black 55%, transparent 100%);
+}
+/* Compact workflow (below lg): the step the highlight is on. */
+li.landing-flowcard[data-active] > p:first-child {
+  color: var(--ai);
+}

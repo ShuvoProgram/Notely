@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Mail, RefreshCw, UserPlus, X } from "lucide-react";
+import { AlertTriangle, Loader2, Mail, RefreshCw, UserPlus, X } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 

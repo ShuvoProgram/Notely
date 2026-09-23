@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, CalendarDays, Check, CheckSquare, FileText, ListChecks, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { CalendarCheck, CalendarDays, Check, CheckSquare, FileText, ListChecks, Loader2, Pencil, Plus, Sparkles, Trash2 } from "@/components/icons";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -9,11 +9,10 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/layout/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
-import { SelectionBar } from "@/components/layout/selection-bar";
+import { SelectionBar, type SelectionAction } from "@/components/layout/selection-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -118,18 +117,31 @@ export function TaskList() {
   const list = tasks.data ?? [];
   const visibleIds = React.useMemo(() => (tasks.data ?? []).map((t) => t.id), [tasks.data]);
   const selection = useSelection(visibleIds);
-  const [confirmBulk, setConfirmBulk] = React.useState(false);
   const removeMany = useMutation({
     mutationFn: tasksApi.removeMany,
     onSuccess: ({ deleted }) => {
       playSfx("delete");
       toast.success(`Deleted ${deleted} ${deleted === 1 ? "task" : "tasks"}`);
-      setConfirmBulk(false);
       selection.exit();
       invalidate();
     },
     onError: (e) => toast.error(messageFor(e)),
   });
+  const bulkActions: SelectionAction[] = [
+    {
+      id: "delete",
+      label: "Delete",
+      icon: Trash2,
+      tone: "destructive",
+      pending: removeMany.isPending,
+      confirm: {
+        title: `Delete ${selection.count} ${selection.count === 1 ? "task" : "tasks"}?`,
+        description: "This can't be undone. Tasks linked to Google Calendar are removed from the calendar too.",
+        label: "Delete",
+      },
+      onRun: () => removeMany.mutate([...selection.ids]),
+    },
+  ];
 
   const sections = view === "open" ? groupOpen(list) : [{ key: "done", label: "Completed", tasks: list }];
   const openCount = view === "open" ? list.length : undefined;
@@ -175,7 +187,19 @@ export function TaskList() {
         </Button>
       </form>
 
-      <div className="flex items-center justify-between gap-3">
+      {/* Tabs and the selection toolbar share one fixed-height row, so selecting never moves the list. */}
+      {selection.selecting ? (
+        <SelectionBar
+          allState={selection.allState}
+          count={selection.count}
+          total={selection.visibleTotal}
+          noun="tasks"
+          onSelectAll={selection.selectAll}
+          onCancel={selection.exit}
+          actions={bulkActions}
+        />
+      ) : (
+      <div className="flex h-10 items-center justify-between gap-3">
         <Tabs value={view} onValueChange={(v) => { selection.exit(); setView(v); }}>
           <TabsList className="rounded-full">
             <TabsTrigger value="open" className="rounded-full">
@@ -186,24 +210,13 @@ export function TaskList() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        {list.length && !selection.selecting ? (
+        {list.length ? (
           <Button variant="ghost" size="sm" aria-label="Select tasks" onClick={selection.enter} className="rounded-full text-muted-foreground">
             <ListChecks aria-hidden /> Select
           </Button>
         ) : null}
       </div>
-      {selection.selecting ? (
-        <SelectionBar
-          className="rounded-xl border border-glass-border bg-muted/30 px-3 py-1"
-          allState={selection.allState}
-          count={selection.count}
-          total={selection.visibleTotal}
-          noun="tasks"
-          onSelectAll={selection.selectAll}
-          onCancel={selection.exit}
-          action={{ label: "Delete", icon: Trash2, onClick: () => setConfirmBulk(true) }}
-        />
-      ) : null}
+      )}
 
       {tasks.isPending ? (
         <div className="space-y-2" aria-busy>
@@ -236,7 +249,7 @@ export function TaskList() {
             <section key={section.key} aria-labelledby={`tasks-${section.key}`}>
               <h2 id={`tasks-${section.key}`} className={cn("mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em]", section.key === "overdue" ? "text-destructive" : "text-muted-foreground")}>
                 {section.label}
-                <span className="text-muted-foreground/60 normal-case tracking-normal">{section.tasks.length}</span>
+                <span className="text-tertiary normal-case tracking-normal">{section.tasks.length}</span>
               </h2>
               <ul className="glass divide-y divide-glass-border rounded-2xl">
                 {section.tasks.map((t) => (
@@ -249,15 +262,6 @@ export function TaskList() {
       )}
 
       <TaskDialog key={`${editing.task?.id ?? "new"}:${editing.open}`} task={editing.task} open={editing.open} onOpenChange={(open) => setEditing((s) => ({ ...s, open }))} />
-      <ConfirmDialog
-        open={confirmBulk}
-        onOpenChange={setConfirmBulk}
-        title={`Delete ${selection.count} ${selection.count === 1 ? "task" : "tasks"}?`}
-        description="This can't be undone. Tasks linked to Google Calendar are removed from the calendar too."
-        confirmLabel="Delete"
-        pending={removeMany.isPending}
-        onConfirm={() => removeMany.mutate([...selection.ids])}
-      />
     </div>
   );
 }

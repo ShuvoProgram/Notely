@@ -45,8 +45,9 @@ test("assistant searches notes automatically and cites sources", async ({ page }
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.getByText("ship the pricing page by Friday")).toBeVisible();
-  await expect(page.getByText("Based on 1 source")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Launch plan" })).toBeVisible();
+  // Sources sit behind a compact "1 source" toggle under the answer.
+  await page.getByRole("button", { name: "1 source" }).click();
+  await expect(page.getByRole("list", { name: "Sources" }).getByRole("link", { name: "Launch plan" })).toBeVisible();
   await expect(page).toHaveURL(/thread=/);
   // No approval card for read-only tools.
   await expect(page.getByText("Ready to execute")).toHaveCount(0);
@@ -69,12 +70,13 @@ test("write actions pause for review; approving one of two executes only that on
 
   const card = page.getByRole("region", { name: "Ready to execute" });
   await expect(card).toBeVisible();
-  await expect(card.getByText("Notely wants to make 2 changes")).toBeVisible();
+  await expect(card.getByText("2 changes")).toBeVisible();
+  // Changes are reviewed one at a time: keep the first, skip the second.
   await expect(card.getByText("Create task “Finalize pricing”")).toBeVisible();
-  await expect(card.getByText("Create task “Email the team”")).toBeVisible();
-
-  // Untick the second proposal, approve the rest.
-  await card.getByLabel(/Email the team/).uncheck();
+  await card.getByRole("radiogroup", { name: /Finalize pricing/ }).getByRole("radio", { name: "Do this" }).click();
+  const second = card.getByRole("radiogroup", { name: /Email the team/ });
+  await second.getByRole("radio", { name: "Skip this one" }).click();
+  await expect(second.getByRole("radio", { name: "Skip this one" })).toHaveAttribute("aria-checked", "true");
   await script(page, [{ content: "Created the approved task." }]);
   await card.getByRole("button", { name: "Approve 1 of 2" }).click();
 
@@ -166,10 +168,12 @@ test("cross-app request: plan is shown and ticked off, writes are verified after
   await script(page, [{ content: "Created the task and verified it exists." }]);
   await card.getByRole("button", { name: /Approve/ }).click();
   await expect(page.getByText("Created the task and verified it exists.")).toBeVisible();
-  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Plan" }).locator('li[data-status="done"]')).toHaveCount(4);
-  await expect(page.getByLabel("Sources")).toContainText("Based on 1 source");
-  await expect(page.getByLabel("Sources").getByRole("link", { name: "Launch plan" })).toBeVisible();
+  // The finished run folds its tool calls away; opening them shows the verified write.
+  await page.getByRole("region", { name: "Tool calls" }).getByRole("button", { name: /tool call/ }).last().click();
+  await expect(page.getByLabel("Verified").last()).toBeVisible();
+  await page.getByRole("button", { name: "1 source" }).last().click();
+  await expect(page.getByRole("list", { name: "Sources" }).last().getByRole("link", { name: "Launch plan" })).toBeVisible();
 
   // The read-back is part of the audit trail, not hidden.
   await page.goto("/app/settings/activity");

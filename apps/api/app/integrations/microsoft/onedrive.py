@@ -6,8 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -198,6 +200,7 @@ class OneDriveProvider(MicrosoftGraphProvider):
                 Capability.search,
                 search_files,
                 lambda a: f"Search OneDrive for “{a.query}”",
+                outputs=(listing("results", "Files", F("name", "Name"), F("url", "Link", "url")),),
             ),
             ProviderTool(
                 "list_folder",
@@ -214,6 +217,7 @@ class OneDriveProvider(MicrosoftGraphProvider):
                 Capability.read,
                 read_text_file,
                 lambda a: "Read a OneDrive file",
+                outputs=(F("name", "File name"), F("content", "File text", "long_text")),
             ),
             ProviderTool(
                 "upload_text_file",

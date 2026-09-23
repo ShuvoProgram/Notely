@@ -7,9 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import SEARCH_RESULTS
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -237,6 +239,7 @@ class DropboxProvider(RestOAuthProvider):
                 Capability.search,
                 search_files,
                 lambda a: f"Search Dropbox for “{a.query}”",
+                outputs=SEARCH_RESULTS,
             ),
             ProviderTool(
                 "list_folder",
@@ -253,6 +256,7 @@ class DropboxProvider(RestOAuthProvider):
                 Capability.read,
                 read_text_file,
                 lambda a: f"Read Dropbox file {a.path}",
+                outputs=(F("path", "File path"), F("content", "File text", "long_text")),
             ),
             ProviderTool(
                 "upload_text_file",

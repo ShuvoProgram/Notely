@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Editor } from "@tiptap/react";
-import { ArrowUp, Check, Copy, ListChecks, Loader2, MessageSquareText, RefreshCw, Replace, Sparkles, TextQuote, WandSparkles, X } from "lucide-react";
+import { ArrowUp, Check, Copy, ListChecks, Loader2, MessageSquareText, RefreshCw, Replace, Sparkles, TextQuote, WandSparkles, X } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 

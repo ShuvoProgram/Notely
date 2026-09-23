@@ -1,9 +1,9 @@
 "use client";
 
-import { LifeBuoy, LogOut, UserRound } from "lucide-react";
+import { LifeBuoy, LogOut, Settings, UserRound } from "@/components/icons";
 import Link from "next/link";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/layout/user-avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,14 +17,7 @@ import { useCurrentUser, useLogout } from "@/features/auth/hooks";
 import { LEGAL } from "@/lib/legal";
 import type { User } from "@/lib/api/types";
 
-export function initialsOf(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-}
+export { initialsOf } from "@/components/layout/user-avatar";
 
 export function UserMenu({ initialUser }: { initialUser: User }) {
   const { data: user = initialUser } = useCurrentUser(initialUser);
@@ -34,12 +27,7 @@ export function UserMenu({ initialUser }: { initialUser: User }) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="rounded-full" aria-label="Account menu">
-          <Avatar className="size-8">
-            {user.avatar_url ? <AvatarImage src={user.avatar_url} alt="" /> : null}
-            <AvatarFallback className="bg-ai-soft text-xs font-medium text-ai">
-              {initialsOf(user.display_name) || "?"}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar name={user.display_name} src={user.avatar_url} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
@@ -51,6 +39,11 @@ export function UserMenu({ initialUser }: { initialUser: User }) {
         <DropdownMenuItem asChild>
           <Link href="/app/settings/profile">
             <UserRound aria-hidden /> Your account
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/app/settings">
+            <Settings aria-hidden /> Settings
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

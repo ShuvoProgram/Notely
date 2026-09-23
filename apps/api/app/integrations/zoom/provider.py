@@ -18,9 +18,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -286,6 +288,16 @@ class ZoomProvider(RestOAuthProvider):
                 list_meetings,
                 lambda a: f"List {a.kind.replace('_', ' ')} Zoom meetings",
                 scope=SCOPE_LIST,
+                outputs=(
+                    listing(
+                        "meetings",
+                        "Meetings",
+                        F("topic", "Topic"),
+                        F("start_time", "Starts", "date"),
+                        F("duration_minutes", "Minutes", "number"),
+                        F("join_url", "Join link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "get_meeting",

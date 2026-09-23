@@ -88,7 +88,7 @@ class ProviderHttpClient:
             if response.status_code < 400:
                 return response
             error = classify_http_status(
-                response.status_code, provider=self.provider, body_hint=response.text[:500]
+                response.status_code, provider=self.provider, body_hint=response.text[:2000]
             )
             metrics.provider_errors.labels(self.provider, error.kind.value).inc()
             retry_after = _retry_after_seconds(response)

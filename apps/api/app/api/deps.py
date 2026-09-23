@@ -42,10 +42,28 @@ async def get_current_auth(
 ) -> AuthContext:
     if ctx is None:
         raise Unauthorized()
+    if ctx.user.totp_secret_encrypted and ctx.session.two_factor_verified_at is None:
+        raise Unauthorized("Two-factor authentication is required.", code="TWO_FACTOR_REQUIRED")
     return ctx
 
 
 CurrentAuth = Annotated[AuthContext, Depends(get_current_auth)]
+
+
+async def get_pending_auth(
+    ctx: Annotated[AuthContext | None, Depends(get_optional_auth)],
+) -> AuthContext:
+    """A valid session that may still be completing its second factor.
+
+    This dependency is intentionally reserved for the 2FA verification endpoint. Using
+    `CurrentAuth` there would be circular: it rejects the very session that needs a code.
+    """
+    if ctx is None:
+        raise Unauthorized()
+    return ctx
+
+
+PendingAuth = Annotated[AuthContext, Depends(get_pending_auth)]
 
 
 def set_session_cookie(response: Response, token: str, settings: Settings) -> None:

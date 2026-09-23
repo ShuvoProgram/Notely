@@ -1,6 +1,6 @@
 "use client";
 
-import { Laptop, Smartphone } from "lucide-react";
+import { Laptop, Smartphone } from "@/components/icons";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";

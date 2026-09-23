@@ -9,6 +9,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   output: "standalone",
+  experimental: {
+    // The /api rewrite proxies to FastAPI. Next's default proxy timeout is 30s, which cut off
+    // slow AI calls (drafting an automation with a large model) and surfaced as a bare 500.
+    // The API bounds each model call itself (AI_REQUEST_TIMEOUT_SECONDS, 90s by default).
+    proxyTimeout: 180_000,
+  },
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${apiInternalUrl}/api/:path*` },
@@ -17,13 +23,16 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     // Next.js needs inline scripts for hydration, hence 'unsafe-inline' on script-src; everything
-    // else is locked to this origin. The API responses carry their own (stricter) headers.
+    // else is locked to this origin, except the Satoshi font (Fontshare: CSS + font files). The API responses carry their own (stricter) headers.
+    // `next dev` only: React's development build uses eval() to rebuild error call stacks.
+    // Production builds never use eval and keep the strict policy.
+    const devEval = process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
+      `script-src 'self' 'unsafe-inline'${devEval}`,
+      "style-src 'self' 'unsafe-inline' https://api.fontshare.com",
       "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
+      "font-src 'self' data: https://cdn.fontshare.com",
       "connect-src 'self'",
       "frame-ancestors 'none'",
       "form-action 'self'",

@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.ai.tools.base import ToolContext, ToolSpec, Verification, untrusted
+from app.ai.tools.base import OutputField, ToolContext, ToolSpec, Verification, untrusted
 from app.core.config import Settings
 from app.core.exceptions import OAuthExchangeFailed
 from app.core.oauth import (
@@ -54,6 +54,8 @@ class ProviderTool:
     # not include it (an optional permission the user declined), the tool is not offered to
     # the assistant at all — never advertise what the provider would refuse.
     scope: str | None = None
+    # What the tool returns, described for automation data mapping (see OutputField).
+    outputs: tuple[OutputField, ...] = ()
 
 
 class RestOAuthProvider(IntegrationProvider):
@@ -216,6 +218,7 @@ class RestOAuthProvider(IntegrationProvider):
                     handler=self._bind(tool.handler),
                     summarize=tool.summarize,
                     verify=self._bind_verifier(tool.verify) if tool.verify else None,
+                    outputs=tool.outputs,
                 )
             )
         return specs

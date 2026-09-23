@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Plus, Tag as TagIcon, X } from "lucide-react";
+import { Check, Plus, Tag as TagIcon, X } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 

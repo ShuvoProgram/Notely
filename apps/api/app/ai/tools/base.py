@@ -70,6 +70,26 @@ class Verification:
 ToolVerifier = Callable[[ToolContext, Any, dict[str, Any]], Awaitable[Verification]]
 
 
+@dataclass(frozen=True)
+class OutputField:
+    """One piece of data a tool returns, described for people (automation "Insert data").
+
+    `fields` describes the items of a list (or the keys of an object) so a workflow can use
+    "the first message's subject" without anyone reading raw data.
+    """
+
+    key: str
+    label: str
+    type: str = "text"  # text | long_text | number | date | boolean | url | list | object
+    fields: tuple[OutputField, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"key": self.key, "label": self.label, "type": self.type}
+        if self.fields:
+            out["fields"] = [f.to_dict() for f in self.fields]
+        return out
+
+
 class ToolArgumentError(ValueError):
     pass
 
@@ -91,6 +111,8 @@ class ToolSpec:
     tags: tuple[str, ...] = field(default_factory=tuple)
     # Optional read-back for write tools; the framework runs it and reports the outcome.
     verify: ToolVerifier | None = None
+    # What the tool returns, for automations. Empty means "discover from a test run".
+    outputs: tuple[OutputField, ...] = ()
 
     def __post_init__(self) -> None:
         if (self.args_schema is None) == (self.json_schema is None):

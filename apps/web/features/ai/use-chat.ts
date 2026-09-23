@@ -22,9 +22,11 @@ export interface LiveAssistant {
   steps: StepState[];
   sources: AISource[];
   plan: AIPlan | null;
+  /** When this reply started (ms since epoch): drives the elapsed timer and "Worked for …". */
+  startedAt: number;
 }
 
-const emptyLive = (): LiveAssistant => ({ text: "", steps: [], sources: [], plan: null });
+const emptyLive = (startedAt: number = Date.now()): LiveAssistant => ({ text: "", steps: [], sources: [], plan: null, startedAt });
 
 export interface ChatState {
   threadId: string | null;
@@ -104,6 +106,7 @@ export function useChat(initialThreadId: string | null) {
                     .map((st) => ({ call_id: st.call_id!, tool: st.tool ?? "", label: st.label ?? "", status: (st.status as StepState["status"]) ?? "completed", verification: st.verification })),
                   sources: run.sources ?? [],
                   plan: run.plan ?? null,
+                  startedAt: Date.parse(run.created_at ?? "") || Date.now(),
                 }
               : null,
         }));
@@ -160,6 +163,7 @@ export function useChat(initialThreadId: string | null) {
               created_at: new Date().toISOString(),
               steps: s.live?.steps.length ? s.live.steps : undefined,
               plan: s.live?.plan ? closePlan(s.live.plan) : null,
+              duration_ms: s.live ? Date.now() - s.live.startedAt : undefined,
             };
             return { ...s, messages: [...s.messages, message], live: null };
           }
@@ -200,8 +204,9 @@ export function useChat(initialThreadId: string | null) {
     (text: string, noteId?: string | null) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const optimistic: AIMessage = { id: `local-${Date.now()}`, role: "user", content: trimmed, sources: null, run_id: null, created_at: new Date().toISOString() };
-      setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: emptyLive(), approval: null }));
+      const now = Date.now();
+      const optimistic: AIMessage = { id: `local-${now}`, role: "user", content: trimmed, sources: null, run_id: null, created_at: new Date(now).toISOString() };
+      setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: emptyLive(now), approval: null }));
       playSfx("ai-start");
       void runStream((signal) => aiApi.chat({ message: trimmed, thread_id: state.threadId, note_id: noteId ?? null }, handleEvent, signal));
     },

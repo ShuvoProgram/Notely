@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Enum, ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, JSONType, TimestampMixin, TZDateTime, UUIDPrimaryKeyMixin, utcnow
@@ -29,6 +29,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
     # User-level preference memory (AI model, summary length, ...). Never derived from note content.
     preferences: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False, default=dict)
+    # TOTP material is encrypted with ENCRYPTION_KEY. A pending secret is deliberately separate
+    # so a scanned-but-unverified setup can never satisfy a login challenge.
+    totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_pending_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_pending_expires_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
     identities: Mapped[list[AuthIdentity]] = relationship(
@@ -87,6 +92,7 @@ class UserSession(UUIDPrimaryKeyMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(TZDateTime(), nullable=False, index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    two_factor_verified_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
 

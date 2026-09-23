@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, CloudOff, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, CloudOff, Loader2 } from "@/components/icons";
 
 import type { SaveStatus } from "@/features/notes/use-autosave";
 import { cn } from "@/lib/utils";

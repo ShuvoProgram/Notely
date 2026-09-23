@@ -21,7 +21,7 @@ export function LegalSection({ id, title, children }: { id: string; title: strin
       <h2 id={`${id}-heading`} className="text-xl font-semibold tracking-tight">
         {title}
       </h2>
-      <div className="space-y-4 text-[15px] leading-7 text-foreground/90 [&_a]:underline [&_a]:underline-offset-4 [&_li]:leading-7 [&_strong]:font-semibold [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-6">
+      <div className="space-y-4 text-[15px] leading-7 text-foreground [&_a]:underline [&_a]:underline-offset-4 [&_li]:leading-7 [&_strong]:font-semibold [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-6">
         {children}
       </div>
     </section>

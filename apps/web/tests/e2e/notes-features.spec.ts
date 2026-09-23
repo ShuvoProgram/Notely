@@ -217,11 +217,10 @@ test("select several notes and move them to trash in one go", async ({ page, isM
   await list.getByRole("checkbox", { name: "Select Bin one" }).click({ modifiers: ["Shift"] }); // range: Bin two → Bin one
   await expect(list.getByText("2 selected")).toBeVisible();
   await expect(list.getByRole("checkbox", { name: "Select Keep me" })).not.toBeChecked();
+  // Moving to trash is reversible, so it runs straight away and offers Undo (no confirmation).
   await list.getByRole("button", { name: "Move to trash" }).click();
-  const confirm = page.getByRole("dialog", { name: "Move 2 notes to trash?" });
-  await expect(confirm.getByText(/restored from Trash/)).toBeVisible();
-  await confirm.getByRole("button", { name: "Move to trash" }).click();
-  await expect(confirm).toBeHidden();
+  await expect(page.getByText("Moved 2 notes to trash")).toBeVisible();
+  await expect(page.locator("[data-sonner-toast]").getByRole("button", { name: "Undo" })).toBeVisible();
   await expect(listTitles(page)).toHaveText(["Keep me"]);
   await page.getByRole("tab", { name: "Trash" }).click();
   await expect(listTitles(page)).toHaveCount(2); // trashed together → same timestamp, order not guaranteed
@@ -231,7 +230,7 @@ test("select several notes and move them to trash in one go", async ({ page, isM
   await page.getByRole("tab", { name: "Notes" }).click();
   await list.getByRole("button", { name: "Select notes" }).click();
   await list.getByRole("checkbox", { name: "Select all" }).click();
-  await expect(list.getByText("The only note selected")).toBeVisible();
+  await expect(list.getByText("1 selected")).toBeVisible();
   await list.getByRole("checkbox", { name: "Deselect all" }).click();
   await expect(list.getByText("Select notes")).toBeVisible();
   // Escape leaves selection mode; so does Cancel.

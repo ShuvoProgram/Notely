@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.provider import (
@@ -337,6 +338,11 @@ class GoogleSheetsProvider(GoogleProvider):
                 read_range,
                 lambda a: f"Read {a.range or 'the first sheet'} from a spreadsheet",
                 scope=SCOPE_READ,
+                outputs=(
+                    F("title", "Spreadsheet name"),
+                    F("rows", "Rows", "list"),
+                    F("range", "Range read"),
+                ),
             ),
             ProviderTool(
                 "create_spreadsheet",

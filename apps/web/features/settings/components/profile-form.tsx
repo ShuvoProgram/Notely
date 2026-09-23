@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { useCurrentUser, useUpdateProfile } from "@/features/auth/hooks";
+import { AvatarUpload } from "@/features/settings/components/avatar-upload";
 import { profileSchema, type ProfileValues } from "@/features/auth/schemas";
 
 export function ProfileForm() {
@@ -31,7 +32,8 @@ export function ProfileForm() {
         <CardTitle>Profile</CardTitle>
         <CardDescription>How you appear across Notely.</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
+        <AvatarUpload user={user} />
         <form
           noValidate
           className="space-y-5"

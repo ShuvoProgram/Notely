@@ -1,6 +1,6 @@
 "use client";
 
-import { Volume1, Volume2, VolumeX } from "lucide-react";
+import { Volume1, Volume2, VolumeX } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -66,7 +66,7 @@ export function SoundSettings() {
             }}
           />
         </div>
-        <div className={saved.enabled ? undefined : "opacity-50"}>
+        <div className={saved.enabled ? undefined : "opacity-(--disabled-opacity)"}>
           <div className="mb-2 flex items-center justify-between">
             <Label htmlFor="sound-volume" className="text-sm font-medium">
               Volume

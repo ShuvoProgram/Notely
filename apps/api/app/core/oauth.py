@@ -54,7 +54,9 @@ class OAuthEndpoints:
     token_url: str
     jwks_url: str | None = None  # OIDC id_token verification
     userinfo_url: str | None = None
-    issuer: str | None = None
+    # OIDC permits an issuer alias in rare cases.  Google documents both its
+    # URL and host-only values, so allow providers to pin an explicit set.
+    issuer: str | tuple[str, ...] | None = None
     extra_authorize_params: dict[str, str] = field(default_factory=dict)
     # How the token endpoint wants client credentials and the body encoded.
     token_auth: Literal["body", "basic"] = "body"

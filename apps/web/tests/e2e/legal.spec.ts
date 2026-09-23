@@ -16,12 +16,13 @@ test("privacy policy and terms are public and linked", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Terms & Conditions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: /Limitation of liability/ })).toBeVisible();
 
-  // Footer on the landing page links to both.
-  await page.goto("/");
+  // Footer on the landing page links to both. The landing page is long and animated; wait for it
+  // to finish loading so the footer isn't scrolled to mid-hydration (the dev build hydrates slowly).
+  await page.goto("/", { waitUntil: "networkidle" });
   const footer = page.getByRole("contentinfo");
   await footer.getByRole("link", { name: "Privacy Policy" }).click();
   await expect(page).toHaveURL(/\/privacy-policy$/);
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "networkidle" });
   await footer.getByRole("link", { name: "Terms & Conditions" }).click();
   await expect(page).toHaveURL(/\/terms-and-conditions$/);
 

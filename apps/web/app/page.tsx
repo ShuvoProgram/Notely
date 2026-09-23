@@ -1,40 +1,49 @@
-import { ArrowRight } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Features } from "@/components/landing/features";
+import { HowItWorks } from "@/components/landing/how-it-works";
+import { Integrations } from "@/components/landing/integrations";
+import { OrbitHero } from "@/components/landing/orbit-hero";
+import { RevealOnScroll } from "@/components/landing/reveal";
+import { FinalCta, Trust } from "@/components/landing/trust";
 import { SiteFooter } from "@/components/site/site-footer";
 import { SiteHeader } from "@/components/site/site-header";
-import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/api/server";
 
+import "./landing.css";
+
+const SECTIONS = [
+  { href: "#how-it-works", label: "How it works" },
+  { href: "#features", label: "Features" },
+  { href: "#integrations", label: "Integrations" },
+  { href: "#trust", label: "Trust" },
+];
+
+/*
+ * Conversion path: what it is (hero) → how it works → what's in it → what it connects to → why
+ * it's safe → one clear next step. Signed-in people go straight to the app.
+ */
 export default async function LandingPage() {
   const user = await getCurrentUser();
   if (user) redirect("/app");
 
   return (
-    <div className="flex flex-1 flex-col">
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-4 py-16 sm:px-6">
-        <p className="mb-4 text-sm font-medium text-ai">AI-first notes</p>
-        <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl">
-          Capture thoughts. Connect your work. Let AI move things forward.
-        </h1>
-        <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-          A calm note-taking workspace with a powerful AI layer underneath it. Write, ask, and
-          review changes before anything leaves Notely.
-        </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Button size="lg" asChild>
-            <Link href="/signup">
-              Create your workspace <ArrowRight className="size-4" aria-hidden />
-            </Link>
-          </Button>
-          <Button size="lg" variant="outline" asChild>
-            <Link href="/login">I already have an account</Link>
-          </Button>
-        </div>
+    <div className="landing flex flex-1 flex-col">
+      {/* Without JavaScript nothing animates, so nothing may start hidden either. */}
+      <noscript>
+        <style>{`.landing [data-reveal], .landing .landing-fade, .landing [data-pop], .landing [data-hero-word] { opacity: 1 !important } .landing [data-ring] { stroke-dashoffset: 0 !important }`}</style>
+      </noscript>
+      <SiteHeader sections={SECTIONS} />
+      <main className="flex-1 overflow-x-clip">
+        <OrbitHero />
+        <HowItWorks />
+        <Features />
+        <Integrations />
+        <Trust />
+        <FinalCta />
       </main>
       <SiteFooter />
+      <RevealOnScroll />
     </div>
   );
 }

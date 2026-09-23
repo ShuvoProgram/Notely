@@ -8,11 +8,28 @@ export interface User {
   display_name: string;
   avatar_url: string | null;
   has_password: boolean;
+  two_factor_enabled: boolean;
+  two_factor_required: boolean;
   created_at: string;
   /** In-app notification switches by kind group; a missing key means on. */
   notifications: Record<string, boolean>;
   /** UI sound effects: master switch and 0–1 volume. */
   sound: { enabled: boolean; volume: number };
+  /** Workspace look (background + glass); see lib/appearance. */
+  appearance: Appearance;
+}
+
+/** The approved backgrounds (images in `public/assets`); there is no custom upload. */
+export type BackgroundId = "starry-moss" | "forest" | "mountain-lake" | "meadow" | "mossy-branch";
+export type GlassLevel = "off" | "subtle" | "medium" | "strong";
+
+/** Mirrors `AppearancePreference`. blur/opacity/border are 0–100; null follows the glass level. */
+export interface Appearance {
+  background: BackgroundId;
+  glass: GlassLevel;
+  blur: number | null;
+  opacity: number | null;
+  border: number | null;
 }
 
 export interface UserSession {
@@ -52,6 +69,7 @@ export interface UpdateProfileInput {
   avatar_url?: string | null;
   notifications?: Record<string, boolean>;
   sound?: { enabled: boolean; volume: number };
+  appearance?: Appearance;
 }
 
 // --- notes (mirrors apps/api/app/schemas/notes.py) ---------------------------------------------
@@ -338,6 +356,8 @@ export interface AIMessage {
   /** Execution metadata of the run that produced this message (client-side only). */
   steps?: AIStep[];
   plan?: AIPlan | null;
+  /** How long the run took (client-side only; set when a live reply completes). */
+  duration_ms?: number;
 }
 
 export interface AIToolCall {
@@ -619,7 +639,8 @@ export type NotificationKind =
   | "calendar_synced"
   | "calendar_sync_failed"
   | "note_reminder"
-  | "note_shared";
+  | "note_shared"
+  | "automation";
 
 export interface AppNotification {
   id: string;

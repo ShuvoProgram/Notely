@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Kbd } from "@/components/ui/kbd"
-import { SearchIcon, CheckIcon, Loader2Icon } from "lucide-react"
+import { SearchIcon, CheckIcon, Loader2Icon } from "@/components/icons"
 
 /*
  * Command palette primitives on cmdk, styled for the Notely glass system.
@@ -91,7 +91,7 @@ function CommandInput({
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "h-full min-w-0 flex-1 bg-transparent text-base outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "h-full min-w-0 flex-1 bg-transparent text-base outline-hidden placeholder:text-placeholder disabled:cursor-not-allowed disabled:opacity-(--disabled-opacity)",
           className
         )}
         {...props}
@@ -138,7 +138,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.1em] **:[[cmdk-group-heading]]:text-muted-foreground/70",
+        "overflow-hidden text-foreground **:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.1em] **:[[cmdk-group-heading]]:text-tertiary",
         className
       )}
       {...props}
@@ -171,7 +171,7 @@ function CommandItem({
       className={cn(
         // icon | text | metadata: the same three columns in every row, so labels and the
         // secondary column line up across sections instead of floating on auto margins.
-        "group/command-item relative grid min-h-10 cursor-default grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg py-2 pl-2.5 pr-3 text-sm outline-hidden select-none transition-colors duration-100",
+        "group/command-item relative grid min-h-10 cursor-default grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg py-2 pl-2.5 pr-3 text-sm outline-hidden select-none transition-colors duration-200 ease-liquid",
         "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
         // Highlight: soft accent fill, a thin emerald bar on the left, icon tinted.
         "data-[selected=true]:bg-ai-soft data-[selected=true]:text-foreground data-[selected=true]:before:absolute data-[selected=true]:before:left-0 data-[selected=true]:before:top-1/2 data-[selected=true]:before:h-5 data-[selected=true]:before:w-0.5 data-[selected=true]:before:-translate-y-1/2 data-[selected=true]:before:rounded-full data-[selected=true]:before:bg-ai",
@@ -225,7 +225,7 @@ function CommandItemMeta({ className, ...props }: React.ComponentProps<"span">) 
     <span
       data-slot="command-item-meta"
       className={cn(
-        "col-start-3 hidden justify-self-end text-[11px] text-muted-foreground/70 group-data-[selected=true]/command-item:text-muted-foreground sm:inline",
+        "col-start-3 hidden justify-self-end text-[11px] text-tertiary group-data-[selected=true]/command-item:text-muted-foreground sm:inline",
         className
       )}
       {...props}

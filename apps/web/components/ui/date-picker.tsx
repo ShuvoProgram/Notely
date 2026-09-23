@@ -1,7 +1,7 @@
 "use client";
 
 import { format, isValid, parse } from "date-fns";
-import { CalendarIcon, X } from "lucide-react";
+import { CalendarIcon, X } from "@/components/icons";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ export function DatePicker({
             disabled={disabled}
             aria-label={ariaLabel}
             aria-invalid={ariaInvalid}
-            className={cn("w-full justify-start gap-2 bg-background/60 px-3 font-normal", !selected && "text-muted-foreground", selected && !disabled && "pr-9")}
+            className={cn("w-full justify-start gap-2 bg-field px-3 font-normal", !selected && "text-muted-foreground", selected && !disabled && "pr-9")}
           >
             <CalendarIcon className="size-4 text-muted-foreground" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-left">{selected ? format(selected, "EEE, MMM d, yyyy") : placeholder}</span>

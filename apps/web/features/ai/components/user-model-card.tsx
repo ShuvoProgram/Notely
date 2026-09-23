@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, ExternalLink, KeyRound, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, KeyRound, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2, XCircle } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -281,7 +281,7 @@ function ConfigurationForm({ settings, onDone, onCancel }: { settings: AISetting
         <div className="space-y-2">
           <Label htmlFor="byo-provider">Provider</Label>
           <Select value={providerId} onValueChange={pickProvider}>
-            <SelectTrigger id="byo-provider" className="w-full bg-background/60">
+            <SelectTrigger id="byo-provider" className="w-full bg-field">
               <SelectValue placeholder="Choose a provider" />
             </SelectTrigger>
             <SelectContent>
@@ -328,7 +328,7 @@ function ConfigurationForm({ settings, onDone, onCancel }: { settings: AISetting
       {info?.needs_base_url && !info.base_url_fixed ? (
         <div className="space-y-2">
           <Label htmlFor="byo-base">Base URL</Label>
-          <Input id="byo-base" type="url" inputMode="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={info.default_base_url ?? "https://…/v1"} aria-invalid={errors.base_url || (baseUrl !== "" && !baseOk) ? true : undefined} className="bg-background/60 font-mono text-sm" />
+          <Input id="byo-base" type="url" inputMode="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={info.default_base_url ?? "https://…/v1"} aria-invalid={errors.base_url || (baseUrl !== "" && !baseOk) ? true : undefined} className="bg-field font-mono text-sm" />
           {errors.base_url || (baseUrl !== "" && !baseOk) ? (
             <p role="alert" className="text-xs text-destructive">
               {errors.base_url ?? "Enter a full http(s) URL ending in /v1, e.g. http://localhost:11434/v1"}
@@ -342,7 +342,7 @@ function ConfigurationForm({ settings, onDone, onCancel }: { settings: AISetting
       <div className="space-y-2">
         <Label htmlFor="byo-key">API key</Label>
         {sameProviderAsSaved && !replacingKey ? (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-glass-border bg-background/60 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-glass-border bg-field px-3 py-2 text-sm">
             <span className="font-mono tracking-widest">••••••••••••{saved?.key_hint.replace("…", "")}</span>
             <Button type="button" variant="outline" size="sm" onClick={() => setReplacingKey(true)}>
               Replace API key
@@ -350,7 +350,7 @@ function ConfigurationForm({ settings, onDone, onCancel }: { settings: AISetting
           </div>
         ) : (
           <>
-            <Input id="byo-key" name="byo-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={info?.key_placeholder} aria-invalid={errors.api_key ? true : undefined} className="bg-background/60" />
+            <Input id="byo-key" name="byo-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={info?.key_placeholder} aria-invalid={errors.api_key ? true : undefined} className="bg-field" />
             {sameProviderAsSaved ? (
               <Button type="button" variant="link" size="sm" className="h-auto px-0 text-xs" onClick={() => { setReplacingKey(false); setApiKey(""); }}>
                 Keep the stored key

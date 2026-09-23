@@ -46,7 +46,7 @@ export function useLogin() {
     mutationFn: authApi.login,
     onSuccess: (user) => {
       queryClient.setQueryData(authKeys.me, user);
-      router.push(next);
+      router.push(user.two_factor_required ? "/login?two_factor=1" : next);
       router.refresh();
     },
   });

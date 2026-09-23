@@ -3,6 +3,7 @@ derives plain text from it for search, AI context and indexing."""
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 BLOCK_NODES = {
@@ -31,6 +32,32 @@ def is_valid_doc(doc: Any) -> bool:
         and doc.get("type") == "doc"
         and isinstance(doc.get("content", []), list)
     )
+
+
+def plain_text_doc(value: str) -> dict[str, Any]:
+    """Convert trustworthy workflow output into the editor's canonical document format."""
+    lines = [line.strip() for line in value.replace("\r\n", "\n").split("\n") if line.strip()]
+    if not lines:
+        return copy.deepcopy(EMPTY_DOC)
+    return {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": line}]} for line in lines
+        ],
+    }
+
+
+def merge_docs(existing: dict[str, Any], incoming: dict[str, Any], mode: str) -> dict[str, Any]:
+    """Safely insert one valid TipTap document into another without mutating either input."""
+    if mode == "replace":
+        return copy.deepcopy(incoming)
+    existing_content = copy.deepcopy(existing.get("content") or [])
+    incoming_content = copy.deepcopy(incoming.get("content") or [])
+    if mode == "prepend":
+        content = incoming_content + existing_content
+    else:
+        content = existing_content + incoming_content
+    return {"type": "doc", "content": content or copy.deepcopy(EMPTY_DOC["content"])}
 
 
 def to_plain_text(doc: dict[str, Any] | None) -> str:

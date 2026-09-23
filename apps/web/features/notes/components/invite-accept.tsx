@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, MailX, UserRound } from "lucide-react";
+import { Loader2, MailX, UserRound } from "@/components/icons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";

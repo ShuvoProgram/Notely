@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -109,15 +110,21 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         self.max_bytes = settings.max_request_bytes
         self.max_webhook_bytes = settings.max_webhook_bytes
         self.webhook_prefix = f"{settings.api_prefix}/webhooks/"
+        # Profile pictures are the one multipart upload; the service caps and re-encodes them.
+        self.avatar_path = f"{settings.api_prefix}/users/me/avatar"
+        self.max_avatar_bytes = 5 * 1024 * 1024 + 64 * 1024  # 5 MB image + multipart framing
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         length = request.headers.get("content-length")
         if length and length.isdigit():
+            path = request.url.path
             limit = (
                 self.max_webhook_bytes
-                if request.url.path.startswith(self.webhook_prefix)
+                if path.startswith(self.webhook_prefix)
+                else self.max_avatar_bytes
+                if path == self.avatar_path
                 else self.max_bytes
             )
             if int(length) > limit:
@@ -128,6 +135,9 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                     {"max_bytes": limit},
                 )
         return await call_next(request)
+
+
+_LOCAL_ORIGIN = re.compile(r"https?://(?:localhost|127\.0\.0\.1)(?::\d{1,5})?")
 
 
 class CSRFOriginMiddleware(BaseHTTPMiddleware):
@@ -144,13 +154,21 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
             settings.frontend_origin,
             settings.api_public_url,
         }
+        # Local development only: the web app may start on another port when 3000 is taken
+        # (Next.js moves to 3001), so trust this machine on any port. Never in production.
+        self.any_local_port = settings.environment == "development"
+
+    def _allowed(self, origin: str) -> bool:
+        return origin in self.allowed or (
+            self.any_local_port and _LOCAL_ORIGIN.fullmatch(origin) is not None
+        )
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if request.method in UNSAFE_METHODS:
             origin = request.headers.get("origin")
-            if origin is not None and origin != "null" and origin not in self.allowed:
+            if origin is not None and origin != "null" and not self._allowed(origin):
                 return error_response(403, "CSRF_ORIGIN_REJECTED", "Request origin not allowed.")
             if origin == "null" or request.headers.get("sec-fetch-site") == "cross-site":
                 return error_response(403, "CSRF_ORIGIN_REJECTED", "Request origin not allowed.")

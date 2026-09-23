@@ -14,14 +14,14 @@ import {
   List,
   ListChecks,
   ListOrdered,
-  type LucideIcon,
+  type IconComponent,
   MoreHorizontal,
   Pilcrow,
   Quote,
   Redo2,
   Strikethrough,
   Undo2,
-} from "lucide-react";
+} from "@/components/icons";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ import type { NoteAIAction } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 interface ToolProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   shortcut?: string;
   active?: boolean;
@@ -63,13 +63,13 @@ function Tool({ icon: Icon, label, shortcut, active, disabled, onClick }: ToolPr
       </TooltipTrigger>
       <TooltipContent>
         {label}
-        {shortcut ? <span className="ml-2 opacity-60">{shortcut}</span> : null}
+        {shortcut ? <span className="ml-2 text-tertiary">{shortcut}</span> : null}
       </TooltipContent>
     </Tooltip>
   );
 }
 
-const BLOCKS: { id: "p" | 1 | 2 | 3; label: string; icon: LucideIcon }[] = [
+const BLOCKS: { id: "p" | 1 | 2 | 3; label: string; icon: IconComponent }[] = [
   { id: "p", label: "Text", icon: Pilcrow },
   { id: 1, label: "Heading 1", icon: Heading1 },
   { id: 2, label: "Heading 2", icon: Heading2 },

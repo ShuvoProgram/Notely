@@ -7,10 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -190,6 +192,16 @@ class TodoistProvider(RestOAuthProvider):
                 Capability.read,
                 list_tasks,
                 lambda a: "List Todoist tasks",
+                outputs=(
+                    listing(
+                        "tasks",
+                        "Tasks",
+                        F("content", "Task"),
+                        F("due", "Due", "date"),
+                        F("priority", "Priority", "number"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "list_projects",

@@ -15,6 +15,15 @@ from app.models.ai import (
     ToolCallStatus,
     UserAISetting,
 )
+from app.models.automation import (
+    Automation,
+    AutomationAction,
+    AutomationApproval,
+    AutomationExecution,
+    AutomationExecutionStep,
+    AutomationStatus,
+    AutomationTemplate,
+)
 from app.models.integration import (
     ConnectionStatus,
     ExternalItem,
@@ -32,6 +41,7 @@ from app.models.note import (
     NoteVersion,
     Tag,
 )
+from app.models.avatar import UserAvatar
 from app.models.notification import Notification, NotificationKind
 from app.models.task import Task, TaskPriority, TaskSource, TaskStatus
 from app.models.tenant import Tenant, TenantKind
@@ -39,6 +49,13 @@ from app.models.user import AuthIdentity, SignInProvider, User, UserSession
 
 __all__ = [
     "AIApproval",
+    "Automation",
+    "AutomationAction",
+    "AutomationApproval",
+    "AutomationExecution",
+    "AutomationExecutionStep",
+    "AutomationStatus",
+    "AutomationTemplate",
     "AIMessage",
     "AIRun",
     "AIThread",
@@ -46,6 +63,7 @@ __all__ = [
     "ApprovalStatus",
     "AuditEvent",
     "UserAISetting",
+    "UserAvatar",
     "AuthIdentity",
     "Base",
     "ConnectionStatus",

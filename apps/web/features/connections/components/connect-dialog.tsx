@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, Lock, ShieldCheck, Unplug } from "lucide-react";
+import { Check, ExternalLink, Lock, ShieldCheck, Unplug } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -60,6 +61,22 @@ class SoundPreference(BaseModel):
     volume: float = Field(default=0.6, ge=0.0, le=1.0)
 
 
+BACKGROUNDS = ("forest", "starry-moss", "mossy-branch", "mountain-lake", "meadow")
+Background = Literal["forest", "starry-moss", "mossy-branch", "mountain-lake", "meadow"]
+
+
+class AppearancePreference(BaseModel):
+    """Workspace look: one of the approved backgrounds (apps/web/public/assets) and the glass
+    strength over it. There is no custom upload; only these images can be chosen."""
+
+    background: Background = "starry-moss"
+    glass: Literal["off", "subtle", "medium", "strong"] = "medium"
+    # Fine-tuning on top of the glass level, 0–100; None follows the level's own value.
+    blur: int | None = Field(default=None, ge=0, le=100)
+    opacity: int | None = Field(default=None, ge=0, le=100)
+    border: int | None = Field(default=None, ge=0, le=100)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -70,10 +87,13 @@ class UserOut(BaseModel):
     display_name: str
     avatar_url: str | None
     has_password: bool
+    two_factor_enabled: bool = False
+    two_factor_required: bool = False
     created_at: datetime
     # In-app notification switches (per kind group); absent keys mean "on".
     notifications: dict[str, bool] = {}
     sound: SoundPreference = Field(default_factory=lambda: SoundPreference())
+    appearance: AppearancePreference = Field(default_factory=lambda: AppearancePreference())
 
 
 class SessionOut(BaseModel):
@@ -100,6 +120,7 @@ class UpdateProfileRequest(BaseModel):
     # Which in-app notification kinds the user wants; merged into preferences.notifications.
     notifications: dict[str, bool] | None = None
     sound: SoundPreference | None = None
+    appearance: AppearancePreference | None = None
 
     @field_validator("display_name")
     @classmethod
@@ -110,3 +131,13 @@ class UpdateProfileRequest(BaseModel):
         if not v:
             raise ValueError("Display name cannot be empty")
         return v
+
+class TOTPCodeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+class TOTPSetupOut(BaseModel):
+    otpauth_uri: str
+    qr_svg: str
+
+class RecoveryCodesOut(BaseModel):
+    recovery_codes: list[str]

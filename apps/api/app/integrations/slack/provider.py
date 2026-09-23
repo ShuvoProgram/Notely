@@ -6,11 +6,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.exceptions import OAuthExchangeFailed
 from app.core.oauth import OAuthEndpoints, OAuthTokens
 from app.integrations.base.capabilities import Capability
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
+from app.integrations.base.outputs import HIT_FIELDS, listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -270,6 +272,7 @@ class SlackProvider(RestOAuthProvider):
                 Capability.search,
                 search_messages,
                 lambda a: f"Search Slack for “{a.query}”",
+                outputs=(listing("results", "Messages", *HIT_FIELDS),),
             ),
             ProviderTool(
                 "list_channels",
@@ -286,6 +289,15 @@ class SlackProvider(RestOAuthProvider):
                 Capability.read,
                 read_channel,
                 lambda a: f"Read Slack channel {a.channel_id}",
+                outputs=(
+                    listing(
+                        "messages",
+                        "Messages",
+                        F("text", "Message"),
+                        F("user", "From"),
+                        F("ts", "Sent", "date"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "read_thread",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check, ShieldQuestion, XCircle } from "lucide-react";
+import { Check, ShieldQuestion, XCircle } from "@/components/icons";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

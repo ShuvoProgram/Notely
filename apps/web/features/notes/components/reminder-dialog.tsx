@@ -1,6 +1,6 @@
 "use client";
 
-import { BellOff } from "lucide-react";
+import { BellOff } from "@/components/icons";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";

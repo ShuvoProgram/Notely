@@ -7,8 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -219,6 +221,16 @@ class TeamsProvider(MicrosoftGraphProvider):
                 search_messages,
                 lambda a: f"Search Teams for “{a.query}”",
                 scope="ChannelMessage.Read.All",
+                outputs=(
+                    listing(
+                        "results",
+                        "Messages",
+                        F("summary", "Message"),
+                        F("from", "From"),
+                        F("created_at", "Sent", "date"),
+                        F("web_url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "list_teams",
@@ -235,6 +247,15 @@ class TeamsProvider(MicrosoftGraphProvider):
                 Capability.read,
                 read_channel,
                 lambda a: "Read a Teams channel",
+                outputs=(
+                    listing(
+                        "messages",
+                        "Messages",
+                        F("text", "Message"),
+                        F("from", "From"),
+                        F("created_at", "Sent", "date"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "send_channel_message",

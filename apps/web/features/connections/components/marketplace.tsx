@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, LayoutGrid, Plug, Search, Sparkles } from "lucide-react";
+import { Check, LayoutGrid, Plug, Search, Sparkles } from "@/components/icons";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -140,12 +140,12 @@ export function Marketplace() {
                   onClick={() => setCategory(item.id)}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                    active ? "bg-ai-soft font-medium text-ai" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                    active ? "liquid-selected font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                   )}
                 >
                   {Icon ? <Icon className="size-4" aria-hidden /> : null}
                   <span className="truncate">{item.label}</span>
-                  <span className={cn("ml-auto hidden text-xs tabular-nums lg:inline", active ? "text-ai/80" : "text-muted-foreground/70")}>{item.count}</span>
+                  <span className={cn("ml-auto hidden text-xs tabular-nums lg:inline", active ? "text-foreground" : "text-tertiary")}>{item.count}</span>
                 </button>
               </li>
             );
@@ -224,7 +224,7 @@ function ProviderCard({ provider, onOpen, onConnect }: { provider: Provider; onO
       <article
         data-state={view.state}
         className={cn(
-          "group relative flex h-full min-w-0 flex-col rounded-2xl border bg-card/60 p-4 transition-[border-color,background-color] duration-150 hover:bg-card",
+          "glass lift group relative flex h-full min-w-0 flex-col rounded-2xl p-4",
           view.state === "attention" ? "border-warning/40" : view.state === "error" ? "border-destructive/40" : "border-glass-border",
         )}
       >

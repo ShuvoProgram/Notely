@@ -6,9 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import HIT_FIELDS, listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -201,6 +203,7 @@ class NotionProvider(RestOAuthProvider):
                 Capability.search,
                 search_pages,
                 lambda a: f"Search Notion for “{a.query}”",
+                outputs=(listing("results", "Pages", *HIT_FIELDS),),
             ),
             ProviderTool(
                 "read_page",
@@ -209,6 +212,7 @@ class NotionProvider(RestOAuthProvider):
                 Capability.read,
                 read_page,
                 lambda a: "Read a Notion page",
+                outputs=(F("title", "Title"), F("content", "Page text", "long_text")),
             ),
             ProviderTool(
                 "create_page",

@@ -13,8 +13,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -261,6 +263,15 @@ class GoogleDocsProvider(GoogleProvider):
                 search_documents,
                 lambda a: f"Search Google Docs for “{a.query}”",
                 scope=SCOPE_DISCOVER,
+                outputs=(
+                    listing(
+                        "results",
+                        "Documents",
+                        F("name", "Name"),
+                        F("modified_at", "Last edited", "date"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "read_document",
@@ -270,6 +281,7 @@ class GoogleDocsProvider(GoogleProvider):
                 read_document,
                 lambda a: "Read a Google Doc",
                 scope=SCOPE_READ,
+                outputs=(F("title", "Title"), F("content", "Document text", "long_text")),
             ),
             ProviderTool(
                 "create_document",

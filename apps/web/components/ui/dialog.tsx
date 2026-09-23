@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { XIcon } from "lucide-react"
+import { SurfaceProvider } from "@/components/ui/surface"
+import { XIcon } from "@/components/icons"
 
 function Dialog({
   ...props
@@ -39,7 +40,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/40 duration-150 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-black/40 duration-200 ease-liquid supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -61,22 +62,18 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 glass-3 rounded-2xl p-5 text-sm text-popover-foreground duration-150 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // One surface: header, a body that scrolls when the viewport is short, and a footer that
+          // stays pinned to the bottom edge (see DialogFooter).
+          "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain glass-3 rounded-3xl p-5 text-sm text-popover-foreground duration-200 ease-liquid outline-none has-[[data-slot=dialog-footer]]:pb-0 sm:max-w-sm sm:p-6 sm:has-[[data-slot=dialog-footer]]:pb-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
       >
-        {children}
+        <SurfaceProvider level="dialog">{children}</SurfaceProvider>
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
-            <Button
-              variant="ghost"
-              className="absolute top-2 right-2"
-              size="icon-sm"
-            >
-              <XIcon
-              />
-              <span className="sr-only">Close</span>
+            <Button variant="ghost" className="absolute top-3 right-3 rounded-full" size="icon-sm" aria-label="Close">
+              <XIcon aria-hidden />
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -89,7 +86,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn("flex flex-col gap-1.5 pr-8", className)}
       {...props}
     />
   )
@@ -107,7 +104,8 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-glass-border bg-muted/30 p-4 sm:flex-row sm:justify-end",
+        // Same glass as the dialog (not a separate band), pinned to the bottom while the body scrolls.
+        "sticky bottom-0 -mx-5 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl border-t border-glass-border bg-(--glass-3) px-5 py-4 sm:-mx-6 sm:flex-row sm:items-center sm:justify-end sm:px-6",
         className
       )}
       {...props}
@@ -130,7 +128,7 @@ function DialogTitle({
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "text-base leading-none font-medium",
+        "text-base leading-tight font-bold tracking-[-0.01em]",
         className
       )}
       {...props}

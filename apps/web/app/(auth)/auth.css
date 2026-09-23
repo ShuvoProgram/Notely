@@ -1,0 +1,37 @@
+/* Auth brand panel: a faint dot grid that fades out, and a highlight that walks down the steps. */
+.auth-dots {
+  background-image: radial-gradient(color-mix(in oklch, var(--foreground) 16%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at 70% 40%, black 10%, transparent 70%);
+}
+
+.auth-step {
+  --auth-ring: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
+  box-shadow:
+    var(--auth-ring),
+    0 10px 28px -18px rgb(0 0 0 / 0.45);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Four steps × 2s: each is "current" for its quarter of the cycle. */
+  .auth-step {
+    animation: auth-step 8s ease-in-out infinite both;
+  }
+}
+
+@keyframes auth-step {
+  0%,
+  25% {
+    translate: 6px 0;
+    box-shadow:
+      0 0 0 1.5px color-mix(in oklch, var(--ai) 65%, transparent),
+      0 14px 30px -18px rgb(0 0 0 / 0.5);
+  }
+  32%,
+  100% {
+    translate: 0 0;
+    box-shadow:
+      var(--auth-ring),
+      0 10px 28px -18px rgb(0 0 0 / 0.45);
+  }
+}

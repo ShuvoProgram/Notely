@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Pencil, Plus, Tag as TagIcon, Trash2 } from "lucide-react";
+import { ChevronRight, Folder as FolderIcon, MoreHorizontal, Pencil, Plus, Tag as TagIcon, Trash2 } from "@/components/icons";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import * as React from "react";

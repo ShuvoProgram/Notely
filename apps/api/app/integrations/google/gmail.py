@@ -8,8 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -258,6 +260,16 @@ class GmailProvider(GoogleProvider):
                 Capability.search,
                 search_mail,
                 lambda a: f"Search Gmail for “{a.query}”",
+                outputs=(
+                    listing(
+                        "results",
+                        "Emails",
+                        F("subject", "Subject"),
+                        F("from", "From"),
+                        F("date", "Date", "date"),
+                        F("snippet", "Preview"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "read_mail",
@@ -266,6 +278,12 @@ class GmailProvider(GoogleProvider):
                 Capability.read,
                 read_mail,
                 lambda a: "Read an email",
+                outputs=(
+                    F("subject", "Subject"),
+                    F("from", "From"),
+                    F("date", "Date", "date"),
+                    F("body", "Email text", "long_text"),
+                ),
             ),
             ProviderTool(
                 "draft_mail",

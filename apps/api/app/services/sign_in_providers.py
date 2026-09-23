@@ -46,7 +46,9 @@ def _google(settings: Settings) -> SignInProviderSpec | None:
                 authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
                 token_url="https://oauth2.googleapis.com/token",
                 jwks_url="https://www.googleapis.com/oauth2/v3/certs",
-                issuer="https://accounts.google.com",
+                # Google ID tokens may use either documented issuer spelling.
+                # Keep verification enabled and accept only these two values.
+                issuer=("https://accounts.google.com", "accounts.google.com"),
                 extra_authorize_params={"prompt": "select_account"},
             ),
         ),

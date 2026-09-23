@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, FileText, Plus, Search, Sparkles } from "lucide-react";
+import { ExternalLink, FileText, Plus, Search, Sparkles } from "@/components/icons";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";

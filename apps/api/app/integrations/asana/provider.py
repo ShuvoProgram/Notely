@@ -7,9 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.core.oauth import OAuthEndpoints
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import HIT_FIELDS, listing
 from app.integrations.base.provider import (
     AuthType,
     ConnectionIdentity,
@@ -230,6 +232,16 @@ class AsanaProvider(RestOAuthProvider):
                 Capability.read,
                 my_tasks,
                 lambda a: "List my Asana tasks",
+                outputs=(
+                    listing(
+                        "tasks",
+                        "Tasks",
+                        F("name", "Task"),
+                        F("due_on", "Due", "date"),
+                        F("completed", "Completed", "boolean"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "search_tasks",
@@ -238,6 +250,7 @@ class AsanaProvider(RestOAuthProvider):
                 Capability.search,
                 search_tasks,
                 lambda a: f"Search Asana for “{a.query}”",
+                outputs=(listing("results", "Tasks", *HIT_FIELDS),),
             ),
             ProviderTool(
                 "create_task",

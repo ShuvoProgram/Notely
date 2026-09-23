@@ -7,8 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.ai.tools.base import OutputField as F
 from app.ai.tools.base import Verification
 from app.integrations.base.capabilities import Capability
+from app.integrations.base.outputs import listing
 from app.integrations.base.provider import (
     AuthType,
     PermissionSpec,
@@ -173,6 +175,17 @@ class GoogleCalendarProvider(GoogleProvider):
                 Capability.read,
                 list_events,
                 lambda a: f"List events for the next {a.days} day(s)",
+                outputs=(
+                    listing(
+                        "events",
+                        "Events",
+                        F("summary", "Title"),
+                        F("start", "Starts", "date"),
+                        F("end", "Ends", "date"),
+                        F("attendees", "Attendees", "list"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
             ),
             ProviderTool(
                 "create_event",

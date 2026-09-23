@@ -45,7 +45,8 @@ test("create a note, autosave, reload, and find it via search", async ({ page })
   await expect(list.getByText(/Ship the pricing page/)).toBeVisible();
 
   // Global search (⌘K) uses stemmed full-text search: "launch" matches "launching" in the body.
-  await page.goto("/app/tasks");
+  // Wait for the page to settle: the shortcut is attached on hydration.
+  await page.goto("/app/tasks", { waitUntil: "networkidle" });
   await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("launching pricing");
   const hit = page.getByRole("dialog").getByRole("option", { name: /Product launch plan/ });

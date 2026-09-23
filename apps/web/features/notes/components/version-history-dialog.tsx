@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { History, Loader2, RotateCcw } from "lucide-react";
+import { History, Loader2, RotateCcw } from "@/components/icons";
 import * as React from "react";
 import { toast } from "sonner";
 
