@@ -4,15 +4,35 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.models.ai import ApprovalStatus, MessageRole, RiskLevel, RunStatus, ToolCallStatus
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
+    # Omitted only when retrying: the last user message of `thread_id` is answered again.
+    message: str | None = Field(default=None, min_length=1, max_length=8000)
     thread_id: uuid.UUID | None = None
     note_id: uuid.UUID | None = None
+    retry: bool = False
+
+    @model_validator(mode="after")
+    def _message_or_retry(self) -> ChatRequest:
+        if self.retry and self.thread_id is None:
+            raise ValueError("retry needs a thread_id")
+        if not self.retry and not (self.message and self.message.strip()):
+            raise ValueError("message is required")
+        return self
+
+
+class ThreadCreate(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    note_id: uuid.UUID | None = None
+
+
+class ThreadUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    archived: bool | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -30,6 +50,13 @@ class ThreadOut(BaseModel):
     note_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    last_activity_at: datetime
+    archived_at: datetime | None = None
+    # List-only extras (see AIThreadService.list_threads).
+    last_message: str | None = None
+    last_message_role: MessageRole | None = None
+    active_run_id: uuid.UUID | None = None
+    active_run_status: RunStatus | None = None
 
 
 class MessageOut(BaseModel):
@@ -87,11 +114,38 @@ class RunOut(BaseModel):
     tool_calls: list[ToolCallOut] = Field(default_factory=list)
     approvals: list[ApprovalOut] = Field(default_factory=list)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def error_message(self) -> str | None:
+        """Why the run failed or stopped, readable by the user (`error` may be a short code)."""
+        return describe_run_error(self.error)
+
+
+def describe_run_error(error: str | None) -> str | None:
+    if not error:
+        return None
+    known = {
+        "interrupted": "The assistant was interrupted before it finished. Please try again.",
+        "superseded": "Replaced by a newer message.",
+        "internal": "The assistant ran into a problem. Please try again.",
+    }
+    if error in known:
+        return known[error]
+    if " " in error:
+        return error  # already a readable reason (see runner.failure_message)
+    # Older runs stored only the exception class name.
+    if "ratelimit" in error.lower() or "resourceexhausted" in error.lower():
+        return "The AI provider was rate-limiting requests. Wait a minute and retry."
+    return "The assistant ran into a problem. Please try again."
+
 
 class ThreadDetailOut(BaseModel):
     thread: ThreadOut
     messages: list[MessageOut]
     active_run: RunOut | None
+    # The most recent run, finished or not: lets a reloaded client show that the last request
+    # failed or was stopped (and offer a retry) when no answer follows it.
+    last_run: RunOut | None = None
 
 
 class AIPreferences(BaseModel):

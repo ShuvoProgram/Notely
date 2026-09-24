@@ -3,6 +3,7 @@
 import { Bell, CheckSquare, Inbox, ListChecks, Plus, Search, Star, Users } from "@/components/icons";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -16,7 +17,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { TagChip } from "@/features/notes/components/tag-picker";
 import { editedLabel, noteColorProps, reminderLabel } from "@/features/notes/lib";
-import { useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
+import { notesApi } from "@/features/notes/api";
+import { FolderPickerSheet, OrganizeSheet } from "@/features/notes/components/organize-sheet";
+import { noteKeys, useCreateNote, useFolders, useNotesList, useTags } from "@/features/notes/hooks";
 import type { NoteSummary, NoteView } from "@/lib/api/types";
 import { useNoteBulkActions } from "@/features/notes/use-bulk-actions";
 import { useSelection } from "@/hooks/use-selection";
@@ -151,7 +154,26 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
     setSelectionScope(scopeKey);
     selection.enter();
   };
-  const bulkActions = useNoteBulkActions(view, selection.ids, selection.exit);
+  const [moving, setMoving] = React.useState(false);
+  const queryClient = useQueryClient();
+  const move = useMutation({
+    mutationFn: ({ ids, folderId }: { ids: string[]; folderId: string | null }) =>
+      Promise.all(ids.map((id) => notesApi.update(id, folderId ? { folder_id: folderId } : { clear_folder: true }))),
+    onSuccess: (moved, { folderId }) => {
+      setMoving(false);
+      selection.exit();
+      const where = folderId ? folders.find((f) => f.id === folderId)?.name ?? "the folder" : "no folder";
+      toast.success(`Moved ${moved.length === 1 ? "1 note" : `${moved.length} notes`} to ${where}`);
+    },
+    onError: (e) => toast.error(messageFor(e)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notes"] });
+      void queryClient.invalidateQueries({ queryKey: noteKeys.folders });
+    },
+  });
+  // Only your own notes can be filed (shared and trashed notes have no move).
+  const canMove = view !== "shared" && view !== "trash";
+  const bulkActions = useNoteBulkActions(view, selection.ids, selection.exit, canMove ? () => setMoving(true) : undefined);
 
   const { data: folders = [] } = useFolders();
   const { data: tags = [] } = useTags();
@@ -210,11 +232,13 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
         </div>
       )}
       </div>
-      <div className="px-3 pt-3">
-        <div className="relative">
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input aria-label="Filter notes" placeholder="Filter notes…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 rounded-full bg-muted/40 pl-9" />
+          <Input aria-label="Filter notes" placeholder="Filter notes…" value={q} onChange={(e) => setQ(e.target.value)} className="h-10 rounded-full bg-muted/40 pl-9 lg:h-9" />
         </div>
+        {/* Below desktop there is no sidebar: folders and tags are organised from here. */}
+        <OrganizeSheet className="lg:hidden" currentLabel={folderName ?? (tag ? `#${tag.name}` : undefined)} />
       </div>
       <div className="px-3 pt-2">
         <Tabs
@@ -298,6 +322,7 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
           </>
         )}
       </div>
+      <FolderPickerSheet open={moving} onOpenChange={setMoving} count={selection.count} pending={move.isPending} onPick={(folderId) => move.mutate({ ids: [...selection.ids], folderId })} />
     </div>
   );
 }

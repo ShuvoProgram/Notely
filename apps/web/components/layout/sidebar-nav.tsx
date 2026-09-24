@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 interface SidebarNavProps {
   /** Which nav set to render. Resolved client-side so server layouts pass only serialisable props. */
   nav: NavSet;
-  orientation?: "vertical" | "horizontal";
+  /** vertical: desktop sidebar. rail: tablet icon rail. horizontal: phone bottom bar. */
+  orientation?: "vertical" | "rail" | "horizontal";
   onNavigate?: () => void;
   className?: string;
 }
@@ -18,13 +19,15 @@ interface SidebarNavProps {
 /**
  * Primary / settings navigation. The active item sits on a single liquid pill that glides to the
  * new item on navigation (instead of one pill vanishing and another appearing), so moving around
- * the app reads as one continuous surface. Vertical: pill plus a small accent bar. Horizontal
- * (phone bottom bar): icon-over-label, the pill behind the active item.
+ * the app reads as one continuous surface. Vertical: pill plus a small accent bar. Rail (tablet)
+ * and horizontal (phone bottom bar): icon-over-label, the pill behind the active item.
  */
 export function SidebarNav({ nav, orientation = "vertical", onNavigate, className }: SidebarNavProps) {
   const pathname = usePathname();
   const items = navSets[nav];
   const phone = orientation === "horizontal";
+  // Rail and phone bar share the stacked icon-over-label item; only the list direction differs.
+  const stacked = orientation !== "vertical";
   const listRef = React.useRef<HTMLDivElement>(null);
   const pillRef = React.useRef<HTMLSpanElement>(null);
   const activeHref = items.find((item) => isActive(pathname, item, items))?.href ?? null;
@@ -60,9 +63,9 @@ export function SidebarNav({ nav, orientation = "vertical", onNavigate, classNam
         aria-hidden
         className="liquid-selected pointer-events-none absolute left-0 top-0 rounded-xl opacity-0 data-[ready]:transition-[transform,width,height,opacity] data-[ready]:duration-300 data-[ready]:ease-liquid"
       >
-        {!phone ? <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-ai" /> : null}
+        {!stacked ? <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-ai" /> : null}
       </span>
-      <ul className={cn(phone ? "grid auto-cols-[minmax(0,1fr)] grid-flow-col" : "flex flex-col gap-0.5", className)}>
+      <ul className={cn(phone ? "grid auto-cols-[minmax(0,1fr)] grid-flow-col" : "flex flex-col", orientation === "vertical" ? "gap-0.5" : orientation === "rail" && "gap-1", className)}>
       {items.map((item) => {
         const active = item.href === activeHref;
         const Icon = item.icon;
@@ -74,14 +77,14 @@ export function SidebarNav({ nav, orientation = "vertical", onNavigate, classNam
               aria-current={active ? "page" : undefined}
               className={cn(
                 "liquid-press group relative flex items-center gap-3 rounded-xl text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                phone ? "min-h-14 flex-col justify-center gap-0.5 px-0.5 py-1.5 text-[11px] leading-tight" : "px-3 py-2",
+                stacked ? "min-h-14 flex-col justify-center gap-0.5 px-0.5 py-1.5 text-[11px] leading-tight" : "px-3 py-2",
                 active ? "text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
               )}
             >
-              <span className={cn("grid place-items-center rounded-lg transition-colors", phone ? "size-8" : "size-6", active && "text-ai")}>
-                <Icon className={cn("shrink-0", phone ? "size-[18px]" : "size-4")} aria-hidden />
+              <span className={cn("grid place-items-center rounded-lg transition-colors", stacked ? "size-8" : "size-6", active && "text-ai")}>
+                <Icon className={cn("shrink-0", stacked ? "size-[18px]" : "size-4")} aria-hidden />
               </span>
-              <span className={cn("truncate", phone && "max-w-full")}>{phone ? (item.short ?? item.label) : item.label}</span>
+              <span className={cn("truncate", stacked && "max-w-full")}>{stacked ? (item.short ?? item.label) : item.label}</span>
             </Link>
           </li>
         );

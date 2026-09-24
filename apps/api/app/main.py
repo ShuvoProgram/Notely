@@ -9,6 +9,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.checkpoint import close_checkpointer, init_checkpointer
+from app.ai.streams import hub
 from app.api import health
 from app.api.v1 import ai, auth, automations, integrations, notes, notifications, tasks, users
 from app.core.config import Settings, get_settings
@@ -51,6 +52,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await init_checkpointer()
         await _sync_integration_catalog(settings)
         yield
+        # Stop in-flight AI runs first: each records itself as interrupted.
+        await hub.shutdown()
         await close_queue()
         await close_checkpointer()
         await close_redis()

@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { ArchiveRestore, LogOut, Trash2 } from "@/components/icons";
+import { ArchiveRestore, Folder, LogOut, Trash2 } from "@/components/icons";
 import type { SelectionAction } from "@/components/layout/selection-bar";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { notesApi } from "@/features/notes/api";
@@ -17,7 +17,7 @@ const plural = (n: number) => `${n} ${n === 1 ? "note" : "notes"}`;
  * only passes the ids. Reversible actions run straight away with an Undo toast; irreversible ones
  * (delete forever, leave) carry a confirmation.
  */
-export function useNoteBulkActions(view: NoteView, ids: Set<string>, done: () => void): SelectionAction[] {
+export function useNoteBulkActions(view: NoteView, ids: Set<string>, done: () => void, onMove?: () => void): SelectionAction[] {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["notes"] });
   const fail = (e: unknown) => toast.error(messageFor(e));
@@ -107,6 +107,8 @@ export function useNoteBulkActions(view: NoteView, ids: Set<string>, done: () =>
     ];
   }
   return [
+    // Picking the folder happens in the list (a sheet), so this only opens it.
+    ...(onMove ? [{ id: "move", label: "Move to folder", icon: Folder, onRun: onMove } satisfies SelectionAction] : []),
     {
       id: "trash",
       label: "Move to trash",

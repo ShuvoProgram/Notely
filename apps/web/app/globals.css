@@ -409,6 +409,20 @@ html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
+/*
+ * Room the phone bottom bar takes at the foot of the screen (bar + its lift + the home indicator).
+ * Every screen sizes itself with this so nothing scrolls or sits underneath the bar. Tablets and
+ * desktop have no bottom bar.
+ */
+:root {
+  --mobile-nav-space: calc(5.5rem + env(safe-area-inset-bottom));
+}
+@media (min-width: 48rem) {
+  :root {
+    --mobile-nav-space: 0px;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -472,6 +486,13 @@ html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
       input[type="radio"],
       input[type="file"],
       input[type="color"],
+      input[type="range"],
+      input[type="submit"],
+      input[type="reset"],
+      input[type="button"],
+      input[type="image"],
+      /* A label wrapping a toggle flips it when its text is clicked. */
+      label:has(input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"], [role="radio"]):not(:has(:disabled, [data-disabled])),
       [role="button"],
       [role="tab"],
       [role="menuitem"],
@@ -485,7 +506,8 @@ html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
     ):not(:disabled, [aria-disabled="true"], [data-disabled]) {
     cursor: pointer;
   }
-  :is(button, input, select, textarea, [role="button"], [role="menuitem"], [role="option"], [role="tab"]):is(:disabled, [aria-disabled="true"], [data-disabled]) {
+  :is(button, input, select, textarea, [role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], [role="tab"], [role="checkbox"], [role="switch"], [role="radio"]):is(:disabled, [aria-disabled="true"], [data-disabled]),
+  label:has(:disabled, [data-disabled]) {
     cursor: not-allowed;
   }
   /* Form controls don't inherit the page font by default. */

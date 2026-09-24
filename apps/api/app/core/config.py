@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     ai_max_tool_iterations: int = 8
     ai_request_timeout_seconds: int = 90
     ai_checkpointer: Literal["postgres", "memory"] = "postgres"
+    # Fake provider only: pause between streamed words, to exercise concurrent runs offline.
+    ai_fake_stream_delay_ms: int = 0
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

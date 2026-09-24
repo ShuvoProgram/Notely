@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@11.13.1",
   "scripts": {
+    "dev": "pnpm run \"/^dev:(api|web)$/\"",
+    "dev:api": "cd apps/api && uv run python -m uvicorn app.main:app --reload --reload-dir app --port 8000",
     "dev:web": "pnpm --filter web dev",
     "build:web": "pnpm --filter web build",
     "lint": "pnpm -r lint",

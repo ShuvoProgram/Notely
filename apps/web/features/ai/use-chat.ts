@@ -1,291 +1,63 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 
-import { aiApi } from "@/features/ai/api";
-import { ApiError } from "@/lib/api/client";
-import { playSfx } from "@/lib/sfx/player";
-import type { AIChatEvent, AIMessage, AIPlan, AIProposal, AISource, AIStep, PlanStep, RunStatus } from "@/lib/api/types";
+import * as chat from "@/features/ai/chat-store";
+import { type ThreadChat, useChatStore } from "@/features/ai/chat-store";
 
-export type StepState = AIStep;
+export type { LiveAssistant, PendingApproval, StepState, ThreadChat } from "@/features/ai/chat-store";
+export { summarizeToolCall } from "@/features/ai/chat-store";
 
-export interface PendingApproval {
-  approval_id: string;
-  run_id: string;
-  proposals: AIProposal[];
-}
-
-/** A message being produced by the current run (not yet persisted). */
-export interface LiveAssistant {
-  text: string;
-  steps: StepState[];
-  sources: AISource[];
-  plan: AIPlan | null;
-  /** When this reply started (ms since epoch): drives the elapsed timer and "Worked for …". */
-  startedAt: number;
-}
-
-const emptyLive = (startedAt: number = Date.now()): LiveAssistant => ({ text: "", steps: [], sources: [], plan: null, startedAt });
-
-export interface ChatState {
-  threadId: string | null;
-  messages: AIMessage[];
-  live: LiveAssistant | null;
-  runId: string | null;
-  runStatus: RunStatus | null;
-  approval: PendingApproval | null;
-  error: string | null;
-  busy: boolean;
-}
-
-const initialState: ChatState = {
-  threadId: null,
+/** What a brand-new conversation (no thread yet) looks like. */
+const DRAFT: ThreadChat = {
+  threadId: "",
+  status: "ready",
   messages: [],
   live: null,
   runId: null,
   runStatus: null,
   approval: null,
   error: null,
+  stopped: false,
   busy: false,
+  lastSeq: -1,
 };
 
-export function useChat(initialThreadId: string | null) {
-  const queryClient = useQueryClient();
-  const [state, setState] = React.useState<ChatState>({ ...initialState, threadId: initialThreadId });
-  const abortRef = React.useRef<AbortController | null>(null);
-  const ownedThreadRef = React.useRef<string | null>(null);
+/**
+ * One conversation's view of the shared chat store. Switching `threadId` only changes what is
+ * shown: requests in the thread being left keep streaming into it, and this component only
+ * re-renders for changes to the thread it shows.
+ */
+export function useChat(threadId: string | null, { onThreadCreated }: { onThreadCreated?: (id: string) => void } = {}) {
+  const thread = useChatStore((s) => (threadId ? s.threads[threadId] : undefined));
+  const [sendError, setSendError] = React.useState<string | null>(null);
 
-  // Load an existing thread's history. A thread this hook created itself (the URL catches up
-  // after the first `run` event) is already in state and must not be reloaded mid-stream.
+  // (The panel is keyed by thread, so `sendError` never outlives its conversation.)
   React.useEffect(() => {
-    let cancelled = false;
-    if (!initialThreadId) {
-      ownedThreadRef.current = null;
-      abortRef.current?.abort();
-      setState({ ...initialState });
-      return;
-    }
-    if (ownedThreadRef.current === initialThreadId) return;
-    ownedThreadRef.current = initialThreadId;
-    setState({ ...initialState, threadId: initialThreadId });
-    aiApi
-      .thread(initialThreadId)
-      .then((detail) => {
-        if (cancelled) return;
-        const run = detail.active_run;
-        const pending = run?.approvals.find((a) => a.status === "pending");
-        setState((s) => ({
-          ...s,
-          messages: detail.messages,
-          runId: run?.id ?? null,
-          runStatus: run?.status ?? null,
-          approval:
-            run && pending
-              ? {
-                  approval_id: pending.id,
-                  run_id: run.id,
-                  proposals: run.tool_calls
-                    .filter((tc) => pending.tool_call_ids.includes(tc.call_id))
-                    .map((tc) => ({
-                      call_id: tc.call_id,
-                      tool_name: tc.tool_name,
-                      provider: tc.provider,
-                      risk: tc.risk_level,
-                      summary: summarizeToolCall(tc.tool_name, tc.arguments),
-                      arguments: tc.arguments,
-                    })),
-                }
-              : null,
-          live:
-            run && run.status === "waiting_for_approval"
-              ? {
-                  text: "",
-                  steps: run.steps
-                    .filter((st) => st.call_id)
-                    .map((st) => ({ call_id: st.call_id!, tool: st.tool ?? "", label: st.label ?? "", status: (st.status as StepState["status"]) ?? "completed", verification: st.verification })),
-                  sources: run.sources ?? [],
-                  plan: run.plan ?? null,
-                  startedAt: Date.parse(run.created_at ?? "") || Date.now(),
-                }
-              : null,
-        }));
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState((s) => ({ ...s, error: error instanceof ApiError ? error.message : "Couldn't load this conversation." }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [initialThreadId]);
+    // First visit loads the history; returning to a thread quietly refreshes it (another tab may
+    // have added to it) without disturbing a reply that is streaming here.
+    if (threadId) void chat.load(threadId, { force: true });
+  }, [threadId]);
 
-  const handleEvent = React.useCallback(
-    (event: AIChatEvent) => {
-      // Cues live here, outside the state updater, so they fire exactly once per event.
-      if (event.type === "done" && event.status === "completed") playSfx("ai-done");
-      else if (event.type === "error") playSfx("error");
-      else if (event.type === "approval_required") playSfx("notification");
-      setState((s) => {
-        switch (event.type) {
-          case "run":
-            ownedThreadRef.current = event.thread_id;
-            return { ...s, threadId: event.thread_id, runId: event.run_id, runStatus: event.status };
-          case "token":
-            return { ...s, live: { ...(s.live ?? emptyLive()), text: (s.live?.text ?? "") + event.text } };
-          case "step": {
-            const live = s.live ?? emptyLive();
-            const existing = live.steps.findIndex((st) => st.call_id === event.call_id);
-            const step: StepState = { ...(existing >= 0 ? live.steps[existing] : {}), call_id: event.call_id, tool: event.tool, label: event.label, status: event.status, result_preview: event.result_preview };
-            const steps = existing >= 0 ? live.steps.map((st, i) => (i === existing ? step : st)) : [...live.steps, step];
-            return { ...s, live: { ...live, steps, plan: advancePlan(live.plan, event.tool, event.status === "running" ? "active" : event.status === "completed" ? "done" : null) } };
-          }
-          case "plan":
-            return { ...s, live: { ...(s.live ?? emptyLive()), plan: { goal: event.goal, steps: event.steps } } };
-          case "verification": {
-            const live = s.live ?? emptyLive();
-            const steps = live.steps.map((st) => (st.call_id === event.call_id ? { ...st, verification: { status: event.status, detail: event.detail } } : st));
-            return { ...s, live: { ...live, steps, plan: markPlanKind(live.plan, "verify", "done") } };
-          }
-          case "approval_required":
-            return {
-              ...s,
-              approval: { approval_id: event.approval_id, run_id: event.run_id, proposals: event.proposals },
-              runStatus: "waiting_for_approval",
-              live: { ...(s.live ?? emptyLive()), plan: markPlanKind(s.live?.plan ?? null, "propose", "waiting") },
-            };
-          case "message": {
-            const message: AIMessage = {
-              id: event.message_id,
-              role: "assistant",
-              content: event.content,
-              sources: event.sources.length ? event.sources : null,
-              run_id: s.runId,
-              created_at: new Date().toISOString(),
-              steps: s.live?.steps.length ? s.live.steps : undefined,
-              plan: s.live?.plan ? closePlan(s.live.plan) : null,
-              duration_ms: s.live ? Date.now() - s.live.startedAt : undefined,
-            };
-            return { ...s, messages: [...s.messages, message], live: null };
-          }
-          case "done":
-            return { ...s, runStatus: event.status, busy: false, live: event.status === "waiting_for_approval" ? s.live : null };
-          case "error":
-            return { ...s, error: event.message, busy: false };
-          default:
-            return s;
-        }
-      });
-    },
-    [],
-  );
-
-  const runStream = React.useCallback(
-    async (start: (signal: AbortSignal) => Promise<void>) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      setState((s) => ({ ...s, busy: true, error: null }));
-      try {
-        await start(controller.signal);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setState((s) => ({ ...s, busy: false, error: error instanceof ApiError ? error.message : "Lost the connection to Notely." }));
-      } finally {
-        if (abortRef.current === controller) abortRef.current = null;
-        queryClient.invalidateQueries({ queryKey: ["ai", "threads"] });
-        queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        queryClient.invalidateQueries({ queryKey: ["notes"] });
-      }
-    },
-    [queryClient],
-  );
+  const state: ThreadChat = thread ?? (threadId ? { ...DRAFT, threadId, status: "loading" } : DRAFT);
 
   const send = React.useCallback(
-    (text: string, noteId?: string | null) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      const now = Date.now();
-      const optimistic: AIMessage = { id: `local-${now}`, role: "user", content: trimmed, sources: null, run_id: null, created_at: new Date(now).toISOString() };
-      setState((s) => ({ ...s, messages: [...s.messages, optimistic], live: emptyLive(now), approval: null }));
-      playSfx("ai-start");
-      void runStream((signal) => aiApi.chat({ message: trimmed, thread_id: state.threadId, note_id: noteId ?? null }, handleEvent, signal));
-    },
-    [handleEvent, runStream, state.threadId],
-  );
-
-  const decide = React.useCallback(
-    (approvedCallIds: string[]) => {
-      const approval = state.approval;
-      if (!approval) return;
-      setState((s) => ({ ...s, approval: null, live: s.live ?? emptyLive() }));
-      void runStream((signal) =>
-        aiApi.approve(
-          { run_id: approval.run_id, approval_id: approval.approval_id, approved_call_ids: approvedCallIds, reject_all: approvedCallIds.length === 0 },
-          handleEvent,
-          signal,
-        ),
-      );
-    },
-    [handleEvent, runStream, state.approval],
-  );
-
-  const stop = React.useCallback(async () => {
-    abortRef.current?.abort();
-    if (state.runId) {
+    async (text: string, noteId?: string | null) => {
+      setSendError(null);
       try {
-        await aiApi.cancel(state.runId);
-      } catch {
-        // best effort
+        const id = await chat.send(threadId, text, noteId);
+        if (id && id !== threadId) onThreadCreated?.(id);
+      } catch (error) {
+        setSendError(error instanceof Error ? error.message : "Couldn't send that.");
       }
-    }
-    setState((s) => ({ ...s, busy: false, live: null, approval: null, runStatus: "cancelled" }));
-  }, [state.runId]);
+    },
+    [threadId, onThreadCreated],
+  );
+  const decide = React.useCallback((ids: string[]) => threadId && chat.decide(threadId, ids), [threadId]);
+  const stop = React.useCallback(async () => {
+    if (threadId) await chat.stop(threadId);
+  }, [threadId]);
+  const retry = React.useCallback(() => threadId && chat.retry(threadId), [threadId]);
 
-  React.useEffect(() => () => abortRef.current?.abort(), []);
-
-  return { state, send, decide, stop };
-}
-
-/** Mirrors the server's plan bookkeeping so the checklist moves as steps stream in. */
-function advancePlan(plan: AIPlan | null, tool: string, status: "active" | "done" | null): AIPlan | null {
-  if (!plan || !status) return plan;
-  return markPlan(plan, (step) => step.tools.includes(tool), status);
-}
-
-function markPlanKind(plan: AIPlan | null, kind: PlanStep["kind"], status: PlanStep["status"]): AIPlan | null {
-  if (!plan) return plan;
-  return markPlan(plan, (step) => step.kind === kind, status);
-}
-
-function markPlan(plan: AIPlan, matches: (step: PlanStep) => boolean, status: PlanStep["status"]): AIPlan {
-  const steps = plan.steps.map((s) => ({ ...s }));
-  const index = steps.findIndex((s) => s.status !== "done" && s.status !== "skipped" && matches(s));
-  if (index < 0) return plan;
-  steps[index]!.status = status;
-  for (let i = 0; i < index; i++) if (steps[i]!.status !== "done" && steps[i]!.status !== "skipped") steps[i]!.status = "done";
-  return { ...plan, steps };
-}
-
-function closePlan(plan: AIPlan): AIPlan {
-  return { ...plan, steps: plan.steps.map((s) => (s.status === "done" ? s : { ...s, status: s.kind === "answer" ? "done" : "skipped" })) };
-}
-
-export function summarizeToolCall(tool: string, args: Record<string, unknown>): string {
-  const title = typeof args.title === "string" ? `“${args.title}”` : "";
-  switch (tool) {
-    case "create_task":
-      return `Create task ${title}`.trim();
-    case "create_note":
-      return `Create note ${title}`.trim();
-    case "complete_task":
-      return "Mark a task as done";
-    case "search_notes":
-      return `Search notes for “${String(args.query ?? "")}”`;
-    case "search_everything":
-      return `Search everything for “${String(args.query ?? "")}”`;
-    case "plan_steps":
-      return `Plan: ${String(args.goal ?? "")}`;
-    default:
-      return tool.replace(/_/g, " ");
-  }
+  return { state: sendError && !threadId ? { ...state, error: sendError } : state, send, decide, stop, retry };
 }

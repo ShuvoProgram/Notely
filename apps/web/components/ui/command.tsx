@@ -171,8 +171,8 @@ function CommandItem({
       className={cn(
         // icon | text | metadata: the same three columns in every row, so labels and the
         // secondary column line up across sections instead of floating on auto margins.
-        "group/command-item relative grid min-h-10 cursor-default grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg py-2 pl-2.5 pr-3 text-sm outline-hidden select-none transition-colors duration-200 ease-liquid",
-        "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
+        "group/command-item relative grid min-h-10 cursor-pointer grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg py-2 pl-2.5 pr-3 text-sm outline-hidden select-none transition-colors duration-200 ease-liquid",
+        "data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50",
         // Highlight: soft accent fill, a thin emerald bar on the left, icon tinted.
         "data-[selected=true]:bg-ai-soft data-[selected=true]:text-foreground data-[selected=true]:before:absolute data-[selected=true]:before:left-0 data-[selected=true]:before:top-1/2 data-[selected=true]:before:h-5 data-[selected=true]:before:w-0.5 data-[selected=true]:before:-translate-y-1/2 data-[selected=true]:before:rounded-full data-[selected=true]:before:bg-ai",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&>svg:first-child]:text-muted-foreground data-[selected=true]:[&>svg:first-child]:text-ai",

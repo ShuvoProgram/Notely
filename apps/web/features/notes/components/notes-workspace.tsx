@@ -23,7 +23,7 @@ export function NotesWorkspace({ children }: { children: React.ReactNode }) {
   const hasNote = Boolean(activeNoteId);
 
   return (
-    <div data-full-bleed className="flex h-[calc(100dvh-4rem)] min-h-0">
+    <div data-full-bleed className="flex h-[calc(100dvh-4rem-var(--mobile-nav-space))] min-h-0">
       <aside
         aria-label="Notes list"
         className={cn(
@@ -34,7 +34,7 @@ export function NotesWorkspace({ children }: { children: React.ReactNode }) {
         <NotesList activeNoteId={activeNoteId} />
       </aside>
       <section className={cn("scrollbar-thin min-w-0 flex-1 overflow-y-auto", hasNote ? "block" : "hidden md:block")}>
-        <div className="w-full px-4 py-4 pb-28 sm:px-6 sm:py-6 md:pb-8">{children}</div>
+        <div className="w-full px-4 py-4 pb-8 sm:px-6 sm:py-6">{children}</div>
       </section>
     </div>
   );

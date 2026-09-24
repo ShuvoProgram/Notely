@@ -1,5 +1,5 @@
 import { api } from "@/lib/api/client";
-import { streamPost } from "@/lib/api/sse";
+import { streamGet, streamPost } from "@/lib/api/sse";
 import type {
   AIChatEvent,
   AIPreferences,
@@ -18,8 +18,10 @@ import type {
 } from "@/lib/api/types";
 
 export const aiApi = {
-  threads: () => api.get<AIThread[]>("/ai/threads"),
+  threads: (options: { archived?: boolean } = {}) => api.get<AIThread[]>(options.archived ? "/ai/threads?archived=true" : "/ai/threads"),
   thread: (id: string) => api.get<AIThreadDetail>(`/ai/threads/${id}`),
+  createThread: (body: { title?: string | null; note_id?: string | null } = {}) => api.post<AIThread>("/ai/threads", body),
+  updateThread: (id: string, body: { title?: string; archived?: boolean }) => api.patch<AIThread>(`/ai/threads/${id}`, body),
   deleteThread: (id: string) => api.delete<{ deleted: boolean }>(`/ai/threads/${id}`),
   run: (id: string) => api.get<AIRun>(`/ai/runs/${id}`),
   cancel: (runId: string) => api.post<AIRun>(`/ai/runs/${runId}/cancel`),
@@ -34,11 +36,16 @@ export const aiApi = {
   deleteUserModel: () => api.delete<{ deleted: boolean }>("/ai/settings/model"),
   audit: () => api.get<AuditEvent[]>("/audit"),
 
+  /** Send a message (or, with `retry`, answer the thread's last message again). */
   chat: (
-    body: { message: string; thread_id?: string | null; note_id?: string | null },
+    body: { message?: string; thread_id?: string | null; note_id?: string | null; retry?: boolean },
     onEvent: (e: AIChatEvent) => void,
     signal?: AbortSignal,
   ) => streamPost<AIChatEvent>("/ai/chat", { body, onEvent, signal }),
+
+  /** Re-attach to a run: replays events after `after`, then follows it live. */
+  streamRun: (runId: string, after: number, onEvent: (e: AIChatEvent) => void, signal?: AbortSignal) =>
+    streamGet<AIChatEvent>(`/ai/runs/${runId}/stream?after=${after}`, { onEvent, signal }),
 
   approve: (
     body: { run_id: string; approval_id: string; approved_call_ids?: string[]; reject_all?: boolean },

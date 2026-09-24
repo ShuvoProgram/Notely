@@ -1,7 +1,7 @@
 /**
- * POST + Server-Sent Events. `EventSource` only supports GET, so we read the response body as
- * a stream and parse `event:`/`data:` frames ourselves. Same-origin via the /api proxy, so the
- * session cookie rides along.
+ * Server-Sent Events over fetch. `EventSource` only supports GET without custom handling, so we
+ * read the response body as a stream and parse `event:`/`data:` frames ourselves. Same-origin
+ * via the /api proxy, so the session cookie rides along.
  */
 
 import { ApiError, type ApiErrorBody } from "@/lib/api/client";
@@ -12,12 +12,23 @@ export interface StreamOptions<E> {
   signal?: AbortSignal;
 }
 
-export async function streamPost<E extends { type: string }>(path: string, { body, onEvent, signal }: StreamOptions<E>): Promise<void> {
+export function streamPost<E extends { type: string }>(path: string, { body, onEvent, signal }: StreamOptions<E>): Promise<void> {
+  return stream(path, { method: "POST", body: JSON.stringify(body), onEvent, signal });
+}
+
+export function streamGet<E extends { type: string }>(path: string, { onEvent, signal }: Omit<StreamOptions<E>, "body">): Promise<void> {
+  return stream(path, { method: "GET", onEvent, signal });
+}
+
+async function stream<E extends { type: string }>(
+  path: string,
+  { method, body, onEvent, signal }: { method: "GET" | "POST"; body?: string; onEvent: (event: E) => void; signal?: AbortSignal },
+): Promise<void> {
   const response = await fetch(`/api/v1${path}`, {
-    method: "POST",
+    method,
     credentials: "include",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(body),
+    headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), Accept: "text/event-stream" },
+    body,
     signal,
   });
 

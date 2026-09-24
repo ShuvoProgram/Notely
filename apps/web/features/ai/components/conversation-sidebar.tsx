@@ -1,9 +1,10 @@
 "use client";
 
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, Search, SquarePen, Trash2, X } from "@/components/icons";
+import { ChevronDown, PanelLeftClose, PanelLeftOpen, Search, SquarePen, X } from "@/components/icons";
 import * as React from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConversationRow, groupOf, type ThreadActions, useThreadActivity } from "@/features/ai/components/conversation-list";
 import type { AIThread } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -89,33 +90,24 @@ function RailButton({ icon, label, collapsed, onClick }: { icon: React.ReactNode
   );
 }
 
-const DAY = 86_400_000;
-function groupOf(updatedAt: string, startOfToday: number): string {
-  const t = new Date(updatedAt).getTime();
-  if (t >= startOfToday) return "Today";
-  if (t >= startOfToday - DAY) return "Yesterday";
-  if (t >= startOfToday - 7 * DAY) return "Previous 7 days";
-  if (t >= startOfToday - 30 * DAY) return "Previous 30 days";
-  return "Older";
-}
-
 export function ConversationSidebar({
   threads,
+  archived,
   loading,
   activeId,
-  onSelect,
   onNew,
-  onDelete,
+  actions,
 }: {
   threads: AIThread[] | undefined;
+  archived: AIThread[] | undefined;
   loading: boolean;
   activeId: string | null;
-  onSelect: (id: string) => void;
   onNew: () => void;
-  onDelete: (thread: AIThread) => void;
+  actions: ThreadActions;
 }) {
   const collapsed = React.useSyncExternalStore(subscribe, readCollapsed, () => false);
   const [listOpen, setListOpen] = React.useState(true);
+  const [archivedOpen, setArchivedOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const searchRef = React.useRef<HTMLInputElement>(null);
@@ -130,18 +122,31 @@ export function ConversationSidebar({
     setQuery("");
   };
 
+  const activity = useThreadActivity(React.useMemo(() => [...(threads ?? []), ...(archived ?? [])], [threads, archived]));
+  // Relative times tick over once a minute (not on every render).
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const matches = React.useCallback(
+    (t: AIThread) => {
+      const q = query.trim().toLowerCase();
+      return !q || t.title.toLowerCase().includes(q) || (t.last_message ?? "").toLowerCase().includes(q);
+    },
+    [query],
+  );
   const groups = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const visible = [...(threads ?? [])]
-      .filter((t) => !q || t.title.toLowerCase().includes(q))
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const visible = [...(threads ?? [])].filter(matches).sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
     const map = new Map<string, AIThread[]>();
     for (const t of visible) {
-      const key = groupOf(t.updated_at, startOfToday);
+      const key = groupOf(t.last_activity_at, startOfToday);
       map.set(key, [...(map.get(key) ?? []), t]);
     }
     return [...map.entries()];
-  }, [threads, query, startOfToday]);
+  }, [threads, matches, startOfToday]);
+  const archivedVisible = React.useMemo(() => (archived ?? []).filter(matches), [archived, matches]);
 
   return (
     <aside
@@ -267,40 +272,9 @@ export function ConversationSidebar({
                   <React.Fragment key={label}>
                     <p className="mx-2 px-2 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-tertiary first:pt-1">{label}</p>
                     <ul className="flex flex-col gap-px">
-                      {items.map((t) => {
-                        const active = t.id === activeId;
-                        return (
-                          <li
-                            key={t.id}
-                            data-row
-                            className={cn(
-                              "group/row relative z-10 mx-2 flex h-8 items-center rounded-lg transition-colors duration-150",
-                              active && "bg-accent/80 group-hover/glide:bg-transparent",
-                            )}
-                          >
-                            <button
-                              type="button"
-                              title={t.title}
-                              onClick={() => onSelect(t.id)}
-                              aria-current={active ? "page" : undefined}
-                              className={cn(
-                                "flex h-full min-w-0 flex-1 items-center rounded-lg px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99]",
-                                active ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
-                              )}
-                            >
-                              <span className="truncate">{t.title}</span>
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Delete conversation ${t.title}`}
-                              onClick={() => onDelete(t)}
-                              className="mr-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color] hover:text-destructive focus-visible:opacity-100 group-hover/row:opacity-100"
-                            >
-                              <Trash2 className="size-3.5" aria-hidden />
-                            </button>
-                          </li>
-                        );
-                      })}
+                      {items.map((t) => (
+                        <ConversationRow key={t.id} thread={t} active={t.id === activeId} activity={activity[t.id] ?? null} now={now} actions={actions} />
+                      ))}
                     </ul>
                   </React.Fragment>
                 ))}
@@ -308,6 +282,28 @@ export function ConversationSidebar({
             ) : (
               <p className="mx-2 px-2 py-2 text-xs text-muted-foreground">{query ? "No conversations found." : "No conversations yet."}</p>
             )}
+            {archivedVisible.length ? (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  aria-expanded={archivedOpen}
+                  onClick={() => setArchivedOpen((o) => !o)}
+                  className="mx-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronDown className={cn("size-3.5 transition-transform duration-200", !archivedOpen && "-rotate-90")} aria-hidden />
+                  Archived <span className="tabular-nums text-tertiary">{archivedVisible.length}</span>
+                </button>
+                {archivedOpen ? (
+                  <GlideList>
+                    <ul className="flex flex-col gap-px opacity-80">
+                      {archivedVisible.map((t) => (
+                        <ConversationRow key={t.id} thread={t} active={t.id === activeId} activity={activity[t.id] ?? null} now={now} actions={actions} />
+                      ))}
+                    </ul>
+                  </GlideList>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

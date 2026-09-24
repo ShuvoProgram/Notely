@@ -15,6 +15,8 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +27,7 @@ from app.db.base import (
     TimestampMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
+    utcnow,
 )
 
 
@@ -42,6 +45,10 @@ class RunStatus(enum.StrEnum):
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+
+
+OPEN_RUN_STATUSES = (RunStatus.queued, RunStatus.running, RunStatus.waiting_for_approval)
+OPEN_RUN_SQL = "status IN ('queued', 'running', 'waiting_for_approval')"
 
 
 class RiskLevel(enum.StrEnum):
@@ -68,13 +75,21 @@ class ApprovalStatus(enum.StrEnum):
 
 class AIThread(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     __tablename__ = "ai_threads"
-    __table_args__ = (Index("ix_ai_threads_user_updated", "user_id", "updated_at"),)
+    __table_args__ = (
+        Index("ix_ai_threads_user_updated", "user_id", "updated_at"),
+        Index("ix_ai_threads_user_activity", "user_id", "last_activity_at"),
+    )
 
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New conversation")
     note_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True
     )
     archived_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    # When the conversation last had a message or run: the list's sort key. Unlike
+    # `updated_at`, renaming or archiving does not move a thread to the top.
+    last_activity_at: Mapped[datetime] = mapped_column(
+        TZDateTime(), nullable=False, default=utcnow, server_default=func.now()
+    )
 
     messages: Mapped[list[AIMessage]] = relationship(
         back_populates="thread",
@@ -111,6 +126,15 @@ class AIRun(UUIDPrimaryKeyMixin, TenantScopedMixin, Base):
     __table_args__ = (
         Index("ix_ai_runs_user_created", "user_id", "created_at"),
         Index("ix_ai_runs_thread_status", "thread_id", "status"),
+        # At most one open run per conversation, whatever the request interleaving: a second
+        # concurrent send to the same thread fails here instead of racing the first.
+        Index(
+            "uq_ai_runs_thread_open",
+            "thread_id",
+            unique=True,
+            postgresql_where=text(OPEN_RUN_SQL),
+            sqlite_where=text(OPEN_RUN_SQL),
+        ),
     )
 
     thread_id: Mapped[uuid.UUID] = mapped_column(

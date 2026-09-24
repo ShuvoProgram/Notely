@@ -197,8 +197,9 @@ async def test_write_tool_requires_approval_then_executes(client: AsyncClient) -
         },
         headers=ORIGIN,
     )
-    assert again.status_code == 200
-    assert (await read_sse(again))[0]["code"] == "RUN_NOT_WAITING"
+    # Rejected before any stream opens: a plain HTTP conflict.
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "RUN_NOT_WAITING"
 
     # The write and its read-back verification are both audited.
     audit = (await client.get("/api/v1/audit")).json()["data"]

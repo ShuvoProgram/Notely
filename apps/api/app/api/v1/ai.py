@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from app.ai.actions import NoteActionRequest, NoteActionService
 from app.ai.byo import model_as_dict
 from app.ai.llm import provider_name
-from app.ai.runner import AIRunner, AIThreadService
+from app.ai.runner import AIRunner, AIThreadService, launch_run
+from app.ai.streams import hub
 from app.ai.tools import build_registry
 from app.api.deps import CurrentAuth, DbDep, SettingsDep
 from app.api.sse import sse_response
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
 from app.models.ai import RunStatus
+from app.models.user import User
 from app.schemas.ai import (
     AIPreferences,
     AISettingsOut,
@@ -29,10 +33,13 @@ from app.schemas.ai import (
     ModelListOut,
     ModelTestOut,
     RunOut,
+    ThreadCreate,
     ThreadDetailOut,
     ThreadOut,
+    ThreadUpdate,
     UserModelIn,
     UserModelOut,
+    describe_run_error,
 )
 from app.services.ai_settings_service import AISettingsService
 from app.services.audit_service import AuditService
@@ -48,13 +55,19 @@ tenant_ai_limit = rate_limit("ai", lambda s: s.rate_limit_ai_tenant_per_minute, 
 async def chat(
     payload: ChatRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> StreamingResponse:
-    """Start (or continue) a conversation. Streams SSE events; see app/ai/runner.py."""
-    runner = AIRunner(db, settings)
-    return sse_response(
-        runner.start(
-            ctx.user, text=payload.message, thread_id=payload.thread_id, note_id=payload.note_id
-        )
+    """Start a run in a conversation (a new one when `thread_id` is omitted) and stream it.
+
+    The run executes in the background (app/ai/streams.py): closing this stream does not stop
+    it. Another conversation's runs are never affected; a second send to a conversation that is
+    still working fails with 409 RUN_IN_PROGRESS."""
+    prepared = await AIRunner(db, settings).prepare_chat(
+        ctx.user,
+        text=payload.message,
+        thread_id=payload.thread_id,
+        note_id=payload.note_id,
+        retry=payload.retry,
     )
+    return sse_response(launch_run(prepared, ctx.user, settings).subscribe())
 
 
 @router.post("/approve", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
@@ -62,16 +75,88 @@ async def approve(
     payload: ApproveRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> StreamingResponse:
     """Decide a pending approval and resume the run. Streams the continuation."""
-    runner = AIRunner(db, settings)
-    return sse_response(
-        runner.resume(
-            ctx.user,
-            run_id=payload.run_id,
-            approval_id=payload.approval_id,
-            approved=payload.approved_call_ids,
-            reject_all=payload.reject_all,
-        )
+    prepared = await AIRunner(db, settings).prepare_resume(
+        ctx.user,
+        run_id=payload.run_id,
+        approval_id=payload.approval_id,
+        approved=payload.approved_call_ids,
+        reject_all=payload.reject_all,
     )
+    return sse_response(launch_run(prepared, ctx.user, settings).subscribe())
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run(
+    run_id: uuid.UUID, ctx: CurrentAuth, db: DbDep, after: int = Query(-1, ge=-1)
+) -> StreamingResponse:
+    """Re-attach to a run (after a reload or reconnect): replays events with `seq > after`,
+    then follows it live. A run executing elsewhere, or already finished, is followed through
+    the database instead and ends with its outcome."""
+    service = AIThreadService(db)
+    run = await service.get_run(ctx.user, run_id)
+    channel = hub.get(run.id)
+    if channel is not None and channel.user_id == ctx.user.id:
+        return sse_response(channel.subscribe(after))
+    return sse_response(_follow_persisted(service, ctx.user, run.id))
+
+
+async def _follow_persisted(
+    service: AIThreadService, user: User, run_id: uuid.UUID
+) -> AsyncIterator[dict[str, Any]]:
+    """Outcome of a run that has no live channel here, polled from the database."""
+    while True:
+        run = await service.get_run(user, run_id)
+        await service.db.refresh(run)
+        base = {"run_id": str(run.id), "thread_id": str(run.thread_id)}
+        if run.status in (RunStatus.queued, RunStatus.running):
+            if not await service.settle_orphan(run):
+                yield {"type": "ping", **base}
+                await asyncio.sleep(1.0)
+                continue
+        if run.status == RunStatus.completed:
+            message = await service.run_message(user, run.id)
+            if message is not None:
+                yield {
+                    "type": "message",
+                    **base,
+                    "message_id": str(message.id),
+                    "content": message.content,
+                    "sources": message.sources or [],
+                }
+        elif run.status == RunStatus.waiting_for_approval:
+            approval = await service.get_pending_approval(user, run)
+            if approval is not None:
+                calls = {tc.call_id: tc for tc in run.tool_calls}
+                yield {
+                    "type": "approval_required",
+                    **base,
+                    "approval_id": str(approval.id),
+                    "proposals": [
+                        {
+                            "call_id": cid,
+                            "tool_name": calls[cid].tool_name,
+                            "provider": calls[cid].provider,
+                            "risk": calls[cid].risk_level.value,
+                            "summary": calls[cid].tool_name.replace("_", " "),
+                            "arguments": calls[cid].arguments,
+                        }
+                        for cid in approval.tool_call_ids
+                        if cid in calls
+                    ],
+                }
+        elif run.status == RunStatus.failed:
+            yield {
+                "type": "error",
+                **base,
+                "code": "AI_RUN_FAILED",
+                "message": _failure_text(run.error),
+            }
+        yield {"type": "done", **base, "status": run.status.value, "usage": run.token_usage}
+        return
+
+
+def _failure_text(error: str | None) -> str:
+    return describe_run_error(error) or "The assistant ran into a problem. Please try again."
 
 
 @router.post("/actions", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
@@ -83,10 +168,36 @@ async def note_action(
 
 
 @router.get("/threads", response_model=Envelope[list[ThreadOut]])
-async def list_threads(ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
-    return ok(
-        [ThreadOut.model_validate(t) for t in await AIThreadService(db).list_threads(ctx.user)]
+async def list_threads(ctx: CurrentAuth, db: DbDep, archived: bool = False) -> dict[str, Any]:
+    """Conversations by latest activity, each with its last message and open run (if any)."""
+    service = AIThreadService(db)
+    out: list[ThreadOut] = []
+    for item in await service.list_threads(ctx.user, archived=archived):
+        run = item.open_run
+        if run is not None and await service.settle_orphan(run):
+            run = None
+        last = item.last_message
+        out.append(
+            ThreadOut.model_validate(item.thread).model_copy(
+                update={
+                    "last_message": _preview(last.content) if last else None,
+                    "last_message_role": last.role if last else None,
+                    "active_run_id": run.id if run else None,
+                    "active_run_status": run.status if run else None,
+                }
+            )
+        )
+    return ok(out)
+
+
+@router.post("/threads", response_model=Envelope[ThreadOut], status_code=201)
+async def create_thread(payload: ThreadCreate, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    """An empty conversation (its title follows the first message unless one is given)."""
+    thread = await AIThreadService(db).create_thread(
+        ctx.user, title=payload.title, note_id=payload.note_id
     )
+    await db.commit()
+    return ok(ThreadOut.model_validate(thread))
 
 
 @router.get("/threads/{thread_id}", response_model=Envelope[ThreadDetailOut])
@@ -94,28 +205,48 @@ async def get_thread(thread_id: uuid.UUID, ctx: CurrentAuth, db: DbDep) -> dict[
     service = AIThreadService(db)
     thread = await service.get_thread(ctx.user, thread_id)
     messages = await service.list_messages(ctx.user, thread.id)
-    active = next(
-        (
-            r
-            for r in await service.list_runs(ctx.user)
-            if r.thread_id == thread.id
-            and r.status in (RunStatus.running, RunStatus.waiting_for_approval)
-        ),
-        None,
-    )
+    active = await service.open_run(ctx.user, thread.id)
+    if active is not None and await service.settle_orphan(active):
+        active = None
+    last = await service.last_run(ctx.user, thread.id)
     return ok(
         ThreadDetailOut(
             thread=ThreadOut.model_validate(thread),
             messages=[MessageOut.model_validate(m) for m in messages],
             active_run=RunOut.model_validate(active) if active else None,
+            last_run=RunOut.model_validate(last) if last else None,
         )
     )
 
 
+@router.patch("/threads/{thread_id}", response_model=Envelope[ThreadOut])
+async def update_thread(
+    thread_id: uuid.UUID, payload: ThreadUpdate, ctx: CurrentAuth, db: DbDep
+) -> dict[str, Any]:
+    """Rename and/or archive (restore with `archived: false`)."""
+    thread = await AIThreadService(db).update_thread(
+        ctx.user, thread_id, title=payload.title, archived=payload.archived
+    )
+    return ok(ThreadOut.model_validate(thread))
+
+
 @router.delete("/threads/{thread_id}", response_model=Envelope[dict[str, bool]])
-async def delete_thread(thread_id: uuid.UUID, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
-    await AIThreadService(db).delete_thread(ctx.user, thread_id)
+async def delete_thread(
+    thread_id: uuid.UUID, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
+) -> dict[str, Any]:
+    service = AIThreadService(db)
+    # Stop whatever this conversation is still doing before its rows disappear.
+    run = await service.open_run(ctx.user, thread_id)
+    if run is not None:
+        await AIRunner(db, settings).cancel(ctx.user, run.id)
+        await hub.wait(run.id, 5.0)
+    await service.delete_thread(ctx.user, thread_id)
     return ok({"deleted": True})
+
+
+def _preview(text: str, limit: int = 140) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
 @router.get("/runs", response_model=Envelope[list[RunOut]])

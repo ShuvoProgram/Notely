@@ -344,6 +344,14 @@ export interface AIThread {
   note_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Latest message or run: the list's sort key (renaming does not change it). */
+  last_activity_at: string;
+  archived_at: string | null;
+  /** List-only: a preview of the latest message and the run in progress, if any. */
+  last_message?: string | null;
+  last_message_role?: "user" | "assistant" | null;
+  active_run_id?: string | null;
+  active_run_status?: RunStatus | null;
 }
 
 export interface AIMessage {
@@ -392,6 +400,8 @@ export interface AIRun {
   plan: AIPlan | null;
   sources: AISource[];
   error: string | null;
+  /** Why it failed, readable by the user. */
+  error_message?: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -403,6 +413,8 @@ export interface AIThreadDetail {
   thread: AIThread;
   messages: AIMessage[];
   active_run: AIRun | null;
+  /** The most recent run, finished or not (shows a failed/stopped last request after reload). */
+  last_run: AIRun | null;
 }
 
 export interface AIProposal {
@@ -414,9 +426,18 @@ export interface AIProposal {
   arguments: Record<string, unknown>;
 }
 
-/** Events streamed by POST /ai/chat and /ai/approve. */
-export type AIChatEvent =
-  | { type: "run"; run_id: string; thread_id: string; status: RunStatus }
+/** Every run event is stamped with its conversation, run and position in the run's stream. */
+export interface AIEventStamp {
+  run_id?: string;
+  thread_id?: string;
+  /** Per-run sequence number (absent on events rebuilt from the database). */
+  seq?: number;
+}
+
+/** Events streamed by POST /ai/chat, /ai/approve and GET /ai/runs/{id}/stream. */
+export type AIChatEvent = AIEventStamp &
+  (
+  | { type: "run"; run_id: string; thread_id: string; status: RunStatus; user_message_id?: string }
   | { type: "token"; text: string }
   | { type: "step"; call_id: string; tool: string; label: string; status: "running" | "completed" | "failed"; result_preview?: string }
   | { type: "plan"; call_id: string; goal: string; steps: PlanStep[] }
@@ -424,7 +445,11 @@ export type AIChatEvent =
   | { type: "approval_required"; approval_id: string; run_id: string; proposals: AIProposal[] }
   | { type: "message"; message_id: string; content: string; sources: AISource[] }
   | { type: "done"; run_id: string; status: RunStatus; usage: Record<string, number> }
-  | { type: "error"; code: string; message: string; details?: Record<string, unknown> };
+  | { type: "error"; code: string; message: string; details?: Record<string, unknown> }
+  | { type: "ping" }
+  /** Transient status while the run waits, e.g. the model provider rate-limited it. */
+  | { type: "notice"; message: string }
+  );
 
 export type NoteAIAction = "summarize" | "improve" | "key_points" | "extract_tasks" | "custom";
 

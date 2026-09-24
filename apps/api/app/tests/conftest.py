@@ -22,6 +22,8 @@ if os.environ.get("AI_EVAL") == "1":
 else:
     os.environ["AI_PROVIDER"] = "fake"
 os.environ["AI_CHECKPOINTER"] = "memory"
+# Whole replies as one chunk unless a test asks for word-by-word streaming (ignores a dev .env).
+os.environ["AI_FAKE_STREAM_DELAY_MS"] = "0"
 # Deterministic Fernet key so encrypted-at-rest assertions are stable.
 os.environ["ENCRYPTION_KEY"] = "8bVJ7u2Q9mJmZcJ3b8lZ5G3Q0eVfG2Yg2b8nQx4bY9k="
 # Tests must not pick up a developer's real vendor apps from .env; fixtures set what they need.

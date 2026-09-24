@@ -33,6 +33,9 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+# Seconds of clock difference tolerated when checking an id_token's iat/exp/nbf.
+ID_TOKEN_CLOCK_SKEW = 120
+
 STATE_TTL_SECONDS = 600
 
 # Tests inject an httpx MockTransport here; production uses real HTTP.
@@ -272,6 +275,9 @@ class OAuthClient:
                 algorithms=["RS256"],
                 audience=self.config.client_id,
                 issuer=endpoints.issuer,
+                # The provider stamps `iat` with its own clock: a server running even a second
+                # behind would otherwise see a token "not yet valid" and fail the sign-in.
+                leeway=ID_TOKEN_CLOCK_SKEW,
                 options={
                     "require": ["sub", "exp", "iat"],
                     "verify_iss": endpoints.issuer is not None,

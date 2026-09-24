@@ -16,6 +16,7 @@ pause for approval and resume later.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -32,6 +33,13 @@ from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.cancel import cancel_key
+from app.ai.pacing import (
+    GATEWAY_CONCURRENCY,
+    RATE_LIMIT_RETRIES,
+    is_transient,
+    model_slot,
+    retry_delay,
+)
 from app.ai.policy import ToolPolicyEngine, ValidatedCall
 from app.ai.prompts import assistant_system_prompt
 from app.ai.tools.base import ToolContext, ToolRegistry, Verification, args_to_dict
@@ -74,6 +82,9 @@ class AgentContext:
     registry: ToolRegistry
     policy: ToolPolicyEngine
     max_iterations: int = 8
+    # Which provider budget this run's model calls share with other runs (see app/ai/pacing.py).
+    slot_key: str = "gateway"
+    slot_limit: int = GATEWAY_CONCURRENCY
 
 
 @dataclass(frozen=True)
@@ -112,8 +123,64 @@ async def agent_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict[
         }
     model = ctx.model.bind_tools(ctx.registry.openai_schemas())
     system = SystemMessage(content=assistant_system_prompt(ctx.user.display_name))
-    response = await model.ainvoke([system, *state.get("messages", [])])
+    history = close_dangling_tool_calls(state.get("messages", []))
+    slot = model_slot(ctx.slot_key, ctx.slot_limit)
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            # Conversations sharing a key take turns here instead of bursting it.
+            async with slot:
+                response = await model.ainvoke([system, *history])
+            break
+        except Exception as exc:
+            if attempt == RATE_LIMIT_RETRIES or not is_transient(exc):
+                raise
+            delay = retry_delay(exc, attempt)
+            log.info(
+                "ai_model_call_retry",
+                extra={"run_id": str(ctx.run_id), "attempt": attempt + 1, "delay": delay},
+            )
+            get_stream_writer()(
+                {
+                    "type": "notice",
+                    "message": f"The model provider is busy. Retrying in {round(delay)}s…",
+                }
+            )
+            if await _wait_unless_cancelled(ctx, delay):
+                raise
     return {"messages": [response], "iterations": iterations + 1}
+
+
+async def _wait_unless_cancelled(ctx: AgentContext, seconds: float) -> bool:
+    """Sleep, but wake as soon as the user presses Stop. True when the run was cancelled."""
+    deadline = asyncio.get_running_loop().time() + seconds
+    while (left := deadline - asyncio.get_running_loop().time()) > 0:
+        if await kv.get(cancel_key(ctx.run_id)):
+            return True
+        await asyncio.sleep(min(1.0, left))
+    return bool(await kv.get(cancel_key(ctx.run_id)))
+
+
+def close_dangling_tool_calls(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """A run cancelled (or superseded by a new message) while its tool calls awaited approval
+    leaves an assistant turn whose calls were never answered. Model APIs reject that history,
+    so the prompt gets a synthetic "not run" result for each; the checkpoint is left as is."""
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+    out: list[BaseMessage] = []
+    for m in messages:
+        out.append(m)
+        if isinstance(m, AIMessage):
+            for tc in m.tool_calls:
+                if tc["id"] and tc["id"] not in answered:
+                    out.append(
+                        ToolMessage(
+                            content=json.dumps(
+                                {"cancelled": True, "message": "Not run: the request was stopped."}
+                            ),
+                            tool_call_id=tc["id"],
+                            name=tc["name"],
+                        )
+                    )
+    return out
 
 
 def route_after_agent(state: AgentState) -> str:

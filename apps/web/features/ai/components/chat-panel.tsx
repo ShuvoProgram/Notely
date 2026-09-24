@@ -1,10 +1,13 @@
 "use client";
 
-import { Sparkles, XCircle } from "@/components/icons";
+import { RotateCcw, Sparkles, Square, XCircle } from "@/components/icons";
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { load as reloadThread } from "@/features/ai/chat-store";
 import { PlanTrace, ReplyFooter, ToolTrace, WorkingStatus } from "@/features/ai/components/agent-trace";
 import { ApprovalCard } from "@/features/ai/components/approval-card";
 import { PromptBar } from "@/features/ai/components/prompt-bar";
@@ -12,25 +15,46 @@ import { type LiveAssistant, useChat } from "@/features/ai/use-chat";
 import type { AIMessage } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
+/**
+ * One conversation. Everything here (history, live reply, approval, error, busy) belongs to
+ * `threadId` alone; replies in other conversations keep streaming in the background.
+ */
 export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }: { threadId: string | null; noteId?: string | null; onThreadCreated?: (id: string) => void; compact?: boolean }) {
-  const { state, send, decide, stop } = useChat(threadId);
+  const { state, send, decide, stop, retry } = useChat(threadId, { onThreadCreated });
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const notified = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    if (state.threadId && !threadId && onThreadCreated && notified.current !== state.threadId) {
-      notified.current = state.threadId;
-      onThreadCreated(state.threadId);
-    }
-  }, [state.threadId, threadId, onThreadCreated]);
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [state.messages.length, state.live?.text, state.live?.steps.length, state.approval]);
+  }, [state.messages.length, state.live?.text, state.live?.steps.length, state.approval, state.error, state.stopped]);
 
   const empty = state.messages.length === 0 && !state.live;
   const lastAssistant = state.messages.map((m) => m.role).lastIndexOf("assistant");
-  const composer = <PromptBar busy={state.busy} compact={compact} onSend={(text) => send(text, noteId)} onStop={() => void stop()} />;
+  const unanswered = state.messages.at(-1)?.role === "user";
+  const composer = <PromptBar busy={state.busy} compact={compact} onSend={(text) => void send(text, noteId)} onStop={() => void stop()} />;
+
+  if (state.status === "loading" && empty) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex-1 space-y-5 px-1 py-4" aria-busy="true" aria-label="Loading conversation">
+          <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
+          <Skeleton className="h-16 w-4/5" />
+          <Skeleton className="ml-auto h-10 w-1/3 rounded-2xl" />
+        </div>
+        {composer}
+      </div>
+    );
+  }
+
+  if (state.status === "load_error" && empty) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 text-center">
+        <p className="text-sm text-muted-foreground">{state.error ?? "Couldn't load this conversation."}</p>
+        <Button size="sm" variant="outline" onClick={() => threadId && void reloadThread(threadId)}>
+          <RotateCcw aria-hidden /> Try again
+        </Button>
+      </div>
+    );
+  }
 
   // A fresh conversation: a big heading with the composer right under it, centred on the page.
   if (empty && !compact) {
@@ -46,6 +70,11 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
             Search, summarize and act across your notes, tasks and connected apps.
           </p> */}
           <div className="mt-8">{composer}</div>
+          {state.error ? (
+            <p role="alert" className="mt-3 text-center text-sm text-destructive">
+              {state.error}
+            </p>
+          ) : null}
         </div>
       </div>
     );
@@ -79,9 +108,24 @@ export function ChatPanel({ threadId, noteId, onThreadCreated, compact = false }
                 <ApprovalCard key={state.approval.approval_id} approval={state.approval} onDecide={decide} disabled={state.busy} />
               </li>
             ) : null}
-            {state.error ? (
-              <li role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-                <XCircle className="mt-0.5 size-4 text-destructive" aria-hidden /> {state.error}
+            {state.error && !state.busy ? (
+              <li role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
+                <XCircle className="size-4 shrink-0 text-destructive" aria-hidden />
+                <span className="min-w-0 flex-1">{state.error}</span>
+                {unanswered ? (
+                  <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={retry}>
+                    <RotateCcw aria-hidden /> Retry
+                  </Button>
+                ) : null}
+              </li>
+            ) : null}
+            {state.stopped && !state.busy && !state.error && unanswered ? (
+              <li role="status" className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                <Square className="size-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1">You stopped this response.</span>
+                <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={retry}>
+                  <RotateCcw aria-hidden /> Retry
+                </Button>
               </li>
             ) : null}
           </ol>
@@ -117,6 +161,7 @@ function MessageBubble({ message, onRetry, onFollowUp }: { message: AIMessage; o
 /** What the assistant is doing right now, in words: the running tool, the active plan step… */
 function liveLabel(live: LiveAssistant, waiting: boolean): string {
   if (waiting) return "Waiting for your approval";
+  if (live.notice) return live.notice;
   const running = [...live.steps].reverse().find((s) => s.status === "running");
   if (running) return running.label;
   const active = live.plan?.steps.find((s) => s.status === "active");

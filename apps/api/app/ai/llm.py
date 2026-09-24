@@ -10,12 +10,16 @@ production by `Settings.validate_for_runtime()`.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+import json
+import re
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCallChunk
+from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
 from app.ai.byo import BYOModel, build_model
@@ -27,14 +31,48 @@ captured_prompts: list[list[BaseMessage]] = []
 
 class ScriptedChatModel(FakeMessagesListChatModel):
     """Returns pre-scripted AIMessages in order; `bind_tools` is a no-op so agent code paths
-    that attach tools keep working."""
+    that attach tools keep working.
+
+    With `stream_delay` > 0 text replies stream word by word (AI_FAKE_STREAM_DELAY_MS), so
+    concurrent runs can be exercised offline. A user message starting with `!fail` raises, to
+    exercise per-thread error handling. Both only exist on the fake provider (never in prod)."""
+
+    stream_delay: float = 0.0
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> ScriptedChatModel:
         return self
 
     def _generate(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> Any:
         captured_prompts.append(list(messages))
+        last_human = next((m for m in reversed(messages) if m.type == "human"), None)
+        if last_human is not None and str(last_human.content).startswith("!fail"):
+            raise RuntimeError("scripted failure")
         return super()._generate(messages, *args, **kwargs)
+
+    async def _astream(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        message = self._generate(messages).generations[0].message
+        assert isinstance(message, AIMessage)
+        tool_chunks = [
+            ToolCallChunk(name=tc["name"], args=json.dumps(tc["args"]), id=tc["id"], index=i)
+            for i, tc in enumerate(message.tool_calls)
+        ]
+        text = message.text
+        if self.stream_delay <= 0 or tool_chunks or not text:
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content=message.content,
+                    tool_call_chunks=tool_chunks,
+                    usage_metadata=message.usage_metadata,
+                    id=message.id,
+                )
+            )
+            return
+        for i, word in enumerate(re.findall(r"\S+\s*|\s+", text)):
+            if i:
+                await asyncio.sleep(self.stream_delay)
+            yield ChatGenerationChunk(message=AIMessageChunk(content=word, id=message.id))
 
 
 # Scripts consumed by the fake provider, keyed by user id (so parallel sessions don't collide).
@@ -89,7 +127,10 @@ def get_chat_model(
     if settings.ai_provider == "fake" and (byo is None or _has_script(script_key)):
         if settings.is_production:
             raise RuntimeError("fake AI provider is not permitted in production")
-        return ScriptedChatModel(responses=_script_for(script_key))
+        return ScriptedChatModel(
+            responses=_script_for(script_key),
+            stream_delay=settings.ai_fake_stream_delay_ms / 1000,
+        )
     if byo is not None:
         return build_model(
             byo, temperature=temperature, timeout=settings.ai_request_timeout_seconds
