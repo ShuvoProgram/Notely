@@ -8,6 +8,8 @@ from sqlalchemy import select
 
 from app.automation.runner import AutomationRunner
 from app.automation.scheduler import claim_due, recover_stale_runs
+from app.automation.triggers import EVENT, poll_due_trigger
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import utcnow
 from app.db.session import get_session_factory
@@ -33,17 +35,27 @@ async def run_due_automations(_: dict[str, Any]) -> int:
     async with factory() as db:
         await recover_stale_runs(db)
         due = list(
-            await db.scalars(
-                select(Automation.id)
-                .where(Automation.enabled.is_(True), Automation.next_run_at <= utcnow())
-                .order_by(Automation.next_run_at)
-                .limit(100)
-            )
+            (
+                await db.execute(
+                    select(Automation.id, Automation.schedule_kind)
+                    .where(Automation.enabled.is_(True), Automation.next_run_at <= utcnow())
+                    .order_by(Automation.next_run_at)
+                    .limit(100)
+                )
+            ).all()
         )
     started = 0
-    for automation_id in due:
+    for automation_id, kind in due:
         async with factory() as db:
             try:
+                if kind == EVENT:
+                    # One check can start several runs (one per new item). They all run: an
+                    # event is never skipped because an earlier one is still being handled.
+                    runner = AutomationRunner(db)
+                    for event_run in await poll_due_trigger(db, automation_id, get_settings()):
+                        await runner.dispatch(event_run)
+                        started += 1
+                    continue
                 execution = await claim_due(db, automation_id)
                 if execution is None:
                     continue

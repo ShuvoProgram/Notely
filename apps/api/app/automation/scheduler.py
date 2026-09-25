@@ -1,7 +1,8 @@
 """When automations run.
 
 Schedule kinds: once, daily, weekly (chosen weekdays), monthly (day of month), custom
-(every N days), interval (every N minutes) and manual (only when the user runs it).
+(every N days), interval (every N minutes), manual (only when the user runs it) and event
+(when something happens in a connected app; see app/automation/triggers.py).
 
 The cron job claims a due automation by moving its `next_run_at` forward *before* running
 it. The schedule therefore always advances — a failed run never stalls it — and a second
@@ -58,6 +59,11 @@ def next_occurrence(
     """The next run strictly after `after` (default: now), in UTC. None = no schedule."""
     if kind == "manual":
         return None
+    if kind == "event":
+        # Event triggers: `next_run_at` is the next check of the connected app.
+        from app.automation.triggers import next_check
+
+        return next_check(config, after or utcnow())
     tz = _zone(timezone)
     anchor = (after or utcnow()).astimezone(tz)
     if kind == "once":

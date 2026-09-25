@@ -235,6 +235,8 @@ class Catalog:
     apps: list[dict[str, Any]]
     # Actions of apps offered on this deployment but not connected by this user.
     locked: dict[str, ActionDefinition] = field(default_factory=dict)
+    # "When something happens in <app>" triggers (see app/automation/triggers.py).
+    triggers: list[dict[str, Any]] = field(default_factory=list)
 
     def get(self, action_id: str) -> ActionDefinition | None:
         return self.actions.get(action_id)
@@ -251,6 +253,7 @@ class Catalog:
                 )
                 for action in [*self.actions.values(), *self.locked.values()]
             ],
+            "triggers": self.triggers,
         }
 
 
@@ -331,7 +334,15 @@ async def build_catalog(ctx: ActionContext) -> Catalog:
             for action in locked_actions(get_providers()[app["id"]]):
                 if action.id not in actions:
                     locked[action.id] = action
-    return Catalog(actions=actions, apps=apps, locked=locked)
+    from app.automation.triggers import catalog_triggers
+
+    triggers = catalog_triggers(
+        ctx.connections,
+        ctx.user,
+        usable,
+        [a["id"] for a in apps if a["id"] not in BUILTIN_APPS],
+    )
+    return Catalog(actions=actions, apps=apps, locked=locked, triggers=triggers)
 
 
 async def resolve_action(ctx: ActionContext, action_id: str) -> ActionDefinition:

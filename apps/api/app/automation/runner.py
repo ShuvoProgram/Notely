@@ -76,8 +76,11 @@ class AutomationRunner:
         occurrence: datetime | None = None,
         idempotency_key: str | None = None,
         test_step_id: str | None = None,
+        trigger_data: dict[str, Any] | None = None,
     ) -> AutomationExecution:
-        """A queued run with a snapshot of the workflow and the trigger's data."""
+        """A queued run with a snapshot of the workflow and the trigger's data. An event trigger
+        passes the item that started the run as `trigger_data` (its fields become
+        `{{trigger.<field>}}`); the base fields always win so they keep their meaning."""
         fired = occurrence or utcnow()
         previous = await self.previous_run_at(automation)
         execution = AutomationExecution(
@@ -93,6 +96,7 @@ class AutomationRunner:
                 # Snapshot: editing the automation never changes a run already under way.
                 "workflow": Workflow.model_validate(automation.action_config).model_dump(),
                 "trigger": {
+                    **(trigger_data or {}),
                     "type": {"scheduled": "schedule"}.get(run_mode, run_mode),
                     "fired_at": _iso(fired),
                     "previous_run_at": _iso(previous),

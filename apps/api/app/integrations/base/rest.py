@@ -30,6 +30,7 @@ from app.integrations.base.provider import (
     ProviderContext,
     TestStep,
 )
+from app.integrations.base.triggers import ProviderTrigger
 
 Handler = Callable[[ProviderContext, Any], Awaitable[dict[str, Any]]]
 Verifier = Callable[[ProviderContext, Any, dict[str, Any]], Awaitable[Verification]]
@@ -195,10 +196,18 @@ class RestOAuthProvider(IntegrationProvider):
     def build_tools(self) -> list[ProviderTool]:
         raise NotImplementedError
 
-    def tool_available(self, tool: ProviderTool, granted: list[str]) -> bool:
+    def tool_available(self, tool: ProviderTool | ProviderTrigger, granted: list[str]) -> bool:
         if tool.scope is None or not granted:
             return True
         return tool.scope in granted
+
+    def build_triggers(self) -> list[ProviderTrigger]:
+        """Events automations can start from (see app/integrations/base/triggers.py)."""
+        return []
+
+    def triggers(self, ctx: ProviderContext) -> list[ProviderTrigger]:
+        granted = list(ctx.connection.scopes or [])
+        return [t for t in self.build_triggers() if self.tool_available(t, granted)]
 
     async def tools(self, ctx: ProviderContext) -> list[ToolSpec]:
         specs: list[ToolSpec] = []

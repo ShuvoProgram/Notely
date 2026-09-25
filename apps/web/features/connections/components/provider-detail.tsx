@@ -21,7 +21,7 @@ import { ConnectDialog } from "@/features/connections/components/connect-dialog"
 import { ACTION_LABEL, ConnectionStatusBadge, describeConnection, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
 import { playSfx } from "@/lib/sfx/player";
-import type { ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
+import type { Ability, ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const CALLBACK_ERRORS: Record<string, string> = {
@@ -261,6 +261,9 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
               <CardDescription>Reads happen when you ask. Anything that changes data waits for your approval.</CardDescription>
             </CardHeader>
             <CardContent>
+              {p.abilities?.length ? (
+                <Abilities abilities={p.abilities} connected={Boolean(conn)} onReconnect={reconnect} />
+              ) : (
               <ul className="space-y-3">
                 {p.capabilities.map((c) => {
                   const copy = CAPABILITY_COPY[c] ?? { title: c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, " "), why: "" };
@@ -277,6 +280,7 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
                   );
                 })}
               </ul>
+              )}
             </CardContent>
           </Card>
 
@@ -446,6 +450,63 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+const ABILITY_GROUPS: { key: string; title: string; match: (a: Ability) => boolean }[] = [
+  { key: "read", title: "Find and read", match: (a) => a.kind === "action" && a.risk === "read" },
+  { key: "write", title: "Make changes (always with your approval)", match: (a) => a.kind === "action" && a.risk !== "read" },
+  { key: "trigger", title: "Start automations when…", match: (a) => a.kind === "trigger" },
+];
+
+/**
+ * Exactly what Notely can do with this app, from its real tools and triggers. Anything behind an
+ * optional permission says which one; once connected, a declined permission shows how to add it.
+ */
+function Abilities({ abilities, connected, onReconnect }: { abilities: Ability[]; connected: boolean; onReconnect: () => void }) {
+  return (
+    <div className="space-y-4">
+      {ABILITY_GROUPS.map((group) => {
+        const items = abilities.filter(group.match);
+        if (!items.length) return null;
+        return (
+          <section key={group.key}>
+            <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{group.title}</h3>
+            <ul className="space-y-1.5">
+              {items.map((a) => {
+                const blocked = a.granted === false;
+                return (
+                  <li key={a.label} className="flex items-start gap-2.5 text-sm">
+                    <span className={cn("mt-0.5 grid size-5 shrink-0 place-items-center rounded-md", blocked ? "bg-muted text-muted-foreground" : "bg-ai-soft text-ai")}>
+                      {blocked ? <XCircle className="size-3" aria-hidden /> : <Check className="size-3" aria-hidden />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className={cn("block", blocked && "text-muted-foreground")}>{a.label.replace(/\.$/, "")}</span>
+                      {a.permission ? (
+                        <span className="block text-xs text-muted-foreground">
+                          {blocked ? (
+                            <>
+                              Needs “{a.permission}”, which wasn’t granted.{" "}
+                              <button type="button" onClick={onReconnect} className="font-medium text-ai underline-offset-2 hover:underline">
+                                Reconnect to allow it
+                              </button>
+                            </>
+                          ) : connected ? (
+                            <>Allowed by “{a.permission}”</>
+                          ) : (
+                            <>Optional: needs “{a.permission}” when you connect</>
+                          )}
+                        </span>
+                      ) : null}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }

@@ -14,6 +14,7 @@ Zoom specifics worth knowing:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -31,6 +32,12 @@ from app.integrations.base.provider import (
     ProviderManifest,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
+from app.integrations.base.triggers import (
+    NoParams,
+    ProviderTrigger,
+    TriggerEvent,
+    parse_time,
+)
 
 API = "https://api.zoom.us/v2"
 SCOPE_USER = "user:read:user"
@@ -167,6 +174,64 @@ class ZoomProvider(RestOAuthProvider):
                 await http.get("/users/me/meetings", params={"type": "upcoming", "page_size": 1})
             ).json()
         return f"{body.get('total_records', 0)} upcoming meeting(s)"
+
+    def build_triggers(self) -> list[ProviderTrigger]:
+        async def meeting_ended(
+            ctx: ProviderContext, p: NoParams, since: datetime
+        ) -> list[TriggerEvent]:
+            # Without webhooks Zoom reports meetings whose time has passed (previous_meetings);
+            # a meeting counts as ended once its scheduled end is behind us.
+            async with self.http(ctx) as http:
+                body = (
+                    await http.get(
+                        "/users/me/meetings", params={"type": "previous_meetings", "page_size": 100}
+                    )
+                ).json()
+            now = datetime.now(UTC)
+            events = []
+            for m in body.get("meetings") or []:
+                start = parse_time(m.get("start_time"))
+                if start is None:
+                    continue
+                ended = start + timedelta(minutes=int(m.get("duration") or 0))
+                if not since < ended <= now:
+                    continue
+                events.append(
+                    TriggerEvent(
+                        # A recurring meeting's occurrences share an id but not a start time.
+                        id=f"{m.get('id')}:{m.get('start_time')}",
+                        occurred_at=ended,
+                        data={
+                            "meeting_id": m.get("id"),
+                            "topic": m.get("topic", ""),
+                            "started_at": m.get("start_time"),
+                            "ended_at": ended.isoformat(),
+                            "duration_minutes": m.get("duration"),
+                            "agenda": m.get("agenda") or "",
+                        },
+                    )
+                )
+            return events
+
+        return [
+            ProviderTrigger(
+                "meeting_ended",
+                "Meeting ended",
+                "Starts after one of your Zoom meetings is over (its scheduled end time has "
+                "passed), e.g. to create follow-up tasks.",
+                meeting_ended,
+                NoParams,
+                outputs=(
+                    F("topic", "Topic"),
+                    F("started_at", "Started", "date"),
+                    F("ended_at", "Ended", "date"),
+                    F("duration_minutes", "Duration (minutes)", "number"),
+                    F("agenda", "Agenda", "long_text"),
+                    F("meeting_id", "Meeting ID"),
+                ),
+                scope=SCOPE_LIST,
+            )
+        ]
 
     def build_tools(self) -> list[ProviderTool]:
         async def list_meetings(ctx: ProviderContext, a: ListMeetingsArgs) -> dict[str, Any]:

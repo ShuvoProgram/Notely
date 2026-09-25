@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from app.integrations.base.provider import (
     ProviderManifest,
 )
 from app.integrations.base.rest import ProviderTool
+from app.integrations.base.triggers import ProviderTrigger, TriggerEvent, parse_time
 from app.integrations.microsoft.base import MicrosoftGraphProvider
 
 
@@ -52,16 +54,47 @@ class SendChannelMessageArgs(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class ChannelMessageParams(BaseModel):
+    """Which channel to watch (ids from "List your teams and channels")."""
+
+    team_id: str = Field(min_length=1, max_length=80)
+    channel_id: str = Field(min_length=1, max_length=120)
+
+
+class ReplyToMessageArgs(BaseModel):
+    """Reply in a channel message's thread as you."""
+
+    team_id: str = Field(min_length=1, max_length=80)
+    channel_id: str = Field(min_length=1, max_length=120)
+    message_id: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class CreateMeetingArgs(BaseModel):
+    """Create a Teams meeting and get its join link to share."""
+
+    subject: str = Field(min_length=1, max_length=255)
+    start: datetime = Field(description="ISO 8601 with a time zone offset")
+    end: datetime | None = Field(default=None, description="Defaults to 30 minutes after start")
+
+
+SEND = "ChannelMessage.Send"
+MEETINGS = "OnlineMeetings.ReadWrite"
+
+
 class TeamsProvider(MicrosoftGraphProvider):
     manifest = ProviderManifest(
         id="microsoft_teams",
         name="Microsoft Teams",
         category="communication",
-        description="Read your teams and channel messages; post to channels with approval.",
+        description=(
+            "Search and read your teams and channel messages; post, reply and create Teams "
+            "meetings with approval."
+        ),
         logo_url="https://cdn.simpleicons.org/microsoftteams",
         docs_url="https://learn.microsoft.com/graph/api/resources/teams-api-overview",
         auth=AuthType.oauth2,
-        capabilities=[Capability.search, Capability.read, Capability.send],
+        capabilities=[Capability.search, Capability.read, Capability.send, Capability.schedule],
         permissions=[
             PermissionSpec(
                 scope="User.Read", label="Read your profile", capability=Capability.read
@@ -79,10 +112,16 @@ class TeamsProvider(MicrosoftGraphProvider):
             ),
             PermissionSpec(scope="offline_access", label="Stay connected (refresh tokens)"),
             PermissionSpec(
-                scope="ChannelMessage.Send",
-                label="Post channel messages as you",
+                scope=SEND,
+                label="Post channel messages and replies as you",
                 required=False,
                 capability=Capability.send,
+            ),
+            PermissionSpec(
+                scope=MEETINGS,
+                label="Create Teams meetings",
+                required=False,
+                capability=Capability.schedule,
             ),
         ],
     )
@@ -91,6 +130,61 @@ class TeamsProvider(MicrosoftGraphProvider):
         async with self.http(ctx) as http:
             teams = self.graph_page((await http.get("/me/joinedTeams")).json())
         return f"{len(teams)} team(s)"
+
+    def build_triggers(self) -> list[ProviderTrigger]:
+        async def message_posted(
+            ctx: ProviderContext, p: ChannelMessageParams, since: datetime
+        ) -> list[TriggerEvent]:
+            async with self.http(ctx) as http:
+                msgs = self.graph_page(
+                    (
+                        await http.get(
+                            f"/teams/{p.team_id}/channels/{p.channel_id}/messages",
+                            params={"$top": 25},
+                        )
+                    ).json()
+                )
+            events = []
+            for m in msgs:
+                created = parse_time(m.get("createdDateTime"))
+                if m.get("messageType") not in (None, "message") or created is None:
+                    continue
+                if created <= since:
+                    continue
+                events.append(
+                    TriggerEvent(
+                        id=str(m["id"]),
+                        occurred_at=created,
+                        data={
+                            "message_id": m["id"],
+                            "text": _strip_html((m.get("body") or {}).get("content", "")),
+                            "from": ((m.get("from") or {}).get("user") or {}).get("displayName"),
+                            "sent_at": m.get("createdDateTime"),
+                            "team_id": p.team_id,
+                            "channel_id": p.channel_id,
+                            "url": m.get("webUrl"),
+                        },
+                    )
+                )
+            return events
+
+        return [
+            ProviderTrigger(
+                "message_posted",
+                "New message in a channel",
+                "Starts when someone posts in a Teams channel.",
+                message_posted,
+                ChannelMessageParams,
+                outputs=(
+                    F("text", "Message", "long_text"),
+                    F("from", "From"),
+                    F("sent_at", "Sent", "date"),
+                    F("message_id", "Message ID"),
+                    F("url", "Link", "url"),
+                ),
+                scope="ChannelMessage.Read.All",
+            )
+        ]
 
     def build_tools(self):  # type: ignore[no-untyped-def]
         async def list_teams(ctx: ProviderContext, a: ListTeamsArgs) -> dict[str, Any]:
@@ -198,6 +292,60 @@ class TeamsProvider(MicrosoftGraphProvider):
                 ).json()
             return {"message_id": msg.get("id"), "web_url": msg.get("webUrl")}
 
+        async def reply_to_message(ctx: ProviderContext, a: ReplyToMessageArgs) -> dict[str, Any]:
+            async with self.http(ctx) as http:
+                msg = (
+                    await http.post(
+                        f"/teams/{a.team_id}/channels/{a.channel_id}/messages/"
+                        f"{a.message_id}/replies",
+                        json={"body": {"contentType": "text", "content": a.text}},
+                    )
+                ).json()
+            return {"reply_id": msg.get("id"), "web_url": msg.get("webUrl")}
+
+        async def create_meeting(ctx: ProviderContext, a: CreateMeetingArgs) -> dict[str, Any]:
+            end = a.end or a.start + timedelta(minutes=30)
+            async with self.http(ctx) as http:
+                meeting = (
+                    await http.post(
+                        "/me/onlineMeetings",
+                        json={
+                            "subject": a.subject,
+                            "startDateTime": a.start.isoformat(),
+                            "endDateTime": end.isoformat(),
+                        },
+                    )
+                ).json()
+            return {
+                "meeting_id": meeting.get("id"),
+                "join_url": meeting.get("joinWebUrl"),
+                "subject": a.subject,
+                "start": a.start.isoformat(),
+            }
+
+        async def verify_reply(
+            ctx: ProviderContext, a: ReplyToMessageArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                msg = (
+                    await http.get(
+                        f"/teams/{a.team_id}/channels/{a.channel_id}/messages/{a.message_id}"
+                        f"/replies/{result['reply_id']}"
+                    )
+                ).json()
+            if msg.get("deletedDateTime"):
+                return Verification.failed("The reply was deleted")
+            return Verification.verified("Reply is visible in the thread")
+
+        async def verify_meeting(
+            ctx: ProviderContext, a: CreateMeetingArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                meeting = (await http.get(f"/me/onlineMeetings/{result['meeting_id']}")).json()
+            if not meeting.get("joinWebUrl"):
+                return Verification.failed("The meeting has no join link")
+            return Verification.verified("Teams meeting is ready to join")
+
         async def verify_send_channel_message(
             ctx: ProviderContext, a: SendChannelMessageArgs, result: dict[str, Any]
         ) -> Verification:
@@ -239,6 +387,7 @@ class TeamsProvider(MicrosoftGraphProvider):
                 Capability.read,
                 list_teams,
                 lambda a: "List Teams channels",
+                outputs=(listing("teams", "Teams", F("name", "Team")),),
             ),
             ProviderTool(
                 "read_channel",
@@ -265,6 +414,31 @@ class TeamsProvider(MicrosoftGraphProvider):
                 send_channel_message,
                 lambda a: f"Post to Teams channel: “{a.text[:60]}”",
                 verify=verify_send_channel_message,
-                scope="ChannelMessage.Send",
+                scope=SEND,
+                outputs=(F("message_id", "Message ID"), F("web_url", "Link", "url")),
+            ),
+            ProviderTool(
+                "reply_to_message",
+                "Reply in a Teams channel thread as you.",
+                ReplyToMessageArgs,
+                Capability.send,
+                reply_to_message,
+                lambda a: f"Reply in Teams thread: “{a.text[:60]}”",
+                verify=verify_reply,
+                scope=SEND,
+                outputs=(F("web_url", "Link", "url"),),
+            ),
+            ProviderTool(
+                "create_meeting",
+                "Create a Teams meeting and get its join link.",
+                CreateMeetingArgs,
+                Capability.schedule,
+                create_meeting,
+                lambda a: (
+                    f"Create Teams meeting “{a.subject}” at {a.start.isoformat(timespec='minutes')}"
+                ),
+                verify=verify_meeting,
+                scope=MEETINGS,
+                outputs=(F("join_url", "Join link", "url"), F("start", "Starts", "date")),
             ),
         ]

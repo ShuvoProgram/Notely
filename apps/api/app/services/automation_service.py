@@ -18,6 +18,7 @@ from app.automation.catalog import Catalog, build_catalog
 from app.automation.model import ActionStep, Workflow, iter_steps
 from app.automation.runner import ACTIVE, AutomationRunner
 from app.automation.scheduler import upcoming
+from app.automation.triggers import EVENT, connection_issues, parse_config
 from app.automation.validation import Issue, normalise, validate
 from app.core.config import Settings, get_settings
 from app.core.exceptions import Conflict, NotFound, ValidationFailed
@@ -85,6 +86,19 @@ def execution_out(execution: AutomationExecution) -> ExecutionOut:
     )
 
 
+def _trigger_status(row: Automation) -> dict[str, Any] | None:
+    """How an event trigger is doing, for the UI (never the raw seen-id list)."""
+    if row.schedule_kind != EVENT:
+        return None
+    state = row.trigger_state or {}
+    return {
+        "status": state.get("status") or "waiting",
+        "last_checked_at": state.get("last_checked_at"),
+        "last_error": state.get("last_error"),
+        "runs_started": int(state.get("runs_started") or 0),
+    }
+
+
 def _issues_error(issues: list[Issue]) -> ValidationFailed:
     first = issues[0].message
     more = f" (and {len(issues) - 1} more)" if len(issues) > 1 else ""
@@ -110,6 +124,9 @@ class AutomationService:
 
     async def catalog(self, user: User) -> Catalog:
         return await build_catalog(self.context(user))
+
+    def connections(self) -> ConnectionService:
+        return ConnectionService(self.db, self.settings)
 
     # --- reading ----------------------------------------------------------------------------
 
@@ -182,6 +199,7 @@ class AutomationService:
             enabled=row.enabled,
             status=row.status.value if hasattr(row.status, "value") else str(row.status),
             consecutive_failures=row.consecutive_failures or 0,
+            trigger_status=_trigger_status(row),
             created_at=row.created_at,
             updated_at=row.updated_at,
             apps=workflow_apps(row.action_config),
@@ -240,6 +258,12 @@ class AutomationService:
         catalog = await self.catalog(user)
         workflow = normalise(Workflow.model_validate(payload.workflow), catalog)
         issues = await validate(self.context(user), workflow, catalog)
+        schedule_config = payload.schedule_config
+        if payload.schedule_kind == EVENT:
+            # Before any row is added: these checks query the database (autoflush).
+            event = parse_config(payload.schedule_config)
+            schedule_config = event.to_dict()
+            issues = [*await connection_issues(self.connections(), user, event), *issues]
         if payload.enabled and issues:
             raise _issues_error(issues)
         row = await self.get(user, automation_id) if automation_id else None
@@ -248,12 +272,15 @@ class AutomationService:
                 tenant_id=user.tenant_id, user_id=user.id, action=AutomationAction.workflow
             )
             self.db.add(row)
+        # A different trigger (or different settings) starts from a fresh baseline.
+        if (row.schedule_kind, row.schedule_config) != (payload.schedule_kind, schedule_config):
+            row.trigger_state = {}
         row.name = payload.name
         row.description = payload.description
         row.action = AutomationAction.workflow
         row.action_config = workflow.model_dump()
         row.schedule_kind = payload.schedule_kind
-        row.schedule_config = payload.schedule_config
+        row.schedule_config = schedule_config
         row.timezone = payload.timezone
         row.starts_at = payload.starts_at
         row.ends_at = payload.ends_at
@@ -280,6 +307,10 @@ class AutomationService:
                 Workflow.model_validate(row.action_config),
                 await self.catalog(user),
             )
+            if row.schedule_kind == EVENT:
+                issues = await connection_issues(
+                    self.connections(), user, parse_config(row.schedule_config or {})
+                )
             if issues:
                 raise _issues_error(issues)
             row.next_run_at = upcoming(row)

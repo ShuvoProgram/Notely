@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import uuid
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -21,14 +22,20 @@ from app.integrations.base.provider import (
     ProviderManifest,
 )
 from app.integrations.base.rest import ProviderTool, RestOAuthProvider
+from app.integrations.base.triggers import ProviderTrigger, TriggerEvent, parse_time
+
+WRITE_SCOPE = "data:read_write"
+# REST v2 cannot change a task's project; the Sync API's `item_move` command can.
+SYNC_URL = "https://api.todoist.com/sync/v9/sync"
 
 
 class ListTasksArgs(BaseModel):
-    """List open tasks, optionally filtered with a Todoist filter string."""
+    """List open tasks, optionally filtered with a Todoist filter string or searched by text."""
 
     filter: str | None = Field(
-        default=None, max_length=200, description="e.g. 'today', 'overdue', 'p1'"
+        default=None, max_length=200, description="e.g. 'today', 'overdue', 'p1', '#Work'"
     )
+    search: str | None = Field(default=None, max_length=200, description="Words in the task")
     limit: int = Field(default=25, ge=1, le=100)
 
 
@@ -42,8 +49,37 @@ class CreateTaskArgs(BaseModel):
     content: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=5000)
     due_date: date | None = None
+    due_string: str | None = Field(
+        default=None, max_length=120, description="Natural language, e.g. 'tomorrow 3pm'"
+    )
     priority: int = Field(default=1, ge=1, le=4, description="1 normal … 4 urgent")
     project_id: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=20)
+
+
+class UpdateTaskArgs(BaseModel):
+    """Change a task's text, description, due date, priority or labels. Omitted fields stay."""
+
+    task_id: str = Field(min_length=1, max_length=40)
+    content: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
+    due_date: date | None = None
+    due_string: str | None = Field(default=None, max_length=120)
+    priority: int | None = Field(default=None, ge=1, le=4)
+    labels: list[str] | None = Field(default=None, max_length=20)
+
+
+class MoveTaskArgs(BaseModel):
+    """Move a task into another project."""
+
+    task_id: str = Field(min_length=1, max_length=40)
+    project_id: str = Field(min_length=1, max_length=40)
+
+
+class TaskCreatedParams(BaseModel):
+    """New tasks anywhere, or only in one project."""
+
+    project_id: str | None = Field(default=None, max_length=40)
 
 
 class CompleteTaskArgs(BaseModel):
@@ -76,8 +112,8 @@ class TodoistProvider(RestOAuthProvider):
             ),
             PermissionSpec(scope="task:add", label="Create tasks", capability=Capability.create),
             PermissionSpec(
-                scope="data:read_write",
-                label="Complete and update tasks",
+                scope=WRITE_SCOPE,
+                label="Complete, update and move tasks",
                 required=False,
                 capability=Capability.update,
             ),
@@ -114,9 +150,61 @@ class TodoistProvider(RestOAuthProvider):
             for t in tasks[:limit]
         ]
 
+    def build_triggers(self) -> list[ProviderTrigger]:
+        async def task_created(
+            ctx: ProviderContext, p: TaskCreatedParams, since: datetime
+        ) -> list[TriggerEvent]:
+            params = {"project_id": p.project_id} if p.project_id else {}
+            async with self.http(ctx) as http:
+                tasks = (await http.get("/tasks", params=params)).json()
+            events = []
+            for t in tasks:
+                created = parse_time(t.get("created_at"))
+                if created is None or created <= since:
+                    continue
+                events.append(
+                    TriggerEvent(
+                        id=str(t["id"]),
+                        occurred_at=created,
+                        data={
+                            "task_id": t["id"],
+                            "content": t.get("content", ""),
+                            "description": t.get("description") or "",
+                            "due": (t.get("due") or {}).get("date"),
+                            "priority": t.get("priority"),
+                            "project_id": t.get("project_id"),
+                            "created_at": t.get("created_at"),
+                            "url": t.get("url"),
+                        },
+                    )
+                )
+            return events
+
+        return [
+            ProviderTrigger(
+                "task_created",
+                "New task",
+                "Starts when a task is added in Todoist (anywhere, or in one project).",
+                task_created,
+                TaskCreatedParams,
+                outputs=(
+                    F("content", "Task"),
+                    F("description", "Description", "long_text"),
+                    F("due", "Due", "date"),
+                    F("priority", "Priority", "number"),
+                    F("task_id", "Task ID"),
+                    F("url", "Link", "url"),
+                ),
+                scope="data:read",
+            )
+        ]
+
     def build_tools(self):  # type: ignore[no-untyped-def]
         async def list_tasks(ctx: ProviderContext, a: ListTasksArgs) -> dict[str, Any]:
-            params = {"filter": a.filter} if a.filter else {}
+            terms = [a.filter] if a.filter else []
+            if a.search:
+                terms.append(f"search: {a.search}")
+            params = {"filter": " & ".join(f"({t})" for t in terms)} if terms else {}
             async with self.http(ctx) as http:
                 tasks = (await http.get("/tasks", params=params)).json()
             return {
@@ -149,11 +237,49 @@ class TodoistProvider(RestOAuthProvider):
                 payload["description"] = a.description
             if a.due_date:
                 payload["due_date"] = a.due_date.isoformat()
+            elif a.due_string:
+                payload["due_string"] = a.due_string
             if a.project_id:
                 payload["project_id"] = a.project_id
+            if a.labels:
+                payload["labels"] = a.labels
             async with self.http(ctx) as http:
                 task = (await http.post("/tasks", json=payload)).json()
             return {"task_id": task.get("id"), "url": task.get("url"), "content": a.content}
+
+        async def update_task(ctx: ProviderContext, a: UpdateTaskArgs) -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                key: getattr(a, key)
+                for key in ("content", "description", "priority", "labels")
+                if getattr(a, key) is not None
+            }
+            if a.due_date:
+                payload["due_date"] = a.due_date.isoformat()
+            elif a.due_string:
+                payload["due_string"] = a.due_string
+            if not payload:
+                raise ProviderError(ProviderErrorKind.invalid_request, "Nothing to change.")
+            async with self.http(ctx) as http:
+                task = (await http.post(f"/tasks/{a.task_id}", json=payload)).json()
+            return {
+                "task_id": a.task_id,
+                "content": task.get("content"),
+                "due": (task.get("due") or {}).get("date"),
+                "priority": task.get("priority"),
+                "url": task.get("url"),
+            }
+
+        async def move_task(ctx: ProviderContext, a: MoveTaskArgs) -> dict[str, Any]:
+            command = {
+                "type": "item_move",
+                "uuid": str(uuid.uuid4()),
+                "args": {"id": a.task_id, "project_id": a.project_id},
+            }
+            async with self.http(ctx) as http:
+                result = (await http.post(SYNC_URL, json={"commands": [command]})).json()
+            if (result.get("sync_status") or {}).get(command["uuid"]) != "ok":
+                raise ProviderError(ProviderErrorKind.invalid_request, "Todoist refused the move.")
+            return {"task_id": a.task_id, "project_id": a.project_id}
 
         async def complete_task(ctx: ProviderContext, a: CompleteTaskArgs) -> dict[str, Any]:
             async with self.http(ctx) as http:
@@ -168,6 +294,28 @@ class TodoistProvider(RestOAuthProvider):
             if task.get("content") != a.content:
                 return Verification.failed("Task exists but its content differs")
             return Verification.verified("Task is in Todoist")
+
+        async def verify_update_task(
+            ctx: ProviderContext, a: UpdateTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                task = (await http.get(f"/tasks/{a.task_id}")).json()
+            if a.content is not None and task.get("content") != a.content:
+                return Verification.failed("The task's text did not change")
+            if a.priority is not None and task.get("priority") != a.priority:
+                return Verification.failed("The task's priority did not change")
+            if a.due_date and (task.get("due") or {}).get("date") != a.due_date.isoformat():
+                return Verification.failed("The task's due date did not change")
+            return Verification.verified("Task updated in Todoist")
+
+        async def verify_move_task(
+            ctx: ProviderContext, a: MoveTaskArgs, result: dict[str, Any]
+        ) -> Verification:
+            async with self.http(ctx) as http:
+                task = (await http.get(f"/tasks/{a.task_id}")).json()
+            if str(task.get("project_id")) != a.project_id:
+                return Verification.failed("The task is still in its old project")
+            return Verification.verified("Task moved in Todoist")
 
         async def verify_complete_task(
             ctx: ProviderContext, a: CompleteTaskArgs, result: dict[str, Any]
@@ -219,6 +367,28 @@ class TodoistProvider(RestOAuthProvider):
                 create_task,
                 lambda a: f"Create Todoist task “{a.content}”",
                 verify=verify_create_task,
+                outputs=(F("task_id", "Task ID"), F("url", "Link", "url"), F("content", "Task")),
+            ),
+            ProviderTool(
+                "update_task",
+                "Change a Todoist task's text, due date, priority or labels.",
+                UpdateTaskArgs,
+                Capability.update,
+                update_task,
+                lambda a: f"Update Todoist task {a.task_id}",
+                verify=verify_update_task,
+                scope=WRITE_SCOPE,
+                outputs=(F("task_id", "Task ID"), F("due", "Due", "date"), F("url", "Link", "url")),
+            ),
+            ProviderTool(
+                "move_task",
+                "Move a Todoist task to another project.",
+                MoveTaskArgs,
+                Capability.update,
+                move_task,
+                lambda a: f"Move Todoist task {a.task_id} to another project",
+                verify=verify_move_task,
+                scope=WRITE_SCOPE,
             ),
             ProviderTool(
                 "complete_task",
@@ -228,5 +398,6 @@ class TodoistProvider(RestOAuthProvider):
                 complete_task,
                 lambda a: f"Complete Todoist task {a.task_id}",
                 verify=verify_complete_task,
+                scope=WRITE_SCOPE,
             ),
         ]

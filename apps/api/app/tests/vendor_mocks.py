@@ -134,8 +134,16 @@ class VendorMock:
                 },
             )
         if path == "/api/conversations.history":
-            ts = self._form(r).get("latest") or "1.0"
+            form = self._form(r)
+            if "slack_history" in self.state:
+                # Scripted channel (newest first, like Slack), honouring `oldest`.
+                oldest = float(form.get("oldest") or 0)
+                messages = [m for m in self.state["slack_history"] if float(m["ts"]) > oldest]
+                return _json(200, {"ok": True, "messages": messages})
+            ts = form.get("latest") or "1.0"
             return _json(200, {"ok": True, "messages": [{"ts": ts, "user": "U2", "text": "hello"}]})
+        if path == "/api/users.info":
+            return _json(200, {"ok": True, "user": {"profile": {"display_name": "sam"}}})
         if path == "/api/chat.postMessage":
             return _json(200, {"ok": True, "ts": "2.0", "channel": self._form(r).get("channel")})
         return None
@@ -570,7 +578,7 @@ class VendorMock:
                     "access_token": "db-token",
                     "refresh_token": "db-refresh",
                     "expires_in": 14400,
-                    "scope": "account_info.read files.metadata.read files.content.read",
+                    "scope": "account_info.read files.metadata.read files.content.read files.content.write",
                 },
             )
         if r.headers.get("authorization") != "Bearer db-token":

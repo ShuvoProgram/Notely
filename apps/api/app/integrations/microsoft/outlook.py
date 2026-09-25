@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -19,6 +19,7 @@ from app.integrations.base.provider import (
     ProviderManifest,
 )
 from app.integrations.base.rest import ProviderTool
+from app.integrations.base.triggers import ProviderTrigger, TriggerEvent, parse_time
 from app.integrations.microsoft.base import MicrosoftGraphProvider
 
 
@@ -31,6 +32,32 @@ class SearchMailArgs(BaseModel):
 
     query: str = Field(min_length=1, max_length=200)
     limit: int = Field(default=10, ge=1, le=25)
+
+
+class ListMailArgs(BaseModel):
+    """List recent emails, newest first: e.g. unread mail received since today."""
+
+    folder: Literal["inbox", "sentitems", "drafts", "archive"] = "inbox"
+    unread_only: bool = False
+    received_after: datetime | None = Field(
+        default=None, description="Only mail received after this moment (ISO 8601)"
+    )
+    from_address: EmailStr | None = None
+    limit: int = Field(default=15, ge=1, le=50)
+
+
+class FindPeopleArgs(BaseModel):
+    """Find people you email by name, to get their address."""
+
+    query: str = Field(min_length=1, max_length=120)
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class EmailReceivedParams(BaseModel):
+    """Which new emails start the automation."""
+
+    folder: Literal["inbox", "archive"] = "inbox"
+    from_address: EmailStr | None = Field(default=None, description="Only mail from this sender")
 
 
 class ReadMailArgs(BaseModel):
@@ -79,6 +106,12 @@ def _snippet(m: dict[str, Any]) -> str:
     return f"{sender}: {m.get('bodyPreview', '')}"[:240]
 
 
+MAIL_WRITE = "Mail.ReadWrite"
+MAIL_SEND = "Mail.Send"
+CALENDAR_WRITE = "Calendars.ReadWrite"
+PEOPLE_READ = "People.Read"
+
+
 def _recipients(addresses: list[str]) -> list[dict[str, Any]]:
     return [{"emailAddress": {"address": a}} for a in addresses]
 
@@ -111,22 +144,29 @@ class OutlookProvider(MicrosoftGraphProvider):
             ),
             PermissionSpec(scope="offline_access", label="Stay connected (refresh tokens)"),
             PermissionSpec(
-                scope="Mail.ReadWrite",
+                scope=MAIL_WRITE,
                 label="Create drafts",
                 required=False,
                 capability=Capability.draft,
             ),
             PermissionSpec(
-                scope="Mail.Send",
+                scope=MAIL_SEND,
                 label="Send mail as you",
                 required=False,
                 capability=Capability.send,
             ),
             PermissionSpec(
-                scope="Calendars.ReadWrite",
+                scope=CALENDAR_WRITE,
                 label="Create calendar events",
                 required=False,
                 capability=Capability.schedule,
+            ),
+            PermissionSpec(
+                scope=PEOPLE_READ,
+                label="Look up people you work with",
+                description="Lets the assistant find an address from a name.",
+                required=False,
+                capability=Capability.read,
             ),
         ],
     )
@@ -155,6 +195,75 @@ class OutlookProvider(MicrosoftGraphProvider):
             for m in self.graph_page(body)
         ]
 
+    def build_triggers(self) -> list[ProviderTrigger]:
+        async def email_received(
+            ctx: ProviderContext, p: EmailReceivedParams, since: datetime
+        ) -> list[TriggerEvent]:
+            clauses = [
+                f"receivedDateTime gt {since.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+            ]
+            if p.from_address:
+                safe = str(p.from_address).replace("'", "''")
+                clauses.append(f"from/emailAddress/address eq '{safe}'")
+            async with self.http(ctx) as http:
+                body = (
+                    await http.get(
+                        f"/me/mailFolders/{p.folder}/messages",
+                        params={
+                            "$filter": " and ".join(clauses),
+                            "$orderby": "receivedDateTime desc",
+                            "$top": 25,
+                            "$select": "id,subject,from,receivedDateTime,bodyPreview,webLink,"
+                            "importance,hasAttachments",
+                        },
+                    )
+                ).json()
+            events = []
+            for m in self.graph_page(body):
+                received = parse_time(m.get("receivedDateTime"))
+                if received is None:
+                    continue
+                sender = (m.get("from") or {}).get("emailAddress") or {}
+                events.append(
+                    TriggerEvent(
+                        id=str(m["id"]),
+                        occurred_at=received,
+                        data={
+                            "message_id": m["id"],
+                            "subject": m.get("subject") or "(no subject)",
+                            "from_address": sender.get("address"),
+                            "from_name": sender.get("name"),
+                            "preview": m.get("bodyPreview") or "",
+                            "received_at": m.get("receivedDateTime"),
+                            "important": m.get("importance") == "high",
+                            "has_attachments": bool(m.get("hasAttachments")),
+                            "url": m.get("webLink"),
+                        },
+                    )
+                )
+            return events
+
+        return [
+            ProviderTrigger(
+                "email_received",
+                "New email received",
+                "Starts when a new email arrives in your Outlook inbox.",
+                email_received,
+                EmailReceivedParams,
+                outputs=(
+                    F("subject", "Subject"),
+                    F("from_address", "From (address)"),
+                    F("from_name", "From (name)"),
+                    F("preview", "Preview", "long_text"),
+                    F("received_at", "Received", "date"),
+                    F("important", "Marked important", "boolean"),
+                    F("message_id", "Email ID"),
+                    F("url", "Link", "url"),
+                ),
+                scope="Mail.Read",
+            )
+        ]
+
     def build_tools(self):  # type: ignore[no-untyped-def]
         async def search_mail(ctx: ProviderContext, a: SearchMailArgs) -> dict[str, Any]:
             hits = await self.search(ctx, a.query, a.limit)
@@ -163,6 +272,78 @@ class OutlookProvider(MicrosoftGraphProvider):
                 "sources": [
                     self.source(object_id=h["id"], title=h["title"], url=h["url"]) for h in hits
                 ],
+            }
+
+        async def list_mail(ctx: ProviderContext, a: ListMailArgs) -> dict[str, Any]:
+            # $filter + $orderby (not $search, which Graph refuses to combine with either).
+            clauses = []
+            if a.unread_only:
+                clauses.append("isRead eq false")
+            if a.received_after:
+                when = a.received_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                clauses.append(f"receivedDateTime ge {when}")
+            if a.from_address:
+                safe = str(a.from_address).replace("'", "''")
+                clauses.append(f"from/emailAddress/address eq '{safe}'")
+            params: dict[str, Any] = {
+                "$top": a.limit,
+                "$orderby": "receivedDateTime desc",
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead,importance,webLink",
+            }
+            if clauses:
+                params["$filter"] = " and ".join(clauses)
+            async with self.http(ctx) as http:
+                body = (
+                    await http.get(f"/me/mailFolders/{a.folder}/messages", params=params)
+                ).json()
+            messages = self.graph_page(body)
+            return {
+                "emails": [
+                    {
+                        "id": m["id"],
+                        "subject": self.wrap(m.get("subject") or "(no subject)", ref=m["id"]),
+                        "from": ((m.get("from") or {}).get("emailAddress") or {}).get("address"),
+                        "received_at": m.get("receivedDateTime"),
+                        "unread": not m.get("isRead", True),
+                        "important": m.get("importance") == "high",
+                        "preview": self.wrap(m.get("bodyPreview") or "", ref=m["id"]),
+                        "url": m.get("webLink"),
+                    }
+                    for m in messages
+                ],
+                "sources": [
+                    self.source(
+                        object_id=m["id"],
+                        title=m.get("subject") or "(no subject)",
+                        url=m.get("webLink"),
+                    )
+                    for m in messages
+                ],
+            }
+
+        async def find_people(ctx: ProviderContext, a: FindPeopleArgs) -> dict[str, Any]:
+            async with self.http(ctx) as http:
+                body = (
+                    await http.get(
+                        "/me/people",
+                        params={
+                            "$search": f'"{a.query}"',
+                            "$top": a.limit,
+                            "$select": "displayName,scoredEmailAddresses,jobTitle",
+                        },
+                    )
+                ).json()
+            return {
+                "people": [
+                    {
+                        "name": p.get("displayName"),
+                        "email": next(
+                            (e.get("address") for e in p.get("scoredEmailAddresses") or []), None
+                        ),
+                        "title": p.get("jobTitle"),
+                    }
+                    for p in self.graph_page(body)
+                ]
             }
 
         async def read_mail(ctx: ProviderContext, a: ReadMailArgs) -> dict[str, Any]:
@@ -224,7 +405,7 @@ class OutlookProvider(MicrosoftGraphProvider):
             return {"sent": True, "to": list(a.to), "subject": a.subject}
 
         async def list_events(ctx: ProviderContext, a: ListEventsArgs) -> dict[str, Any]:
-            from datetime import UTC, timedelta
+            from datetime import timedelta
 
             start = a.start or datetime.now(UTC)
             end = a.end or start + timedelta(days=7)
@@ -334,6 +515,37 @@ class OutlookProvider(MicrosoftGraphProvider):
                 outputs=(listing("results", "Emails", *HIT_FIELDS),),
             ),
             ProviderTool(
+                "list_mail",
+                "List recent Outlook emails, e.g. unread ones received today.",
+                ListMailArgs,
+                Capability.read,
+                list_mail,
+                lambda a: (
+                    "List " + ("unread " if a.unread_only else "") + f"Outlook mail in {a.folder}"
+                ),
+                outputs=(
+                    listing(
+                        "emails",
+                        "Emails",
+                        F("subject", "Subject"),
+                        F("from", "From"),
+                        F("received_at", "Received", "date"),
+                        F("preview", "Preview", "long_text"),
+                        F("url", "Link", "url"),
+                    ),
+                ),
+            ),
+            ProviderTool(
+                "find_people",
+                "Find someone's email address by name.",
+                FindPeopleArgs,
+                Capability.read,
+                find_people,
+                lambda a: f"Look up “{a.query}” in Outlook",
+                scope=PEOPLE_READ,
+                outputs=(listing("people", "People", F("name", "Name"), F("email", "Email")),),
+            ),
+            ProviderTool(
                 "read_mail",
                 "Read an email.",
                 ReadMailArgs,
@@ -355,6 +567,8 @@ class OutlookProvider(MicrosoftGraphProvider):
                 draft_mail,
                 lambda a: f"Draft email to {', '.join(a.to)}: “{a.subject}”",
                 verify=verify_draft_mail,
+                scope=MAIL_WRITE,
+                outputs=(F("draft_id", "Draft ID"), F("web_url", "Link", "url")),
             ),
             ProviderTool(
                 "send_mail",
@@ -364,6 +578,7 @@ class OutlookProvider(MicrosoftGraphProvider):
                 send_mail,
                 lambda a: f"Send email to {', '.join(a.to)}: “{a.subject}”",
                 verify=verify_send_mail,
+                scope=MAIL_SEND,
             ),
             ProviderTool(
                 "list_events",
@@ -392,5 +607,7 @@ class OutlookProvider(MicrosoftGraphProvider):
                 create_event,
                 lambda a: f"Create event “{a.subject}” at {a.start.isoformat(timespec='minutes')}",
                 verify=verify_create_event,
+                scope=CALENDAR_WRITE,
+                outputs=(F("event_id", "Event ID"), F("web_url", "Link", "url")),
             ),
         ]

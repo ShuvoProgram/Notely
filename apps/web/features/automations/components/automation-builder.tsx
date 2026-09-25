@@ -46,6 +46,7 @@ import {
   removeStep,
   scheduleText,
   stepTitle,
+  triggerOptions,
   usersOf,
   type DataSource,
 } from "../lib";
@@ -53,6 +54,7 @@ import type { ActionSpec, ActionStep, Automation, AutomationInput, Catalog, Cond
 import { ActionPicker } from "./action-picker";
 import { AIAssist } from "./ai-assist";
 import { RunHistory } from "./run-panel";
+import { TriggerDataContext } from "./data-picker";
 import { ScheduleEditor } from "./schedule-editor";
 import { StepList, type BuilderContext, type InsertKind, type Slot } from "./step-list";
 
@@ -208,7 +210,13 @@ function Builder({
   };
 
   const labelsVersion = `${catalog.actions.length}:${Object.keys(samples).join(",")}`;
-  const labelFor = React.useCallback((path: string) => referenceLabel(path, form.workflow, catalog, samples), [form.workflow, catalog, samples]);
+  // What {{trigger.*}} means here: schedule basics, or the fields of the event that starts the run.
+  const runData = React.useMemo(() => {
+    const options = triggerOptions(form, catalog);
+    const trigger = form.schedule_kind === "event" ? catalog.triggers?.find((t) => t.app === form.schedule_config.provider && t.name === form.schedule_config.trigger) : undefined;
+    return { heading: trigger ? `${trigger.app_name} · ${trigger.label}` : "This run", options };
+  }, [form, catalog]);
+  const labelFor = React.useCallback((path: string) => referenceLabel(path, form.workflow, catalog, samples, runData.options), [form.workflow, catalog, samples, runData]);
 
   const showError = (error: unknown) => {
     if (error instanceof ApiError && Array.isArray(error.details.issues)) {
@@ -241,7 +249,7 @@ function Builder({
     onSuccess: (saved) => {
       setForm((f) => ({ ...f, enabled: saved.enabled }));
       void queryClient.invalidateQueries({ queryKey: ["automations"] });
-      toast.success(saved.enabled ? `On — ${scheduleText(saved).toLowerCase()}` : "Turned off");
+      toast.success(saved.enabled ? `On — ${scheduleText(saved, catalog).toLowerCase()}` : "Turned off");
     },
     onError: showError,
   });
@@ -380,6 +388,7 @@ function Builder({
   const stepCount = form.workflow.steps.length;
 
   return (
+    <TriggerDataContext.Provider value={runData}>
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
@@ -393,7 +402,7 @@ function Builder({
             placeholder="Name this automation"
             className="block w-full truncate rounded-md bg-transparent text-2xl font-semibold tracking-tight outline-none placeholder:text-tertiary focus-visible:ring-2 focus-visible:ring-ring/40"
           />
-          <p className="text-sm text-muted-foreground">{scheduleText(form)}{form.enabled ? " · On" : " · Off"}</p>
+          <p className="text-sm text-muted-foreground">{scheduleText(form, catalog)}{form.enabled ? " · On" : " · Off"}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="mr-1 flex items-center gap-2 text-sm">
@@ -451,7 +460,7 @@ function Builder({
         <div className={cn("min-w-0 space-y-4", panel !== "steps" && "hidden lg:block")}>
           <section className="glass rounded-2xl p-4" aria-labelledby="when-title">
             <h2 id="when-title" className="mb-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">When this happens</h2>
-            <ScheduleEditor value={form} onChange={(schedule) => change(schedule)} />
+            <ScheduleEditor value={form} onChange={(schedule) => change(schedule)} triggers={catalog.triggers} />
           </section>
 
           {issues.length ? (
@@ -523,6 +532,7 @@ function Builder({
         onConfirm={() => remove.mutate()}
       />
     </div>
+    </TriggerDataContext.Provider>
   );
 }
 

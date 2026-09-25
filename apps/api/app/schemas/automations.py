@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.automation.model import Workflow
 
-ScheduleKind = Literal["once", "daily", "weekly", "monthly", "custom", "interval", "manual"]
+ScheduleKind = Literal[
+    "once", "daily", "weekly", "monthly", "custom", "interval", "manual", "event"
+]
 
 
 class AutomationIn(BaseModel):
@@ -75,6 +77,8 @@ class AutomationOut(BaseModel):
     enabled: bool
     status: str
     consecutive_failures: int
+    # Event triggers only: {status, last_checked_at, last_error, runs_started}.
+    trigger_status: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
     apps: list[str] = Field(default_factory=list)

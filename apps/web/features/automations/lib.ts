@@ -9,6 +9,7 @@ import type {
   RunStatus,
   Schedule,
   Step,
+  TriggerSpec,
   Workflow,
 } from "./types";
 
@@ -28,10 +29,21 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-export function scheduleText(s: Pick<Schedule, "schedule_kind" | "schedule_config" | "starts_at">): string {
+/** The trigger an event automation is configured with (undefined when not in the catalog). */
+export function findTrigger(config: Schedule["schedule_config"] | undefined, catalog: Catalog | undefined): TriggerSpec | undefined {
+  if (!config?.provider || !config.trigger) return undefined;
+  return catalog?.triggers?.find((t) => t.app === config.provider && t.name === config.trigger);
+}
+
+export function scheduleText(s: Pick<Schedule, "schedule_kind" | "schedule_config" | "starts_at">, catalog?: Catalog): string {
   const cfg = s.schedule_config ?? {};
   const at = formatClock(cfg.time);
   switch (s.schedule_kind) {
+    case "event": {
+      const trigger = findTrigger(cfg, catalog);
+      if (trigger) return `When: ${trigger.label} · ${trigger.app_name}`;
+      return cfg.trigger ? `When: ${humanKey(cfg.trigger)}` : "When something happens in an app";
+    }
     case "manual":
       return "Only when you run it";
     case "interval": {
@@ -310,10 +322,28 @@ export const TRIGGER_OPTIONS: DataOption[] = [
   { path: "automation.name", label: "Automation name", type: "text" },
 ];
 
+/** What `{{trigger.*}}` offers: the schedule basics, or the fields of the event that started the run. */
+export function triggerOptions(schedule: Pick<Schedule, "schedule_kind" | "schedule_config"> | undefined, catalog: Catalog | undefined): DataOption[] {
+  const trigger = schedule?.schedule_kind === "event" ? findTrigger(schedule.schedule_config, catalog) : undefined;
+  if (!trigger) return TRIGGER_OPTIONS;
+  return [
+    ...trigger.outputs.map((o) => ({ path: `trigger.${o.key}`, label: o.label, type: o.type })),
+    { path: "automation.name", label: "Automation name", type: "text" },
+  ];
+}
+
 /** "Gmail · Emails › First email · Subject" for a `steps.x.output…` reference. */
-export function referenceLabel(path: string, workflow: Workflow, catalog: Catalog | undefined, samples: Record<string, unknown> = {}): string {
-  const trigger = TRIGGER_OPTIONS.find((o) => o.path === path);
+export function referenceLabel(
+  path: string,
+  workflow: Workflow,
+  catalog: Catalog | undefined,
+  samples: Record<string, unknown> = {},
+  triggers: DataOption[] = TRIGGER_OPTIONS,
+): string {
+  const trigger = triggers.find((o) => o.path === path) ?? TRIGGER_OPTIONS.find((o) => o.path === path);
   if (trigger) return trigger.label;
+  // An event trigger field whose trigger is not in view (e.g. a card without the catalog).
+  if (path.startsWith("trigger.")) return `Trigger › ${humanKey(path.slice("trigger.".length))}`;
   const match = /^steps\.([a-z][a-z0-9_]*)\.output(?:\.(.*))?$/.exec(path);
   if (!match) return path;
   const step = findStep(workflow.steps, match[1]!);

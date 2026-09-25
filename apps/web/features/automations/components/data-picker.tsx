@@ -11,6 +11,12 @@ import { TRIGGER_OPTIONS, type DataOption, type DataSource } from "../lib";
 import type { Catalog } from "../types";
 import { AppIcon } from "./app-icon";
 
+/**
+ * What the run itself offers as data: the schedule basics, or the fields of the event that
+ * started it ("Subject", "From" …). The builder provides it; every picker below reads it.
+ */
+export const TriggerDataContext = React.createContext<{ heading: string; options: DataOption[] }>({ heading: "This run", options: TRIGGER_OPTIONS });
+
 /** "Insert data": every piece of data earlier steps produce, grouped by step, in plain words. */
 export function DataPicker({
   sources,
@@ -28,6 +34,7 @@ export function DataPicker({
   trigger?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
+  const run = React.useContext(TriggerDataContext);
   const pick = (option: DataOption) => {
     onPick(option);
     setOpen(false);
@@ -76,8 +83,8 @@ export function DataPicker({
                 </CommandGroup>
               );
             })}
-            <CommandGroup heading="This run">
-              {TRIGGER_OPTIONS.filter((o) => !filter || filter(o)).map((option) => (
+            <CommandGroup heading={run.heading}>
+              {run.options.filter((o) => !filter || filter(o)).map((option) => (
                 <CommandItem key={option.path} value={`run ${option.label}`} onSelect={() => pick(option)}>
                   <Braces className="size-3.5 text-muted-foreground" aria-hidden />
                   {option.label}

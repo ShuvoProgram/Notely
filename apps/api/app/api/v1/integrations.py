@@ -24,7 +24,9 @@ from app.core.oauth import callback_uri, consume_oauth_state
 from app.core.rate_limit import rate_limit
 from app.core.responses import Envelope, ok
 from app.db.base import utcnow
+from app.integrations.base.capabilities import risk_for
 from app.integrations.base.provider import IntegrationProvider
+from app.integrations.base.rest import RestOAuthProvider
 from app.integrations.registry import get_provider
 from app.models.integration import UserConnection, WebhookEvent
 from app.schemas.integrations import (
@@ -105,9 +107,59 @@ async def provider_detail(
     tools = entry.connection.metadata_.get("tools", []) if entry.connection else []
     return ok(
         ProviderDetailOut(
-            **base, local_item_count=count, tools=tools if isinstance(tools, list) else []
+            **base,
+            local_item_count=count,
+            tools=tools if isinstance(tools, list) else [],
+            abilities=abilities(entry.provider, entry.connection),
         )
     )
+
+
+def abilities(
+    provider: IntegrationProvider, connection: UserConnection | None
+) -> list[dict[str, Any]]:
+    """Exactly what Notely can do with this app, from its implemented tools and triggers (so the
+    page can never advertise something that doesn't exist). Each names the optional permission it
+    needs, and, once connected, whether that permission was granted."""
+    if not isinstance(provider, RestOAuthProvider):
+        return []  # MCP-backed apps describe their tools only once connected (see `tools`)
+    labels = {p.scope: p.label for p in provider.manifest.permissions if not p.required}
+    granted = (
+        list(connection.scopes or []) if connection is not None and connection.is_usable else None
+    )
+
+    def entry(
+        kind: str, label: str, risk: str, scope: str | None, available: bool
+    ) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "label": label,
+            "risk": risk,
+            "permission": labels.get(scope or ""),
+            "granted": None if granted is None else available,
+        }
+
+    out = [
+        entry(
+            "action",
+            tool.description,
+            risk_for(tool.capability).value,
+            tool.scope,
+            provider.tool_available(tool, granted or []),
+        )
+        for tool in provider.build_tools()
+    ]
+    out += [
+        entry(
+            "trigger",
+            f"{trigger.label}: {trigger.description}",
+            "read",
+            trigger.scope,
+            provider.tool_available(trigger, granted or []),
+        )
+        for trigger in provider.build_triggers()
+    ]
+    return out
 
 
 # --- connections --------------------------------------------------------------------------------

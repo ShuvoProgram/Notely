@@ -68,7 +68,17 @@ export function describeConnection(conn: Connection | null, providerName: string
       };
     }
     case "expired":
-      return { state: "attention", label: "Connection needs attention", shortLabel: "Needs attention", detail: "Authorization expired", icon: AlertTriangle, tone: "text-warning", action: "reconnect" };
+      // The vendor rejected the refresh too: only signing in again helps. Automations and
+      // settings are kept, so say so plainly instead of a generic error.
+      return {
+        state: "attention",
+        label: "Session expired",
+        shortLabel: "Session expired",
+        detail: "Reconnect to continue. Your automations and settings stay as they are.",
+        icon: AlertTriangle,
+        tone: "text-warning",
+        action: "reconnect",
+      };
     case "needs_attention":
       return {
         state: "attention",

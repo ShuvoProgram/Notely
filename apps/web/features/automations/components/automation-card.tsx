@@ -68,7 +68,7 @@ export function AutomationCard({ automation, catalog }: { automation: Automation
         <Link href={href} className="min-w-0 flex-1 rounded-md focus-visible:ring-2 focus-visible:ring-ring/40">
           {/* Long names wrap (two lines, then clipped with an ellipsis); unbroken words break too. */}
           <h3 className="line-clamp-2 font-semibold [overflow-wrap:anywhere]">{automation.name}</h3>
-          <p className="text-sm text-muted-foreground">{scheduleText(automation)}</p>
+          <p className="text-sm text-muted-foreground">{scheduleText(automation, catalog)}</p>
         </Link>
         <label className="flex shrink-0 items-center gap-2 text-xs font-medium">
           <span className={automation.enabled ? "text-success" : "text-muted-foreground"}>{automation.enabled ? "ON" : "OFF"}</span>
@@ -99,7 +99,19 @@ export function AutomationCard({ automation, catalog }: { automation: Automation
           <p className="text-muted-foreground">Hasn&apos;t run yet</p>
         )}
         {automation.enabled && automation.next_run_at ? (
-          <p className="mt-1 text-xs text-muted-foreground">Next run {relativeTime(automation.next_run_at)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {automation.schedule_kind === "event" ? "Next check" : "Next run"} {relativeTime(automation.next_run_at)}
+          </p>
+        ) : null}
+        {automation.trigger_status?.status === "needs_attention" && automation.trigger_status.last_error ? (
+          <p className="mt-1 text-xs text-destructive [overflow-wrap:anywhere]">
+            {automation.trigger_status.last_error}{" "}
+            {automation.schedule_config.provider ? (
+              <Link href={`/app/settings/connections/${automation.schedule_config.provider}`} className="font-medium underline underline-offset-2">
+                Fix
+              </Link>
+            ) : null}
+          </p>
         ) : null}
         {automation.consecutive_failures >= 2 ? (
           <p className="mt-1 text-xs text-destructive">Failed {automation.consecutive_failures} times in a row</p>

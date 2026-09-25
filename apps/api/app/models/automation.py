@@ -65,6 +65,11 @@ class Automation(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Scheduled runs that failed in a row; the scheduler pauses the automation at a limit.
     consecutive_failures: Mapped[int] = mapped_column(nullable=False, default=0)
+    # Event triggers only (schedule_kind "event"): high-water mark, recently seen item ids and
+    # the outcome of the last check. See app/automation/triggers.py.
+    trigger_state: Mapped[dict[str, Any]] = mapped_column(
+        JSONType, nullable=False, default=dict, server_default="{}"
+    )
 
 
 class AutomationTemplate(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):

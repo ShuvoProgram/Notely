@@ -23,6 +23,7 @@ from app.automation.actions import ActionContext, ActionDefinition, ActionError
 from app.automation.catalog import Catalog, build_catalog
 from app.automation.model import ActionStep, Workflow, iter_steps
 from app.automation.native import chat_model, parse_json_reply
+from app.automation.triggers import MIN_EVERY_MINUTES, parse_config
 from app.automation.validation import normalise, validate
 from app.core.exceptions import ValidationFailed
 from app.core.logging import get_logger
@@ -33,16 +34,18 @@ from app.services.note_service import NoteService
 log = get_logger(__name__)
 
 _DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-_KINDS = {"once", "daily", "weekly", "monthly", "custom", "interval", "manual"}
+_KINDS = {"once", "daily", "weekly", "monthly", "custom", "interval", "manual", "event"}
 
 FORMAT = """
 Reply with ONE JSON object and nothing else:
 {
   "name": "short name",
   "description": "one sentence",
-  "schedule": {"kind": "daily|weekly|monthly|once|interval|custom|manual",
+  "schedule": {"kind": "daily|weekly|monthly|once|interval|custom|manual|event",
                "time": "HH:MM", "days": [0-6, Monday=0], "day": 1-31,
-               "every_minutes": 15-1440, "interval_days": N, "starts_at": "ISO datetime"},
+               "every_minutes": 15-1440, "interval_days": N, "starts_at": "ISO datetime",
+               "trigger": "<trigger id from TRIGGERS, only for kind event>",
+               "params": {"<trigger setting>": "value"}},
   "steps": [ ...steps... ],
   "missing_apps": ["app ids from NOT CONNECTED that the request needs"],
   "unsupported": [{"request": "what the user asked", "reason": "why Notely can't",
@@ -61,6 +64,8 @@ OP = equals | not_equals | contains | not_contains | greater_than | less_than | 
      not_exists | is_empty | is_not_empty | is_true | is_false | before | after
 Data from earlier steps: "{{steps.<id>.output.<field>}}"; a list's size is "<list>.count";
 the first item is "<list>.0.<field>". Also "{{trigger.fired_at}}", "{{trigger.previous_run_at}}".
+With an event trigger, the item that started the run is "{{trigger.<field>}}" (fields listed as
+"gives" under TRIGGERS), e.g. "{{trigger.subject}}".
 """
 
 RULES = """
@@ -80,9 +85,13 @@ Rules:
 7. For a note input use the id of one of the user's NOTES. If the user named a note that isn't
    listed, use notely.create_note if they asked to create it; otherwise leave "note" empty and ask
    which note to use.
-8. "Every weekday" = weekly with days [0,1,2,3,4]. Times are in the user's time zone. No trigger
-   other than a schedule or manual exists; for "when X happens" use an interval schedule that
-   checks for new items and say so in description.
+8. "Every weekday" = weekly with days [0,1,2,3,4]. Times are in the user's time zone. For "when
+   X happens in <app>" (a new email, message, task, file, a meeting ending) use schedule kind
+   "event" with a trigger id from TRIGGERS and its settings in "params"; the run then gets that
+   one item as {{trigger.<field>}}. Conditions on the item ("only if it mentions invoice") are a
+   filter on {{trigger.<field>}}. If the trigger's app is not connected, still use it and list
+   the app in missing_apps. Only when no trigger fits, use an interval schedule that searches
+   for new items, and say so in the description.
 9. Keep it minimal: no steps the user didn't ask for. Never set "approval" — Notely decides.
 10. A scheduled automation runs again and again. Never create a new spreadsheet, document, page
    or note on every run just to write into it: write into one existing place (a search/find
@@ -111,10 +120,46 @@ def _compact(action: ActionDefinition, catalog: Catalog) -> dict[str, Any]:
     }
 
 
+def _triggers(catalog: Catalog) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": t["id"],
+            "app": t["app_name"],
+            "when": t["label"],
+            "connected": t["available"],
+            "settings": {p["key"]: p["type"] + ("*" if p["required"] else "") for p in t["params"]},
+            "gives": [o["key"] for o in t["outputs"]],
+        }
+        for t in catalog.triggers
+    ]
+
+
+def _event_schedule(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    trigger_id = str(raw.get("trigger") or "")
+    provider, _, name = trigger_id.partition(".")
+    try:
+        config = parse_config(
+            {
+                "provider": provider,
+                "trigger": name,
+                "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
+                "every_minutes": raw.get("every_minutes") or MIN_EVERY_MINUTES,
+            }
+        )
+    except ValidationFailed as exc:
+        if not name:
+            return {"schedule_kind": "event"}, ["What should start this automation?"]
+        partial = {"provider": provider, "trigger": name, "params": raw.get("params") or {}}
+        return {"schedule_kind": "event", "schedule_config": partial}, [exc.message]
+    return {"schedule_kind": "event", "schedule_config": config.to_dict()}, []
+
+
 def _schedule(raw: Any) -> tuple[dict[str, Any], list[str]]:
     if not isinstance(raw, dict):
         return {}, []
     kind = str(raw.get("kind") or "").lower()
+    if kind == "event":
+        return _event_schedule(raw)
     if kind in ("weekday", "weekdays"):
         kind, raw = "weekly", {**raw, "days": [0, 1, 2, 3, 4]}
     if kind not in _KINDS:
@@ -232,6 +277,7 @@ class AutomationPlanner:
                 "NOT CONNECTED actions: " + json.dumps(locked, ensure_ascii=False),
                 "OTHER ACTIONS (ids only; use one only if the request clearly needs it): "
                 + json.dumps(others, ensure_ascii=False),
+                "TRIGGERS: " + json.dumps(_triggers(catalog), ensure_ascii=False),
                 "NOTES: "
                 + json.dumps(
                     [{"id": str(n.id), "title": n.title} for n in notes], ensure_ascii=False
@@ -357,6 +403,9 @@ class AutomationPlanner:
             }
         questions += [str(q) for q in parsed.get("questions") or [] if str(q).strip()][:4]
         missing_ids = [str(a) for a in parsed.get("missing_apps") or []]
+        trigger_app = (schedule.get("schedule_config") or {}).get("provider")
+        if schedule.get("schedule_kind") == "event" and trigger_app:
+            missing_ids.append(str(trigger_app))  # dropped below when it is connected
         unsupported = [
             Unsupported(
                 request=str(u.get("request") or ""),

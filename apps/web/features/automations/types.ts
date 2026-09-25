@@ -62,11 +62,21 @@ export interface Workflow {
   steps: Step[];
 }
 
-export type ScheduleKind = "once" | "daily" | "weekly" | "monthly" | "custom" | "interval" | "manual";
+export type ScheduleKind = "once" | "daily" | "weekly" | "monthly" | "custom" | "interval" | "manual" | "event";
 
 export interface Schedule {
   schedule_kind: ScheduleKind;
-  schedule_config: { time?: string; days?: number[]; day?: number; every_minutes?: number; interval_days?: number };
+  schedule_config: {
+    time?: string;
+    days?: number[];
+    day?: number;
+    every_minutes?: number;
+    interval_days?: number;
+    /** Event triggers ("event"): which app and trigger, and its settings. */
+    provider?: string;
+    trigger?: string;
+    params?: Record<string, unknown>;
+  };
   timezone: string;
   starts_at?: string | null;
   ends_at?: string | null;
@@ -109,6 +119,15 @@ export interface Automation extends Schedule {
   running: boolean;
   pending_approvals: number;
   issues: Issue[];
+  /** Event triggers only: how the last check went. */
+  trigger_status?: TriggerStatus | null;
+}
+
+export interface TriggerStatus {
+  status: "waiting" | "ok" | "needs_attention" | string;
+  last_checked_at: string | null;
+  last_error: string | null;
+  runs_started: number;
 }
 
 export interface AutomationInput extends Schedule {
@@ -210,6 +229,21 @@ export interface AppSpec {
 export interface Catalog {
   apps: AppSpec[];
   actions: ActionSpec[];
+  triggers?: TriggerSpec[];
+}
+
+/** "When something happens in <app>": starts an automation with the item as trigger data. */
+export interface TriggerSpec {
+  id: string;
+  app: string;
+  app_name: string;
+  app_logo: string | null;
+  name: string;
+  label: string;
+  description: string;
+  available: boolean;
+  params: InputSpec[];
+  outputs: OutputSpec[];
 }
 
 export interface Template {

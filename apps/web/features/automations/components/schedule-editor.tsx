@@ -1,17 +1,23 @@
 "use client";
 
+import Link from "next/link";
+import * as React from "react";
+
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 
-import type { Schedule } from "../types";
+import type { InputSpec, Schedule, TriggerSpec } from "../types";
 
-type Mode = "daily" | "weekdays" | "weekly" | "monthly" | "interval" | "custom" | "once" | "manual";
+type Mode = "event" | "daily" | "weekdays" | "weekly" | "monthly" | "interval" | "custom" | "once" | "manual";
+const CHECK_EVERY = [5, 10, 15, 30, 60];
 
 const MODES: { value: Mode; label: string }[] = [
+  { value: "event", label: "When something happens in an app" },
   { value: "daily", label: "Every day" },
   { value: "weekdays", label: "Every weekday (Mon–Fri)" },
   { value: "weekly", label: "On certain days" },
@@ -43,8 +49,9 @@ function combine(date: string, time: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-export function ScheduleEditor({ value, onChange }: { value: Schedule; onChange: (next: Schedule) => void }) {
+export function ScheduleEditor({ value, onChange, triggers = [] }: { value: Schedule; onChange: (next: Schedule) => void; triggers?: TriggerSpec[] }) {
   const mode = modeOf(value);
+  const modes = triggers.length ? MODES : MODES.filter((m) => m.value !== "event");
   const cfg = value.schedule_config ?? {};
   const time = cfg.time ?? "09:00";
   const setMode = (next: Mode) => {
@@ -56,10 +63,14 @@ export function ScheduleEditor({ value, onChange }: { value: Schedule; onChange:
     if (next === "custom") return onChange({ ...base, schedule_kind: "custom", schedule_config: { time, interval_days: cfg.interval_days ?? 2 } });
     if (next === "once") return onChange({ ...base, schedule_kind: "once", schedule_config: {}, starts_at: value.starts_at ?? new Date(Date.now() + 3_600_000).toISOString() });
     if (next === "manual") return onChange({ ...base, schedule_kind: "manual", schedule_config: {} });
+    if (next === "event") {
+      const first = triggers.find((t) => t.available) ?? triggers[0];
+      return onChange({ ...base, schedule_kind: "event", schedule_config: first ? eventConfig(first) : {} });
+    }
     return onChange({ ...base, schedule_kind: "daily", schedule_config: { time } });
   };
   const setConfig = (patch: Schedule["schedule_config"]) => onChange({ ...value, schedule_config: { ...cfg, ...patch } });
-  const needsTime = !["interval", "once", "manual"].includes(mode);
+  const needsTime = !["interval", "once", "manual", "event"].includes(mode);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -70,7 +81,7 @@ export function ScheduleEditor({ value, onChange }: { value: Schedule; onChange:
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MODES.map((m) => (
+            {modes.map((m) => (
               <SelectItem key={m.value} value={m.value}>
                 {m.label}
               </SelectItem>
@@ -158,9 +169,143 @@ export function ScheduleEditor({ value, onChange }: { value: Schedule; onChange:
           </div>
         </fieldset>
       ) : null}
-      {mode !== "manual" ? (
+      {mode === "event" ? <EventTrigger value={value} onChange={onChange} triggers={triggers} /> : null}
+      {mode !== "manual" && mode !== "event" ? (
         <p className="text-xs text-muted-foreground sm:col-span-2">Times are in {value.timezone.replaceAll("_", " ")}.</p>
       ) : null}
+    </div>
+  );
+}
+
+function eventConfig(trigger: TriggerSpec, every = 5): Schedule["schedule_config"] {
+  const params = Object.fromEntries(trigger.params.filter((p) => p.default !== undefined).map((p) => [p.key, p.default]));
+  return { provider: trigger.app, trigger: trigger.name, params, every_minutes: every };
+}
+
+/** "When something happens in <app>": which trigger, its settings, and how often to check. */
+function EventTrigger({ value, onChange, triggers }: { value: Schedule; onChange: (next: Schedule) => void; triggers: TriggerSpec[] }) {
+  const cfg = value.schedule_config ?? {};
+  const current = triggers.find((t) => t.app === cfg.provider && t.name === cfg.trigger);
+  const every = cfg.every_minutes ?? 5;
+  const params = cfg.params ?? {};
+  const byApp = React.useMemo(() => {
+    const groups = new Map<string, TriggerSpec[]>();
+    for (const t of triggers) groups.set(t.app_name, [...(groups.get(t.app_name) ?? []), t]);
+    return [...groups.entries()];
+  }, [triggers]);
+  const setParam = (key: string, v: unknown) => onChange({ ...value, schedule_config: { ...cfg, params: { ...params, [key]: v } } });
+
+  return (
+    <>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label htmlFor="trigger-pick">When</Label>
+        <Select
+          value={current ? current.id : ""}
+          onValueChange={(id) => {
+            const next = triggers.find((t) => t.id === id);
+            if (next) onChange({ ...value, schedule_config: eventConfig(next, every) });
+          }}
+        >
+          <SelectTrigger id="trigger-pick" className="w-full" aria-label="What starts this automation">
+            <SelectValue placeholder="Choose what starts this automation" />
+          </SelectTrigger>
+          <SelectContent>
+            {byApp.map(([app, items]) => (
+              <SelectGroup key={app}>
+                <SelectLabel>{app}</SelectLabel>
+                {items.map((t) => (
+                  <SelectItem key={t.id} value={t.id} disabled={!t.available}>
+                    {t.label}
+                    {t.available ? null : <span className="ml-1 text-xs text-muted-foreground">· connect {t.app_name} first</span>}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+        {current ? <p className="text-xs text-muted-foreground">{current.description}</p> : null}
+        {current && !current.available ? (
+          <p className="text-xs">
+            <Link href={`/app/settings/connections/${current.app}`} className="font-medium text-ai underline-offset-2 hover:underline">
+              Connect {current.app_name}
+            </Link>{" "}
+            <span className="text-muted-foreground">to switch this automation on.</span>
+          </p>
+        ) : null}
+      </div>
+      {current?.params.map((p) => (
+        <TriggerParam key={p.key} spec={p} value={params[p.key]} onChange={(v) => setParam(p.key, v)} />
+      ))}
+      <div className="space-y-1.5">
+        <Label htmlFor="trigger-every">Check every</Label>
+        <Select value={String(every)} onValueChange={(v) => onChange({ ...value, schedule_config: { ...cfg, every_minutes: Number(v) } })}>
+          <SelectTrigger id="trigger-every" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CHECK_EVERY.map((m) => (
+              <SelectItem key={m} value={String(m)}>
+                {m === 60 ? "hour" : `${m} minutes`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-xs text-muted-foreground sm:col-span-2">
+        Notely checks {current?.app_name ?? "the app"} every {every === 60 ? "hour" : `${every} minutes`} and runs once for each new item. The first check only notes what is already there, so turning this on never replays old items.
+      </p>
+    </>
+  );
+}
+
+/** One trigger setting (a folder, a channel, "only from this sender"…). */
+function TriggerParam({ spec, value, onChange }: { spec: InputSpec; value: unknown; onChange: (v: unknown) => void }) {
+  const id = `trigger-param-${spec.key}`;
+  const label = (
+    <Label htmlFor={id}>
+      {spec.label}
+      {spec.required ? null : <span className="ml-1 font-normal text-muted-foreground">(optional)</span>}
+    </Label>
+  );
+  if (spec.type === "boolean") {
+    return (
+      <div className="flex items-center justify-between gap-3 sm:col-span-2">
+        {label}
+        <Switch id={id} checked={Boolean(value)} onCheckedChange={onChange} />
+      </div>
+    );
+  }
+  if (spec.options?.length) {
+    return (
+      <div className="space-y-1.5">
+        {label}
+        <Select value={String(value ?? spec.default ?? "")} onValueChange={onChange}>
+          <SelectTrigger id={id} className="w-full">
+            <SelectValue placeholder="Choose…" />
+          </SelectTrigger>
+          <SelectContent>
+            {spec.options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {spec.help ? <p className="text-xs text-muted-foreground">{spec.help}</p> : null}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      {label}
+      <Input
+        id={id}
+        type={spec.type === "number" ? "number" : spec.type === "email" ? "email" : "text"}
+        value={value === undefined || value === null ? "" : String(value)}
+        placeholder={spec.placeholder}
+        onChange={(e) => onChange(e.target.value === "" ? undefined : spec.type === "number" ? Number(e.target.value) : e.target.value)}
+      />
+      {spec.help ? <p className="text-xs text-muted-foreground">{spec.help}</p> : null}
     </div>
   );
 }

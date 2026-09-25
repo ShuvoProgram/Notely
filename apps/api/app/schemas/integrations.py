@@ -55,6 +55,8 @@ class ProviderOut(BaseModel):
 class ProviderDetailOut(ProviderOut):
     local_item_count: int = 0
     tools: list[dict[str, Any]] = Field(default_factory=list)
+    # What Notely can do with this app (actions and automation triggers), see `abilities()`.
+    abilities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ConnectionUpdate(BaseModel):

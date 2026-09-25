@@ -644,6 +644,18 @@ export interface Provider {
 export interface ProviderDetail extends Provider {
   local_item_count: number;
   tools: { name: string; description: string; read_only: boolean; destructive: boolean }[];
+  /** What Notely can do with this app, from its real tools and triggers. */
+  abilities?: Ability[];
+}
+
+export interface Ability {
+  kind: "action" | "trigger";
+  label: string;
+  risk: "read" | "write" | "external_communication" | "destructive" | string;
+  /** The optional permission this needs (null when the basic connection is enough). */
+  permission: string | null;
+  /** Whether it is allowed on the current connection (null when not connected). */
+  granted: boolean | null;
 }
 
 export interface ConnectionTestResult {
