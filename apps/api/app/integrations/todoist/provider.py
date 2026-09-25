@@ -1,8 +1,15 @@
-"""Todoist: OAuth2 (non-expiring tokens), REST API v2."""
+"""Todoist: OAuth2 (non-expiring tokens), Todoist API v1.
+
+Todoist retired REST v2 and Sync v9 (both now answer 410 Gone). API v1 differences that matter
+here: lists are paginated (`{"results": [...], "next_cursor": ...}`), filtering and search live
+at `GET /tasks/filter?query=`, moving has its own `POST /tasks/{id}/move`, tasks report
+`added_at` / `checked` (not `created_at` / `is_completed`), projects `inbox_project`, and tasks
+no longer carry a `url` (it is built from the id).
+"""
 
 from __future__ import annotations
 
-import uuid
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
@@ -25,8 +32,29 @@ from app.integrations.base.rest import ProviderTool, RestOAuthProvider
 from app.integrations.base.triggers import ProviderTrigger, TriggerEvent, parse_time
 
 WRITE_SCOPE = "data:read_write"
-# REST v2 cannot change a task's project; the Sync API's `item_move` command can.
-SYNC_URL = "https://api.todoist.com/sync/v9/sync"
+PAGE = 200  # Todoist's maximum page size
+
+
+def task_url(task_id: Any) -> str:
+    return f"https://app.todoist.com/app/task/{task_id}"
+
+
+async def fetch_all(
+    get: Callable[..., Any], path: str, params: dict[str, Any] | None = None, limit: int = PAGE
+) -> list[dict[str, Any]]:
+    """Follow `next_cursor` until `limit` items are collected (or there are no more)."""
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(items) < limit:
+        query = {**(params or {}), "limit": min(PAGE, limit - len(items))}
+        if cursor:
+            query["cursor"] = cursor
+        body = (await get(path, params=query)).json()
+        items.extend(body.get("results") or [])
+        cursor = body.get("next_cursor")
+        if not cursor:
+            break
+    return items[:limit]
 
 
 class ListTasksArgs(BaseModel):
@@ -91,7 +119,7 @@ class CompleteTaskArgs(BaseModel):
 class TodoistProvider(RestOAuthProvider):
     settings_prefix = "todoist"
     use_pkce = False
-    api_base = "https://api.todoist.com/rest/v2"
+    api_base = "https://api.todoist.com/api/v1"
     endpoints = OAuthEndpoints(
         authorize_url="https://todoist.com/oauth/authorize",
         token_url="https://todoist.com/oauth/access_token",
@@ -101,9 +129,12 @@ class TodoistProvider(RestOAuthProvider):
         id="todoist",
         name="Todoist",
         category="tasks",
-        description="Read your tasks and projects; create and complete tasks with approval.",
+        description=(
+            "Read and search your tasks and projects; create, update, move and complete tasks "
+            "with approval."
+        ),
         logo_url="https://cdn.simpleicons.org/todoist",
-        docs_url="https://developer.todoist.com/guides/#authorization",
+        docs_url="https://developer.todoist.com/api/v1/",
         auth=AuthType.oauth2,
         capabilities=[Capability.read, Capability.create, Capability.update],
         permissions=[
@@ -122,8 +153,8 @@ class TodoistProvider(RestOAuthProvider):
 
     async def identity(self, ctx: ProviderContext) -> ConnectionIdentity:
         async with self.http(ctx) as http:
-            projects = (await http.get("/projects")).json()
-        inbox = next((p for p in projects if p.get("is_inbox_project")), None)
+            projects = await fetch_all(http.get, "/projects")
+        inbox = next((p for p in projects if p.get("inbox_project")), None)
         return ConnectionIdentity(
             external_account_id=str(inbox.get("id")) if inbox else "todoist",
             external_account_name="Todoist account",
@@ -132,22 +163,25 @@ class TodoistProvider(RestOAuthProvider):
 
     async def probe(self, ctx: ProviderContext) -> str:
         async with self.http(ctx) as http:
-            projects = (await http.get("/projects")).json()
+            projects = await fetch_all(http.get, "/projects")
         return f"{len(projects)} project(s)"
 
     async def search(self, ctx: ProviderContext, query: str, limit: int) -> list[dict[str, Any]]:
+        safe = query.replace('"', " ")
         async with self.http(ctx) as http:
-            tasks = (await http.get("/tasks", params={"filter": f"search: {query}"})).json()
+            tasks = await fetch_all(
+                http.get, "/tasks/filter", {"query": f"search: {safe}"}, limit=limit
+            )
         return [
             {
                 "id": t["id"],
                 "kind": "task",
                 "title": t.get("content", ""),
                 "snippet": (t.get("description") or "")[:240],
-                "url": t.get("url"),
-                "updated_at": t.get("created_at"),
+                "url": task_url(t["id"]),
+                "updated_at": t.get("updated_at") or t.get("added_at"),
             }
-            for t in tasks[:limit]
+            for t in tasks
         ]
 
     def build_triggers(self) -> list[ProviderTrigger]:
@@ -156,10 +190,10 @@ class TodoistProvider(RestOAuthProvider):
         ) -> list[TriggerEvent]:
             params = {"project_id": p.project_id} if p.project_id else {}
             async with self.http(ctx) as http:
-                tasks = (await http.get("/tasks", params=params)).json()
+                tasks = await fetch_all(http.get, "/tasks", params, limit=1000)
             events = []
             for t in tasks:
-                created = parse_time(t.get("created_at"))
+                created = parse_time(t.get("added_at"))
                 if created is None or created <= since:
                     continue
                 events.append(
@@ -173,8 +207,8 @@ class TodoistProvider(RestOAuthProvider):
                             "due": (t.get("due") or {}).get("date"),
                             "priority": t.get("priority"),
                             "project_id": t.get("project_id"),
-                            "created_at": t.get("created_at"),
-                            "url": t.get("url"),
+                            "created_at": t.get("added_at"),
+                            "url": task_url(t["id"]),
                         },
                     )
                 )
@@ -203,10 +237,13 @@ class TodoistProvider(RestOAuthProvider):
         async def list_tasks(ctx: ProviderContext, a: ListTasksArgs) -> dict[str, Any]:
             terms = [a.filter] if a.filter else []
             if a.search:
-                terms.append(f"search: {a.search}")
-            params = {"filter": " & ".join(f"({t})" for t in terms)} if terms else {}
+                terms.append(f"search: {a.search.replace('&', ' ')}")
             async with self.http(ctx) as http:
-                tasks = (await http.get("/tasks", params=params)).json()
+                if terms:
+                    query = " & ".join(f"({t})" for t in terms)
+                    tasks = await fetch_all(http.get, "/tasks/filter", {"query": query}, a.limit)
+                else:
+                    tasks = await fetch_all(http.get, "/tasks", limit=a.limit)
             return {
                 "tasks": [
                     {
@@ -215,15 +252,15 @@ class TodoistProvider(RestOAuthProvider):
                         "due": (t.get("due") or {}).get("date"),
                         "priority": t.get("priority"),
                         "project_id": t.get("project_id"),
-                        "url": t.get("url"),
+                        "url": task_url(t["id"]),
                     }
-                    for t in tasks[: a.limit]
+                    for t in tasks
                 ]
             }
 
         async def list_projects(ctx: ProviderContext, a: ListProjectsArgs) -> dict[str, Any]:
             async with self.http(ctx) as http:
-                projects = (await http.get("/projects")).json()
+                projects = await fetch_all(http.get, "/projects")
             return {
                 "projects": [
                     {"id": p["id"], "name": self.wrap(str(p.get("name", "")), ref=p["id"])}
@@ -245,7 +282,11 @@ class TodoistProvider(RestOAuthProvider):
                 payload["labels"] = a.labels
             async with self.http(ctx) as http:
                 task = (await http.post("/tasks", json=payload)).json()
-            return {"task_id": task.get("id"), "url": task.get("url"), "content": a.content}
+            return {
+                "task_id": task.get("id"),
+                "url": task_url(task.get("id")),
+                "content": a.content,
+            }
 
         async def update_task(ctx: ProviderContext, a: UpdateTaskArgs) -> dict[str, Any]:
             payload: dict[str, Any] = {
@@ -266,20 +307,19 @@ class TodoistProvider(RestOAuthProvider):
                 "content": task.get("content"),
                 "due": (task.get("due") or {}).get("date"),
                 "priority": task.get("priority"),
-                "url": task.get("url"),
+                "url": task_url(a.task_id),
             }
 
         async def move_task(ctx: ProviderContext, a: MoveTaskArgs) -> dict[str, Any]:
-            command = {
-                "type": "item_move",
-                "uuid": str(uuid.uuid4()),
-                "args": {"id": a.task_id, "project_id": a.project_id},
-            }
             async with self.http(ctx) as http:
-                result = (await http.post(SYNC_URL, json={"commands": [command]})).json()
-            if (result.get("sync_status") or {}).get(command["uuid"]) != "ok":
-                raise ProviderError(ProviderErrorKind.invalid_request, "Todoist refused the move.")
-            return {"task_id": a.task_id, "project_id": a.project_id}
+                task = (
+                    await http.post(f"/tasks/{a.task_id}/move", json={"project_id": a.project_id})
+                ).json()
+            return {
+                "task_id": a.task_id,
+                "project_id": str(task.get("project_id") or a.project_id),
+                "url": task_url(a.task_id),
+            }
 
         async def complete_task(ctx: ProviderContext, a: CompleteTaskArgs) -> dict[str, Any]:
             async with self.http(ctx) as http:
@@ -328,7 +368,7 @@ class TodoistProvider(RestOAuthProvider):
                 if exc.kind == ProviderErrorKind.not_found:
                     return Verification.verified("Task is no longer active in Todoist")
                 raise
-            if task.get("is_completed"):
+            if task.get("checked") or task.get("completed_at"):
                 return Verification.verified("Task is completed in Todoist")
             return Verification.failed("Task is still open in Todoist")
 

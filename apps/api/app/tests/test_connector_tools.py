@@ -207,30 +207,42 @@ async def test_todoist_update_task_with_nothing_to_change_is_refused(vendor: Ven
     assert vendor.requests == []
 
 
-async def test_todoist_move_task_uses_the_sync_item_move_command(vendor: Vendor) -> None:
-    def sync(request: httpx.Request) -> dict[str, Any]:
-        command = json.loads(request.content)["commands"][0]
-        return {"sync_status": {command["uuid"]: "ok"}}
+async def test_todoist_uses_api_v1(vendor: Vendor) -> None:
+    """REST v2 and Sync v9 are retired (410 Gone); every call goes to /api/v1."""
+    vendor.on("GET", "/projects", {"results": [], "next_cursor": None})
+    await run("todoist", "list_projects", {})
+    assert vendor.sent("GET", "/projects").url.path == "/api/v1/projects"
 
-    vendor.on("POST", "/sync/v9/sync", sync)
+
+async def test_todoist_move_task_uses_the_move_endpoint(vendor: Vendor) -> None:
+    vendor.on("POST", "/tasks/t1/move", {"id": "t1", "project_id": "p2"})
     vendor.on("GET", "/tasks/t1", {"id": "t1", "project_id": "p2"})
     result = await run("todoist", "move_task", {"task_id": "t1", "project_id": "p2"})
-    command = vendor.json("POST", "/sync/v9/sync")["commands"][0]
-    assert command["type"] == "item_move" and command["args"] == {"id": "t1", "project_id": "p2"}
+    assert vendor.json("POST", "/tasks/t1/move") == {"project_id": "p2"}
     verdict = await verify("todoist", "move_task", {"task_id": "t1", "project_id": "p2"}, result)
     assert verdict.status == "verified"
 
 
-async def test_todoist_move_task_reports_a_refused_move(vendor: Vendor) -> None:
-    vendor.on("POST", "/sync/v9/sync", {"sync_status": {}})
-    with pytest.raises(ProviderError):
-        await run("todoist", "move_task", {"task_id": "t1", "project_id": "p2"})
+async def test_todoist_list_tasks_filters_with_the_filter_endpoint(vendor: Vendor) -> None:
+    vendor.on(
+        "GET",
+        "/tasks/filter",
+        {"results": [{"id": "t9", "content": "Invoice"}], "next_cursor": None},
+    )
+    result = await run("todoist", "list_tasks", {"filter": "today", "search": "invoice"})
+    assert vendor.sent("GET", "/tasks/filter").url.params["query"] == "(today) & (search: invoice)"
+    assert result["tasks"][0]["url"] == "https://app.todoist.com/app/task/t9"
 
 
-async def test_todoist_list_tasks_combines_filter_and_search(vendor: Vendor) -> None:
-    vendor.on("GET", "/tasks", [])
-    await run("todoist", "list_tasks", {"filter": "today", "search": "invoice"})
-    assert vendor.sent("GET", "/tasks").url.params["filter"] == "(today) & (search: invoice)"
+async def test_todoist_lists_follow_the_cursor(vendor: Vendor) -> None:
+    def page(request: httpx.Request) -> dict[str, Any]:
+        if request.url.params.get("cursor") == "c2":
+            return {"results": [{"id": "b"}], "next_cursor": None}
+        return {"results": [{"id": "a"}], "next_cursor": "c2"}
+
+    vendor.on("GET", "/tasks", page)
+    result = await run("todoist", "list_tasks", {"limit": 10})
+    assert [t["id"] for t in result["tasks"]] == ["a", "b"]
 
 
 # --- Asana --------------------------------------------------------------------------------------
@@ -644,10 +656,13 @@ async def test_task_triggers_fire_for_new_tasks_not_edited_ones(vendor: Vendor) 
                 ]
             }
             if "app.asana.com" in str(r.url)
-            else [
-                {"id": "t1", "content": "New", "created_at": NEW},
-                {"id": "t0", "content": "Old", "created_at": OLD},
-            ]
+            else {
+                "results": [
+                    {"id": "t1", "content": "New", "added_at": NEW},
+                    {"id": "t0", "content": "Old", "added_at": OLD},
+                ],
+                "next_cursor": None,
+            }
         ),
     )
     asana = await poll("asana", "task_created", {"project_gid": "p1"})

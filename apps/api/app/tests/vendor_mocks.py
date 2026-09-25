@@ -248,27 +248,34 @@ class VendorMock:
             return _json(200, {"access_token": "td-token", "token_type": "Bearer"})
         if r.headers.get("authorization") != "Bearer td-token":
             return _json(401, {})
-        if path == "/rest/v2/projects":
-            return _json(200, [{"id": "pr1", "name": "Inbox", "is_inbox_project": True}])
-        if path == "/rest/v2/tasks" and r.method == "GET":
+        # Todoist API v1 (REST v2 / Sync v9 are retired and answer 410 Gone).
+        if path.startswith(("/rest/v2/", "/sync/v9/")):
+            return httpx.Response(410, text="This endpoint is deprecated.")
+        if path == "/api/v1/projects":
             return _json(
                 200,
-                [
-                    {
-                        "id": "t1",
-                        "content": "Finalize pricing",
-                        "description": "",
-                        "priority": 4,
-                        "url": "https://todoist.com/t1",
-                        "project_id": "pr1",
-                        "created_at": "2026-09-01T00:00:00Z",
-                    }
-                ],
+                {
+                    "results": [{"id": "pr1", "name": "Inbox", "inbox_project": True}],
+                    "next_cursor": None,
+                },
             )
-        if path == "/rest/v2/tasks" and r.method == "POST":
+        task_t1 = {
+            "id": "t1",
+            "content": "Finalize pricing",
+            "description": "",
+            "priority": 4,
+            "project_id": "pr1",
+            "added_at": "2026-09-01T00:00:00Z",
+            "checked": False,
+        }
+        if path in ("/api/v1/tasks", "/api/v1/tasks/filter") and r.method == "GET":
+            if path == "/api/v1/tasks/filter":
+                assert r.url.params.get("query"), "v1 filters with ?query="
+            return _json(200, {"results": [task_t1], "next_cursor": None})
+        if path == "/api/v1/tasks" and r.method == "POST":
             self.state["todoist_content"] = r_json(r)["content"]
-            return _json(200, {"id": "t2", "url": "https://todoist.com/t2"})
-        if path == "/rest/v2/tasks/t2" and r.method == "GET":
+            return _json(200, {"id": "t2", "content": self.state["todoist_content"]})
+        if path == "/api/v1/tasks/t2" and r.method == "GET":
             # Test knobs: simulate a contradicting or unavailable read-back.
             if self.state.get("todoist_readback_status"):
                 return _json(int(self.state["todoist_readback_status"]), {"error": "down"})
@@ -276,13 +283,13 @@ class VendorMock:
                 "todoist_content"
             )
             return _json(200, {"id": "t2", "content": content})
-        if path == "/rest/v2/tasks/t1/close":
+        if path == "/api/v1/tasks/t1/close":
             self.state["todoist_t1_closed"] = True
             return httpx.Response(204)
-        if path == "/rest/v2/tasks/t1" and r.method == "GET":
+        if path == "/api/v1/tasks/t1" and r.method == "GET":
             if self.state.get("todoist_t1_closed"):
                 return _json(404, {"error": "not found"})
-            return _json(200, {"id": "t1", "content": "Finalize pricing", "is_completed": False})
+            return _json(200, task_t1)
         return None
 
     # --- Asana ----------------------------------------------------------------------------------
@@ -578,7 +585,8 @@ class VendorMock:
                     "access_token": "db-token",
                     "refresh_token": "db-refresh",
                     "expires_in": 14400,
-                    "scope": "account_info.read files.metadata.read files.content.read files.content.write",
+                    "scope": "account_info.read files.metadata.read files.content.read "
+                    "files.content.write",
                 },
             )
         if r.headers.get("authorization") != "Bearer db-token":

@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
-import { ACTION_LABEL, ConnectionStatusBadge, describeConnection } from "@/features/connections/components/connection-status";
+import { ACTION_LABEL, ConnectionStatusBadge, describeConnection, isUnfinished } from "@/features/connections/components/connection-status";
 import type { ConnectMethod, Provider } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +107,7 @@ export function Marketplace() {
   }
 
   const all = providers.data ?? [];
-  const connected = all.filter((p) => p.connection && p.connection.status !== "disconnected");
+  const connected = all.filter((p) => p.connection && p.connection.status !== "disconnected" && !isUnfinished(p.connection));
   const categories = CATEGORY_ORDER.filter((c) => all.some((p) => p.category === c));
   const needle = q.trim().toLowerCase();
   const visible = all.filter(

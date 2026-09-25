@@ -376,6 +376,12 @@ async def test_oauth_denied_marks_connection_error(client: Any, fake_oauth_provi
     ]
     assert conn["status"] == "error" and conn["last_error_code"] == "auth_failed"
 
+    # Testing a sign-in that never finished must not turn it into "session expired".
+    test = await client.post(f"/api/v1/integrations/connections/{conn['id']}/test", headers=ORIGIN)
+    assert test.json()["data"]["healthy"] is False
+    after = (await client.get("/api/v1/integrations/providers/fakeoauth")).json()["data"]
+    assert after["connection"]["status"] == "error"
+
 
 async def test_oauth_token_refresh_near_expiry(client: Any, fake_oauth_provider: Any) -> None:
     await signup(client)

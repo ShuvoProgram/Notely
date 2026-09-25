@@ -60,7 +60,7 @@ CASES: dict[str, dict[str, Any]] = {
             "todoist__create_task",
             {"content": "Email the team", "priority": 3},
             "POST",
-            "/rest/v2/tasks",
+            "/api/v1/tasks",
             "write",
         ),
     },

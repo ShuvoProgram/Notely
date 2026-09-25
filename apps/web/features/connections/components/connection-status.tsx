@@ -40,6 +40,17 @@ export function describeConnection(conn: Connection | null, providerName: string
   if (opts?.refreshing) {
     return { state: "connecting", label: "Reconnecting…", detail: `Checking ${providerName}`, icon: RefreshCw, tone: "text-muted-foreground", spinning: true, action: null };
   }
+  if (conn && isUnfinished(conn)) {
+    // A first sign-in that failed or was abandoned: there is nothing to "reconnect" or "retry".
+    return {
+      state: "disconnected",
+      label: conn.last_error ? "Couldn’t connect" : "Not connected",
+      detail: conn.last_error ?? "",
+      icon: conn.last_error ? AlertTriangle : Circle,
+      tone: conn.last_error ? "text-warning" : "text-muted-foreground",
+      action: opts?.available === false ? null : "connect",
+    };
+  }
   const status: ConnectionStatus | "none" = conn && conn.status !== "disconnected" ? conn.status : "none";
   switch (status) {
     case "none":
@@ -118,4 +129,14 @@ export function ConnectionStatusBadge({ view, className, compact }: { view: Conn
       </div>
     </div>
   );
+}
+
+/**
+ * A connection row whose first sign-in never finished (the vendor refused, showed its own error
+ * page, or the user left): no account on record and never synced. It was never authorized, so
+ * it can't have "expired" — it is simply not connected yet. Public MCP servers have no account
+ * id by design and are excluded.
+ */
+export function isUnfinished(conn: Connection): boolean {
+  return conn.auth_type !== "mcp" && conn.status !== "connected" && conn.status !== "syncing" && conn.status !== "disconnected" && !conn.external_account_id && !conn.last_sync_at;
 }

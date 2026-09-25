@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { connectionsApi } from "@/features/connections/api";
 import { ConnectDialog } from "@/features/connections/components/connect-dialog";
-import { ACTION_LABEL, ConnectionStatusBadge, describeConnection, relativeTime } from "@/features/connections/components/connection-status";
+import { ACTION_LABEL, ConnectionStatusBadge, describeConnection, isUnfinished, relativeTime } from "@/features/connections/components/connection-status";
 import { CATEGORY_LABELS, ProviderLogo } from "@/features/connections/components/marketplace";
 import { playSfx } from "@/lib/sfx/player";
 import type { Ability, ConnectMethod, ConnectionTestResult } from "@/lib/api/types";
@@ -118,7 +118,9 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
     );
   }
   const p = detail.data;
-  const conn = p.connection && p.connection.status !== "disconnected" ? p.connection : null;
+  // A first sign-in that never finished isn't a connection yet: offer Connect, with the reason.
+  const unfinished = p.connection && isUnfinished(p.connection) ? p.connection : null;
+  const conn = p.connection && p.connection.status !== "disconnected" && !unfinished ? p.connection : null;
   const canOAuth = p.connect_methods.includes("oauth");
   const canMcp = p.connect_methods.includes("mcp");
   const available = canOAuth || canMcp;
@@ -195,6 +197,19 @@ export function ProviderDetail({ providerId }: { providerId: string }) {
           </div>
         </div>
       </section>
+
+      {unfinished?.last_error && available ? (
+        <Alert className="border-warning/40 bg-warning/10">
+          <AlertTriangle className="text-warning" />
+          <AlertTitle>Couldn’t connect {p.name}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{unfinished.last_error}</span>
+            <Button size="sm" onClick={startConnect}>
+              Try connecting again
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {conn && attention ? (
         <Alert className={view.state === "error" ? "border-destructive/40 bg-destructive/10" : "border-warning/40 bg-warning/10"}>

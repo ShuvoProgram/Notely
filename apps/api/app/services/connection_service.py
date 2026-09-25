@@ -85,6 +85,17 @@ class MarketplaceEntry:
     connection: UserConnection | None
 
 
+def never_connected(conn: UserConnection) -> bool:
+    """No sign-in ever finished: no tokens and no vendor account on record. (A public MCP server
+    legitimately has neither, so it never counts.)"""
+    return (
+        conn.auth_type != MCP_AUTH
+        and conn.external_account_id is None
+        and not conn.access_token_encrypted
+        and not conn.refresh_token_encrypted
+    )
+
+
 def status_from_error(error: ProviderError) -> ConnectionStatus:
     if error.kind in (ProviderErrorKind.expired, ProviderErrorKind.auth_failed):
         return ConnectionStatus.expired
@@ -603,6 +614,12 @@ class ConnectionService:
         provider = self.adapter(conn)
         if conn.status == ConnectionStatus.disconnected:
             return ConnectionTest([TestStep("Connection", False, "Not connected")])
+        if never_connected(conn):
+            # A first sign-in that failed or was abandoned left no tokens. Testing it can only
+            # fail authentication, which must not turn "couldn't connect" into "session expired".
+            return ConnectionTest(
+                [TestStep("Connection", False, "Sign-in wasn't completed. Connect to try again.")]
+            )
         try:
             await self.refresh_if_needed(user, conn)
             result = await provider.test_connection(self.context(user, conn))
