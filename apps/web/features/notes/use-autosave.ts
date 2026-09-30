@@ -130,6 +130,9 @@ export function useAutosave(note: Note): Autosave {
             setErrorMessage(error.message);
             setStatus("error");
             playSfx("error");
+            // Gone, or the owner stopped sharing it: re-check so the editor says so. The unsent
+            // text stays in the local draft backup.
+            if (error.status === 404) void queryClient.invalidateQueries({ queryKey: noteKeys.detail(note.id) });
           } else {
             setStatus("offline");
           }

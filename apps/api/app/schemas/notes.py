@@ -149,6 +149,12 @@ class BulkIds(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
 
 
+class BulkMove(BulkIds):
+    """`folder_id: null` moves the notes out of any folder."""
+
+    folder_id: uuid.UUID | None
+
+
 class NoteCreate(BaseModel):
     title: str = Field(default="", max_length=300)
     content_json: dict[str, Any] | None = None
@@ -209,6 +215,12 @@ class CollaboratorOut(BaseModel):
     accepted_at: datetime | None = None
     invite_expires_at: datetime | None = None
     created_at: datetime
+
+
+class NoteOwnerOut(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: str
 
 
 class DeliveryOut(BaseModel):
@@ -292,6 +304,7 @@ class NoteOut(NoteSummary):
     plain_text: str
     summary: str | None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    owner: NoteOwnerOut | None = None
     collaborators: list[CollaboratorOut] = Field(default_factory=list)
 
 

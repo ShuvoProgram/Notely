@@ -32,6 +32,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { NOTE_AI_ACTIONS, NoteAIPanel } from "@/features/ai/components/note-ai-panel";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { BackgroundDialog } from "@/features/notes/components/background-dialog";
+import { FolderPickerSheet } from "@/features/notes/components/organize-sheet";
 import { ReminderDialog } from "@/features/notes/components/reminder-dialog";
 import { RichTextEditor } from "@/features/notes/components/rich-text-editor";
 import { SaveStatusIndicator } from "@/features/notes/components/save-status";
@@ -65,8 +66,10 @@ export function NoteEditor({ noteId }: { noteId: string }) {
     const notFound = error instanceof ApiError && error.status === 404;
     return (
       <div className="rounded-xl border bg-card p-8 text-center">
-        <h2 className="text-lg font-semibold">{notFound ? "This note doesn't exist" : "Couldn't load this note"}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{notFound ? "It may have been deleted." : messageFor(error)}</p>
+        <h2 className="text-lg font-semibold">{notFound ? "This note isn't available" : "Couldn't load this note"}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {notFound ? "It may have been deleted, or its owner stopped sharing it with you." : messageFor(error)}
+        </p>
       </div>
     );
   }
@@ -140,6 +143,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [reminderOpen, setReminderOpen] = React.useState(false);
   const [backgroundOpen, setBackgroundOpen] = React.useState(false);
+  const [folderOpen, setFolderOpen] = React.useState(false);
 
   const folderName = note.folder_id ? folders.find((f) => f.id === note.folder_id)?.name : null;
   const collaborators = note.collaborators ?? [];
@@ -223,7 +227,7 @@ function LoadedNoteEditor({ note }: { note: Note }) {
                   <Copy aria-hidden /> Duplicate
                 </DropdownMenuItem>
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger disabled={readOnly || !owner}>
+                  <DropdownMenuSubTrigger disabled={readOnly || !owner || inTrash}>
                     <FolderIcon aria-hidden /> Move to folder
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="w-56">
@@ -335,10 +339,22 @@ function LoadedNoteEditor({ note }: { note: Note }) {
         <div className="mb-7 flex flex-wrap items-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
           <TagPicker selected={note.tags ?? []} onChange={(tag_ids) => meta({ tag_ids })} disabled={readOnly} />
           <span aria-hidden className="px-1 opacity-50">·</span>
-          <span className="inline-flex h-7 items-center gap-1 px-1">
-            <FolderIcon className="size-3.5" aria-hidden />
-            {folderName ?? "No folder"}
-          </span>
+          {owner && !readOnly ? (
+            <button
+              type="button"
+              onClick={() => setFolderOpen(true)}
+              className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 outline-none transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={folderName ? `Folder: ${folderName}. Move to another folder` : "No folder. Move to a folder"}
+            >
+              <FolderIcon className="size-3.5" aria-hidden />
+              {folderName ?? "No folder"}
+            </button>
+          ) : (
+            <span className="inline-flex h-7 items-center gap-1 px-1">
+              <FolderIcon className="size-3.5" aria-hidden />
+              {folderName ?? "No folder"}
+            </span>
+          )}
           {reminder ? (
             <>
               <span aria-hidden className="px-1 opacity-50">·</span>
@@ -384,7 +400,27 @@ function LoadedNoteEditor({ note }: { note: Note }) {
           }}
         />
 
-        <ShareDialog note={note} open={shareOpen} onOpenChange={setShareOpen} />
+        <FolderPickerSheet
+        open={folderOpen}
+        onOpenChange={setFolderOpen}
+        count={1}
+        current={note.folder_id}
+        pending={update.isPending}
+        onPick={(folderId) =>
+          update.mutate(
+            { id: note.id, input: folderId ? { folder_id: folderId } : { clear_folder: true } },
+            {
+              onSuccess: () => {
+                setFolderOpen(false);
+                toast.success(folderId ? `Moved to ${folders.find((f) => f.id === folderId)?.name ?? "folder"}` : "Removed from folder");
+                playSfx("success");
+              },
+              onError: (e) => toast.error(messageFor(e)),
+            },
+          )
+        }
+      />
+      <ShareDialog note={note} open={shareOpen} onOpenChange={setShareOpen} />
         <ReminderDialog open={reminderOpen} onOpenChange={setReminderOpen} value={note.reminder_at} onSave={(iso) => setReminder(iso)} onRemove={() => setReminder(null)} />
         <BackgroundDialog
           open={backgroundOpen}

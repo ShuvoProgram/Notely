@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -18,6 +18,9 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 from app.db.base import (
     Base,
@@ -93,6 +96,10 @@ class Note(UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True, index=True)
 
     folder: Mapped[Folder | None] = relationship(back_populates="notes")
+    # Read-only: shown to collaborators as "Owner" in the sharing dialog.
+    owner: Mapped[User] = relationship(
+        "User", foreign_keys="Note.user_id", lazy="selectin", viewonly=True
+    )
     collaborators: Mapped[list[NoteCollaborator]] = relationship(
         back_populates="note", lazy="selectin", cascade="all, delete-orphan"
     )
@@ -180,3 +187,7 @@ class NoteCollaborator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     accepted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
 
     note: Mapped[Note] = relationship(back_populates="collaborators")
+    # The matched account (display name for the sharing dialog). None until the address has one.
+    user: Mapped[User | None] = relationship(
+        "User", foreign_keys=[user_id], lazy="selectin", viewonly=True
+    )

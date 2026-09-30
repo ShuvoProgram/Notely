@@ -12,6 +12,7 @@ from app.models.note import Folder, Note, NoteCollaborator, Tag
 from app.models.user import User
 from app.schemas.notes import (
     BulkIds,
+    BulkMove,
     ChecklistProgress,
     CollaboratorInvite,
     CollaboratorOut,
@@ -25,6 +26,7 @@ from app.schemas.notes import (
     NoteCreate,
     NoteListQuery,
     NoteOut,
+    NoteOwnerOut,
     NoteSummary,
     NoteUpdate,
     NoteVersionDetail,
@@ -74,7 +76,8 @@ def _common(note: Note, user: User) -> dict[str, Any]:
         "id": note.id,
         "title": note.title,
         "excerpt": excerpt(note.plain_text),
-        "folder_id": note.folder_id,
+        # Folders are personal: a guest never sees the owner's folder id.
+        "folder_id": note.folder_id if note.user_id == user.id else None,
         "tags": [tag_out(t) for t in note.tags],
         "is_favorite": note.is_favorite,
         "archived_at": note.archived_at,
@@ -100,6 +103,7 @@ def collaborator_out(c: NoteCollaborator) -> CollaboratorOut:
         email=c.email,
         role=c.role,
         user_id=c.user_id,
+        display_name=c.user.display_name if c.user is not None else None,
         status=NoteService.invitation_status(c),
         invited_at=c.invited_at,
         accepted_at=c.accepted_at,
@@ -116,6 +120,9 @@ def note_out(note: Note, user: User) -> NoteOut:
         summary=note.summary,
         metadata=note.metadata_,
         collaborators=[collaborator_out(c) for c in note.collaborators],
+        owner=NoteOwnerOut(
+            id=note.owner.id, display_name=note.owner.display_name, email=note.owner.email
+        ),
     )
 
 
@@ -133,6 +140,17 @@ async def list_notes(
 @notes_router.post("", status_code=status.HTTP_201_CREATED, response_model=Envelope[NoteOut])
 async def create_note(payload: NoteCreate, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
     return ok(note_out(await service.create_note(ctx.user, payload), ctx.user))
+
+
+@notes_router.get("/share-suggestions", response_model=Envelope[list[dict[str, str | None]]])
+async def share_suggestions(
+    ctx: CurrentAuth,
+    service: ServiceDep,
+    q: Annotated[str, Query(max_length=120)] = "",
+) -> dict[str, Any]:
+    """People to suggest in the share box: only those you already share notes with (either
+    way). Never a directory search — Notely doesn't reveal who else has an account."""
+    return ok(await service.share_suggestions(ctx.user, q))
 
 
 @notes_router.get("/{note_id}", response_model=Envelope[NoteOut])
@@ -156,6 +174,12 @@ async def trash_note(note_id: uuid.UUID, ctx: CurrentAuth, service: ServiceDep) 
 async def trash_notes(payload: BulkIds, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
     """Bulk "move to trash" from the list's selection mode. Reversible per note via restore."""
     return ok({"moved": await service.trash_many(ctx.user, payload.ids)})
+
+
+@notes_router.post("/bulk/move", response_model=Envelope[dict[str, int]])
+async def move_notes(payload: BulkMove, ctx: CurrentAuth, service: ServiceDep) -> dict[str, Any]:
+    """Bulk "move to folder" from the list's selection mode, atomically."""
+    return ok({"moved": await service.move_many(ctx.user, payload.ids, payload.folder_id)})
 
 
 @notes_router.post("/bulk/restore", response_model=Envelope[dict[str, int]])

@@ -54,12 +54,15 @@ export function FolderPickerSheet({
   count,
   pending,
   onPick,
+  current,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   count: number;
   pending: boolean;
   onPick: (folderId: string | null) => void;
+  /** The note's folder when moving one note: marked and not offered as a "move". */
+  current?: string | null;
 }) {
   const { data: folders = [] } = useFolders();
   const [choice, setChoice] = React.useState<string | null | undefined>(undefined);
@@ -79,6 +82,7 @@ export function FolderPickerSheet({
       >
         {icon}
         <span className="min-w-0 flex-1 truncate">{label}</span>
+        {current !== undefined && current === id ? <span className="text-xs text-muted-foreground">Current</span> : null}
         {choice === id ? <Check className="size-4 text-ai" aria-hidden /> : null}
       </button>
     </li>
@@ -101,12 +105,15 @@ export function FolderPickerSheet({
         <ul className="scrollbar-thin flex-1 overflow-y-auto overscroll-contain px-2">
           {row(null, "No folder", 0, <Inbox className="size-4 shrink-0 text-muted-foreground" aria-hidden />)}
           {ordered.map(({ folder, depth }) => row(folder.id, folder.name, depth, <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />))}
+          {ordered.length ? null : (
+            <li className="px-3 py-4 text-sm text-muted-foreground">No folders yet. Create one from Folders in the sidebar (or Folders &amp; tags on a phone).</li>
+          )}
         </ul>
         <div className="flex gap-2 border-t border-border/60 px-4 py-3">
           <Button variant="outline" className="h-11 flex-1 rounded-full" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button className="h-11 flex-1 rounded-full" disabled={choice === undefined || pending} onClick={() => choice !== undefined && onPick(choice)}>
+          <Button className="h-11 flex-1 rounded-full" disabled={choice === undefined || choice === current || pending} onClick={() => choice !== undefined && onPick(choice)}>
             Move
           </Button>
         </div>
