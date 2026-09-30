@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     rate_limit_webhook_per_minute: int = 600  # per provider + source IP
 
     # Request hardening
+    # Admin area (/admin, /api/v1/admin). Admin access needs a session younger than this even
+    # though ordinary sessions slide for a week; with ADMIN_REQUIRE_2FA staff must use 2FA.
+    admin_session_max_age_hours: int = 12
+    admin_require_2fa: bool = False
+    rate_limit_admin_per_minute: int = 240  # per staff user, reads
+    rate_limit_admin_write_per_minute: int = 30  # per staff user, changes
+
     max_request_bytes: int = 2 * 1024 * 1024  # JSON bodies (notes are the largest)
     max_webhook_bytes: int = 1024 * 1024
     trust_proxy_headers: bool = False  # honour X-Forwarded-For only behind a trusted proxy

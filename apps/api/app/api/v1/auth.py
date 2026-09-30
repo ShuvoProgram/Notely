@@ -27,15 +27,17 @@ from app.schemas.auth import (
     AppearancePreference,
     ChangePasswordRequest,
     LoginRequest,
+    RecoveryCodesOut,
     SessionOut,
     SignInProviderOut,
     SignupRequest,
     SoundPreference,
+    TOTPCodeRequest,
+    TOTPSetupOut,
     UserOut,
-    TOTPCodeRequest, TOTPSetupOut, RecoveryCodesOut,
 )
-from app.services.totp_service import TOTPService
 from app.services.auth_service import AuthService
+from app.services.platform_events import record_event
 from app.services.sign_in_providers import (
     SIGN_IN_FLOW,
     build_client,
@@ -43,6 +45,7 @@ from app.services.sign_in_providers import (
     enabled_sign_in_providers,
     get_sign_in_provider,
 )
+from app.services.totp_service import TOTPService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -60,6 +63,7 @@ def user_out(user: Any) -> UserOut:
         avatar_url=user.avatar_url,
         has_password=user.password_hash is not None,
         two_factor_enabled=user.totp_secret_encrypted is not None,
+        role=user.role or "user",
         created_at=user.created_at,
         notifications=dict(prefs.get("notifications") or {}),
         sound=SoundPreference.model_validate(prefs.get("sound") or {}),
@@ -250,16 +254,21 @@ async def two_factor_status(ctx: CurrentAuth) -> dict[str, Any]:
 
 @router.post("/2fa/setup", response_model=Envelope[TOTPSetupOut], dependencies=[Depends(auth_limit)])
 async def two_factor_setup(ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
+    import io
+
     import qrcode
     from qrcode.image.svg import SvgPathImage
-    import io
     secret, otp_uri = await TOTPService(db).begin(ctx.user)
     image = qrcode.make(otp_uri, image_factory=SvgPathImage); out = io.BytesIO(); image.save(out)
     return ok(TOTPSetupOut(otpauth_uri=otp_uri, qr_svg=out.getvalue().decode()))
 
 @router.post("/2fa/confirm", response_model=Envelope[RecoveryCodesOut], dependencies=[Depends(auth_limit)])
 async def two_factor_confirm(payload: TOTPCodeRequest, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
-    return ok(RecoveryCodesOut(recovery_codes=await TOTPService(db).confirm(ctx.user, payload.code)))
+    codes = await TOTPService(db).confirm(ctx.user, payload.code)
+    await record_event(
+        "security", "auth.2fa_enabled", message="Two-factor turned on", user_id=ctx.user.id
+    )
+    return ok(RecoveryCodesOut(recovery_codes=codes))
 
 @router.post("/2fa/verify", response_model=Envelope[dict[str, bool]], dependencies=[Depends(auth_limit)])
 async def two_factor_verify(payload: TOTPCodeRequest, ctx: PendingAuth, db: DbDep) -> dict[str, Any]:
@@ -270,7 +279,11 @@ async def two_factor_verify(payload: TOTPCodeRequest, ctx: PendingAuth, db: DbDe
 @router.post("/2fa/disable", response_model=Envelope[dict[str, bool]], dependencies=[Depends(auth_limit)])
 async def two_factor_disable(payload: TOTPCodeRequest, ctx: CurrentAuth, db: DbDep) -> dict[str, Any]:
     if ctx.session.two_factor_verified_at is None or not await TOTPService(db).verify(ctx.user, payload.code): raise Unauthorized("Enter a current authenticator code to disable 2FA.", code="RECENT_AUTH_REQUIRED")
-    await TOTPService(db).disable(ctx.user); return ok({"disabled": True})
+    await TOTPService(db).disable(ctx.user)
+    await record_event(
+        "security", "auth.2fa_disabled", message="Two-factor turned off", user_id=ctx.user.id
+    )
+    return ok({"disabled": True})
 
 
 def login_redirect(settings: Settings, reason: str) -> RedirectResponse:

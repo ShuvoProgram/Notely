@@ -14,11 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.exceptions import Conflict, NotFound, Unauthorized, ValidationFailed
+from app.core.exceptions import Conflict, Forbidden, NotFound, Unauthorized, ValidationFailed
 from app.core.security import hash_password, hash_token, new_session_token, verify_password
 from app.db.base import utcnow
-from app.models.user import SignInProvider, User, UserSession
+from app.models.user import STAFF_ROLES, SignInProvider, User, UserSession
 from app.repositories.user_repository import UserRepository
+from app.services.platform_events import add_event
 
 # Refresh the sliding expiry at most this often to avoid a write on every request.
 SESSION_TOUCH_INTERVAL = timedelta(minutes=5)
@@ -44,8 +45,18 @@ class AuthService:
 
     # --- account creation / credentials ------------------------------------------------------
 
+    async def _require_signups_open(self) -> None:
+        from app.services.platform_settings import PlatformSettings
+
+        if not await PlatformSettings(self.db).get("signups_enabled"):
+            raise Forbidden(
+                "New sign-ups are paused right now. Please try again later.",
+                code="SIGNUPS_DISABLED",
+            )
+
     async def signup(self, *, email: str, password: str, display_name: str) -> User:
         email = email.lower().strip()
+        await self._require_signups_open()
         if await self.repo.get_by_email(email) is not None:
             raise Conflict("An account with this email already exists.", code="EMAIL_TAKEN")
         user = await self.repo.create_user_with_personal_tenant(
@@ -98,8 +109,28 @@ class AuthService:
         stored = user.password_hash if user and user.password_hash else _DUMMY_HASH
         valid = verify_password(password, stored)
         if user is None or user.password_hash is None or not valid:
+            if user is not None:
+                # Known accounts only: failures against unknown emails would store guesses.
+                add_event(
+                    self.db,
+                    "security",
+                    "auth.sign_in_failed",
+                    source="password",
+                    message="Incorrect password",
+                    user_id=user.id,
+                )
+                await self.db.commit()
             raise Unauthorized("Incorrect email or password.", code="INVALID_CREDENTIALS")
         if not user.is_active:
+            add_event(
+                self.db,
+                "security",
+                "auth.sign_in_blocked",
+                source="password",
+                message="Sign-in attempt on a suspended account",
+                user_id=user.id,
+            )
+            await self.db.commit()
             raise Unauthorized("This account is disabled.", code="ACCOUNT_DISABLED")
         return user
 
@@ -120,6 +151,13 @@ class AuthService:
         user.password_hash = hash_password(new_password)
         # Changing a password ends every other session.
         await self.repo.revoke_all_sessions(user.id, except_id=keep_session.id)
+        add_event(
+            self.db,
+            "security",
+            "auth.password_changed",
+            message="Password changed",
+            user_id=user.id,
+        )
         await self.db.commit()
 
     # --- federated sign-in ---------------------------------------------------------------------
@@ -156,6 +194,7 @@ class AuthService:
                     code="EMAIL_UNVERIFIED",
                 )
         else:
+            await self._require_signups_open()
             user = await self.repo.create_user_with_personal_tenant(
                 email=email,
                 display_name=display_name or email.split("@")[0],
@@ -182,6 +221,26 @@ class AuthService:
             ip_address=ip_address,
         )
         await self.repo.touch_last_login(user)
+        user.last_active_at = utcnow()
+        add_event(
+            self.db,
+            "security",
+            "auth.sign_in",
+            message="Signed in",
+            user_id=user.id,
+            metadata={"session_id": str(record.id)},
+        )
+        if user.role in STAFF_ROLES:
+            from app.services.admin_audit import AdminAuditService
+
+            AdminAuditService(self.db).add(
+                actor=user,
+                action="admin.login",
+                resource_type="session",
+                resource_id=record.id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
         await self.db.commit()
         return IssuedSession(token=token, record=record)
 
@@ -200,6 +259,7 @@ class AuthService:
         if now - record.last_seen_at > SESSION_TOUCH_INTERVAL:
             record.last_seen_at = now
             record.expires_at = now + timedelta(seconds=self.settings.session_ttl_seconds)
+            user.last_active_at = now
             await self.db.commit()
         return AuthContext(user=user, session=record)
 

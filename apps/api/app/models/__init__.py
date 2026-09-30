@@ -1,6 +1,7 @@
 """Import every model here so Alembic autogenerate and Base.metadata see them."""
 
 from app.db.base import Base
+from app.models.admin import AdminAuditEvent, PlatformEvent, PlatformSetting
 from app.models.ai import (
     AIApproval,
     AIMessage,
@@ -24,6 +25,7 @@ from app.models.automation import (
     AutomationStatus,
     AutomationTemplate,
 )
+from app.models.avatar import UserAvatar
 from app.models.integration import (
     ConnectionStatus,
     ExternalItem,
@@ -41,13 +43,16 @@ from app.models.note import (
     NoteVersion,
     Tag,
 )
-from app.models.avatar import UserAvatar
 from app.models.notification import Notification, NotificationKind
 from app.models.task import Task, TaskPriority, TaskSource, TaskStatus
 from app.models.tenant import Tenant, TenantKind
-from app.models.user import AuthIdentity, SignInProvider, User, UserSession
+from app.models.user import AuthIdentity, PlatformRole, SignInProvider, User, UserSession
 
 __all__ = [
+    "AdminAuditEvent",
+    "PlatformEvent",
+    "PlatformRole",
+    "PlatformSetting",
     "AIApproval",
     "Automation",
     "AutomationAction",

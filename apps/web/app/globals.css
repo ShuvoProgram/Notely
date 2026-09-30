@@ -658,6 +658,14 @@ html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
     transform: translateY(0);
   }
 }
+/* Horizontal strips that scroll by touch or trackpad (admin phone tabs) without a visible bar. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @utility animate-fade-up {
   animation: notely-fade-up var(--dur-slow) var(--ease-out) both;
 }

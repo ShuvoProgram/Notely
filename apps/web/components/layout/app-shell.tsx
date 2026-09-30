@@ -9,6 +9,7 @@ import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
 import { FolderSidebar } from "@/features/folders/components/folder-sidebar";
+import { MaintenanceBanner } from "@/features/admin/components/maintenance-banner";
 import { NotificationBell } from "@/features/notifications/components/notification-bell";
 import { AppBackdrop, AppearanceSync } from "@/lib/appearance/appearance-sync";
 import { SfxPreferenceSync } from "@/lib/sfx/sfx-preference-sync";
@@ -84,6 +85,7 @@ export function AppShell({ user, children }: { user: User; children: React.React
           </div>
         </header>
 
+        <MaintenanceBanner />
         <main id="main" tabIndex={-1} className="scrollbar-thin flex-1 overflow-y-auto pb-[var(--mobile-nav-space)] focus:outline-none">
           <div className="app-canvas mx-auto w-full max-w-6xl px-4 py-6 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0 sm:px-6 sm:py-8">{children}</div>
         </main>

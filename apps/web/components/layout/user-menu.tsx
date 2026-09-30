@@ -1,6 +1,6 @@
 "use client";
 
-import { LifeBuoy, LogOut, Settings, UserRound } from "@/components/icons";
+import { LifeBuoy, LogOut, Settings, ShieldCheck, UserRound } from "@/components/icons";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/layout/user-avatar";
@@ -46,6 +46,14 @@ export function UserMenu({ initialUser }: { initialUser: User }) {
             <Settings aria-hidden /> Settings
           </Link>
         </DropdownMenuItem>
+        {user.role && user.role !== "user" ? (
+          // Staff only. Showing it is a convenience; /admin and its API authorize on the server.
+          <DropdownMenuItem asChild>
+            <Link href="/admin">
+              <ShieldCheck aria-hidden /> Admin console
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem asChild>
           <a href={`mailto:${LEGAL.contactEmail}?subject=Notely%20help`}>
             <LifeBuoy aria-hidden /> Help &amp; support

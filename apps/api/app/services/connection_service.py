@@ -51,6 +51,7 @@ from app.models.user import User
 from app.services.audit_service import AuditService
 from app.services.credential_vault import CredentialVault
 from app.services.notification_service import NotificationService
+from app.services.platform_events import add_event, record_event
 
 log = get_logger(__name__)
 
@@ -457,6 +458,15 @@ class ConnectionService:
             client = self._oauth_client(provider)
         if error or not code:
             metrics.oauth_failures.labels(provider_id, "authorize").inc()
+            add_event(
+                self.db,
+                "error",
+                "oauth_failed",
+                source=provider_id,
+                message=f"Authorization {'denied' if error else 'returned no code'}",
+                user_id=conn.user_id,
+                metadata={"stage": "authorize", "reason": (error or "no_code")[:60]},
+            )
             await self._fail(
                 conn,
                 ProviderError(
@@ -474,8 +484,16 @@ class ConnectionService:
             raise api_error
         try:
             tokens = await client.exchange_code(code, record.get("verifier"))
-        except Exception:
+        except Exception as exc:
             metrics.oauth_failures.labels(provider_id, "exchange").inc()
+            await record_event(
+                "error",
+                "oauth_failed",
+                source=provider_id,
+                message=f"Token exchange failed ({type(exc).__name__})",
+                user_id=conn.user_id,
+                metadata={"stage": "exchange"},
+            )
             raise
         self.vault.store_tokens(conn, tokens)
         conn.token_expires_at = (
@@ -656,6 +674,16 @@ class ConnectionService:
     async def _fail(
         self, conn: UserConnection, error: ProviderError, *, status: ConnectionStatus | None = None
     ) -> None:
+        if error.kind in (ProviderErrorKind.auth_failed, ProviderErrorKind.expired):
+            add_event(
+                self.db,
+                "error",
+                "connector_auth_failed",
+                source=conn.provider,
+                message=error.user_message()[0],
+                user_id=conn.user_id,
+                metadata={"kind": error.kind.value},
+            )
         conn.status = status or status_from_error(error)
         conn.last_error = error.user_message()[1]
         conn.last_error_code = error.kind.value

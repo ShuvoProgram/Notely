@@ -197,4 +197,16 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "request_id": getattr(request.state, "request_id", None),
             },
         )
+        from app.core.middleware import route_template
+        from app.services.platform_events import record_event
+
+        # Durable record for the admin dashboard: route template + exception type only.
+        await record_event(
+            "error",
+            "api_error",
+            source=f"{request.method} {route_template(request)}",
+            message=type(exc).__name__,
+            user_id=getattr(request.state, "user_id", None),
+            metadata={"request_id": getattr(request.state, "request_id", None)},
+        )
         return error_response(500, "INTERNAL_ERROR", "Something went wrong on our side.")

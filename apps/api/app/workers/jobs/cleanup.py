@@ -32,6 +32,23 @@ async def cleanup_expired_sessions(_: dict[str, Any]) -> int:
     return deleted
 
 
+PLATFORM_EVENT_RETENTION = timedelta(days=90)
+
+
+async def purge_platform_events(_: dict[str, Any]) -> int:
+    """Platform events feed the admin dashboard's recent history; 90 days is plenty. The admin
+    audit log is not purged — it is the record of who changed what."""
+    from app.models.admin import PlatformEvent
+
+    cutoff = utcnow() - PLATFORM_EVENT_RETENTION
+    async with get_session_factory()() as db:
+        result = await db.execute(delete(PlatformEvent).where(PlatformEvent.occurred_at < cutoff))
+        await db.commit()
+    deleted = int(getattr(result, "rowcount", 0) or 0)
+    log.info("purge_platform_events", extra={"deleted": deleted})
+    return deleted
+
+
 async def purge_trashed_notes(_: dict[str, Any]) -> int:
     """Permanently delete notes that have sat in the trash longer than the retention window."""
     from app.repositories.note_repository import NoteRepository

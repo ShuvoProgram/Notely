@@ -1,5 +1,7 @@
 /** Mirrors `apps/api/app/schemas/auth.py`. Keep in sync until shared-types is generated from OpenAPI. */
 
+export type PlatformRole = "user" | "viewer" | "support" | "admin";
+
 export interface User {
   id: string;
   tenant_id: string;
@@ -10,6 +12,8 @@ export interface User {
   has_password: boolean;
   two_factor_enabled: boolean;
   two_factor_required: boolean;
+  /** Platform role. Only decides whether the Admin link shows; the API authorizes every call. */
+  role?: PlatformRole;
   created_at: string;
   /** In-app notification switches by kind group; a missing key means on. */
   notifications: Record<string, boolean>;

@@ -14,6 +14,23 @@ if TYPE_CHECKING:
     from app.models.tenant import Tenant
 
 
+class PlatformRole(enum.StrEnum):
+    """Deployment-wide role, independent of tenants. Only staff roles can open /admin.
+
+    viewer  — read-only admin: every admin page, no changes.
+    support — viewer + account actions (suspend, reactivate, sign out).
+    admin   — support + roles, connector availability and platform settings.
+    """
+
+    user = "user"
+    viewer = "viewer"
+    support = "support"
+    admin = "admin"
+
+
+STAFF_ROLES = frozenset({PlatformRole.viewer, PlatformRole.support, PlatformRole.admin})
+
+
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
@@ -27,6 +44,14 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    # Refreshed with the sliding session (at most every few minutes); survives session cleanup.
+    last_active_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True, index=True)
+    # Stored as text (not a PG enum) so adding a role never needs a type migration.
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=PlatformRole.user, server_default="user", index=True
+    )
+    suspended_at: Mapped[datetime | None] = mapped_column(TZDateTime(), nullable=True)
+    suspension_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # User-level preference memory (AI model, summary length, ...). Never derived from note content.
     preferences: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False, default=dict)
     # TOTP material is encrypted with ENCRYPTION_KEY. A pending secret is deliberately separate
