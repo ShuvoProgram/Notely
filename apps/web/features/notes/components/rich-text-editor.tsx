@@ -13,7 +13,8 @@ import * as React from "react";
 
 import { EditorToolbar } from "@/features/notes/components/editor-toolbar";
 import { ListItemMove } from "@/features/notes/extensions/list-item-move";
-import { SelectionAIMenu } from "@/features/notes/components/selection-ai-menu";
+import { AIEditToolbar } from "@/features/notes/components/ai-edit-toolbar";
+import { AIEditTargetExtension } from "@/features/notes/extensions/ai-edit-target";
 import type { NoteAIAction, TipTapDoc } from "@/lib/api/types";
 import { playSfx } from "@/lib/sfx/player";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,10 @@ interface RichTextEditorProps {
   onReady?: (editor: Editor) => void;
   /** Hands a chosen AI action (from the toolbar or the selection menu) to the suggestion panel. */
   onAskAI?: (action: NoteAIAction) => void;
+  /** Enables contextual AI edits on selected text (the note they belong to). */
+  aiNoteId?: string;
+  /** Whether AI edits may change the note; viewers only get "Explain". */
+  aiCanEdit?: boolean;
   className?: string;
 }
 
@@ -43,10 +48,12 @@ export function RichTextEditor({
   content,
   documentKey,
   editable = true,
-  placeholder = "Start writing, or select text and ask AI…",
+  placeholder = "Start writing, or select text to edit it with AI…",
   onChange,
   onReady,
   onAskAI,
+  aiNoteId,
+  aiCanEdit = true,
   className,
 }: RichTextEditorProps) {
   const onChangeRef = React.useRef(onChange);
@@ -79,6 +86,7 @@ export function RichTextEditor({
         Typography,
         CharacterCount,
         ListItemMove,
+        AIEditTargetExtension,
         Placeholder.configure({ placeholder }),
       ],
       content,
@@ -112,7 +120,7 @@ export function RichTextEditor({
     <div className={cn("flex min-h-0 flex-1 flex-col", className)}>
       {editor && editable ? <EditorToolbar editor={editor} onAskAI={onAskAI} /> : null}
       <div ref={containerRef} className="relative flex-1">
-        {editor && editable && onAskAI ? <SelectionAIMenu editor={editor} containerRef={containerRef} onPick={onAskAI} /> : null}
+        {editor && aiNoteId ? <AIEditToolbar editor={editor} containerRef={containerRef} noteId={aiNoteId} canEdit={editable && aiCanEdit} /> : null}
         <EditorContent editor={editor} />
       </div>
       {editor ? (

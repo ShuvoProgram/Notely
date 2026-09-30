@@ -26,6 +26,7 @@ from app.models.automation import (
     AutomationTemplate,
 )
 from app.models.avatar import UserAvatar
+from app.models.journal import ActionRecord, BatchRevert
 from app.models.integration import (
     ConnectionStatus,
     ExternalItem,
@@ -49,6 +50,8 @@ from app.models.tenant import Tenant, TenantKind
 from app.models.user import AuthIdentity, PlatformRole, SignInProvider, User, UserSession
 
 __all__ = [
+    "ActionRecord",
+    "BatchRevert",
     "AdminAuditEvent",
     "PlatformEvent",
     "PlatformRole",

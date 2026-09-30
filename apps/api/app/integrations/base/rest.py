@@ -34,6 +34,7 @@ from app.integrations.base.triggers import ProviderTrigger
 
 Handler = Callable[[ProviderContext, Any], Awaitable[dict[str, Any]]]
 Verifier = Callable[[ProviderContext, Any, dict[str, Any]], Awaitable[Verification]]
+Reverter = Callable[[ProviderContext, dict[str, Any]], Awaitable[None]]
 
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,11 @@ class ProviderTool:
     scope: str | None = None
     # What the tool returns, described for automation data mapping (see OutputField).
     outputs: tuple[OutputField, ...] = ()
+    # Undo (change journal): ids from (args, result) and the call that reverses the write.
+    # Only set when the vendor supports a reliable reversal; otherwise say why in `irreversible`.
+    revert_ref: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
+    revert: Reverter | None = None
+    irreversible: str | None = None
 
 
 class RestOAuthProvider(IntegrationProvider):
@@ -228,6 +234,9 @@ class RestOAuthProvider(IntegrationProvider):
                     summarize=tool.summarize,
                     verify=self._bind_verifier(tool.verify) if tool.verify else None,
                     outputs=tool.outputs,
+                    revert=self._bind_reverter(tool.revert) if tool.revert else None,
+                    revert_ref=tool.revert_ref,
+                    irreversible=tool.irreversible,
                 )
             )
         return specs
@@ -270,6 +279,14 @@ class RestOAuthProvider(IntegrationProvider):
     ) -> Callable[[ToolContext, Any, dict[str, Any]], Awaitable[Verification]]:
         async def run(tool_ctx: ToolContext, args: Any, result: dict[str, Any]) -> Verification:
             return await verifier(await self._provider_context(tool_ctx), args, result)
+
+        return run
+
+    def _bind_reverter(
+        self, reverter: Reverter
+    ) -> Callable[[ToolContext, dict[str, Any]], Awaitable[None]]:
+        async def run(tool_ctx: ToolContext, ref: dict[str, Any]) -> None:
+            await reverter(await self._provider_context(tool_ctx), ref)
 
         return run
 

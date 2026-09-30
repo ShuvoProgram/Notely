@@ -441,6 +441,9 @@ class SlackProvider(RestOAuthProvider):
             body = await self._call(ctx, "chat.postMessage", **params)
             return {"ts": body.get("ts"), "channel": body.get("channel"), "thread_ts": a.thread_ts}
 
+        async def delete_message(ctx: ProviderContext, ref: dict[str, Any]) -> None:
+            await self._call(ctx, "chat.delete", channel=ref["channel"], ts=ref["ts"])
+
         async def verify_post_message(
             ctx: ProviderContext, a: PostMessageArgs, result: dict[str, Any]
         ) -> Verification:
@@ -534,6 +537,9 @@ class SlackProvider(RestOAuthProvider):
                 verify=verify_post_message,
                 scope="chat:write",
                 outputs=(F("ts", "Message timestamp"), F("channel", "Channel ID")),
+                # People may already have read it; deleting removes it from the channel.
+                revert_ref=lambda a, r: {"ts": r["ts"], "channel": r["channel"]},
+                revert=delete_message,
             ),
             ProviderTool(
                 "create_channel",

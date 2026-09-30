@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/layout/empty-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RunChanges } from "@/features/history/components/change-history";
 import { messageFor } from "@/features/auth/components/auth-form-error";
 import { cn } from "@/lib/utils";
 
@@ -195,6 +196,7 @@ export function RunDetailView({ automationId, runId, onBack, onFinished }: { aut
                 </div>
               </section>
             ))}
+          {TERMINAL_RUN.has(run.status) && run.run_mode !== "test" ? <RunChanges kind="automation_run" batchId={run.id} /> : null}
           <ol aria-label="Steps in this run">
             {run.steps.map((step) => (
               <StepRow key={step.step_id} step={step} run={run} automationId={automationId} onRetried={() => detail.refetch()} />

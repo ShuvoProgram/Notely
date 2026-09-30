@@ -25,6 +25,7 @@ from app.integrations.base.rest import RestOAuthProvider
 from app.integrations.registry import get_providers
 from app.models.ai import RiskLevel
 from app.models.integration import ConnectionStatus, UserConnection
+from app.services import action_journal
 
 BUILTIN_APPS: dict[str, dict[str, Any]] = {
     "notely": {"name": "Notely", "logo": None, "category": "notely"},
@@ -186,6 +187,7 @@ def _provider_handler(provider_id: str, tool_name: str) -> Any:
         tool_ctx = ToolContext(user=ctx.user, db=ctx.db, credential=credential)
         try:
             result = await spec.handler(tool_ctx, parsed)
+            action_journal.record_tool_call(ctx.db, spec, parsed, result)
             if spec.verify is not None and spec.risk != RiskLevel.read:
                 verification = await spec.verify(tool_ctx, parsed, result)
                 if verification.status == "failed":

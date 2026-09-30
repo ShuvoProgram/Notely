@@ -22,6 +22,7 @@ from app.models.integration import ConnectionStatus
 from app.models.notification import NotificationKind
 from app.models.task import Task, TaskStatus
 from app.models.user import User
+from app.services import action_journal as journal
 from app.services.connection_service import ConnectionService
 from app.services.notification_service import NotificationService
 
@@ -95,8 +96,19 @@ class CalendarSyncService:
         except Exception:  # noqa: BLE001 — network/parse errors are still "sync failed"
             await self._record_failure(user, task, "The calendar request failed.")
             raise
+        created = not task.calendar_event_id
         task.calendar_id = calendar
         task.calendar_event_id = str(event.get("id") or task.calendar_event_id or "")
+        if created:
+            journal.record(
+                self.db,
+                provider=PROVIDER,
+                kind="google_calendar.task_event",
+                resource_type="calendar_event",
+                resource_id=task.calendar_event_id,
+                label=f"Added “{task.title}” to Google Calendar",
+                revert_ref={"task_id": str(task.id), "event_id": task.calendar_event_id},
+            )
         task.calendar_event_url = event.get("htmlLink") or task.calendar_event_url
         task.calendar_synced_at = utcnow()
         task.calendar_error = None

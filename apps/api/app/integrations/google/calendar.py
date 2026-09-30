@@ -167,6 +167,14 @@ class GoogleCalendarProvider(GoogleProvider):
                 return Verification.failed("The event is cancelled")
             return Verification.verified("Event is on your Google Calendar")
 
+        async def delete_event(ctx: ProviderContext, ref: dict[str, Any]) -> None:
+            async with self.http(ctx) as http:
+                await http.delete(
+                    f"/calendars/primary/events/{ref['event_id']}",
+                    # Attendees who got the invitation also get the cancellation.
+                    params={"sendUpdates": "all" if ref.get("attendees") else "none"},
+                )
+
         return [
             ProviderTool(
                 "list_events",
@@ -195,5 +203,7 @@ class GoogleCalendarProvider(GoogleProvider):
                 create_event,
                 lambda a: f"Create event “{a.summary}” at {a.start.isoformat()}",
                 verify=verify_event,
+                revert_ref=lambda a, r: {"event_id": r["event_id"], "attendees": bool(a.attendees)},
+                revert=delete_event,
             ),
         ]

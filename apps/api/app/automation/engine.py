@@ -34,6 +34,7 @@ from app.models.automation import (
     AutomationExecutionStep,
 )
 from app.models.user import User
+from app.services import action_journal
 from app.services.connection_service import ConnectionService
 
 log = get_logger(__name__)
@@ -335,7 +336,11 @@ class WorkflowEngine:
             attempts += 1
             row.attempts = (row.attempts or 0) + 1
             try:
-                result = await action.handler(ctx, dict(inputs))
+                # Everything this step changes is journaled against the run (reversible later).
+                with action_journal.batch(
+                    "automation_run", state.execution.id, ctx.user, source_ref=step.id
+                ):
+                    result = await action.handler(ctx, dict(inputs))
                 break
             except ActionError as exc:
                 if exc.details.get("retryable") and attempts <= step.retries:

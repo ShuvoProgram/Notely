@@ -35,6 +35,7 @@ from app.schemas.notes import (
     TagCreate,
     TagUpdate,
 )
+from app.services import action_journal as journal
 from app.services.email_templates import invitation_html
 from app.services.notification_service import NotificationService
 from app.services.rich_text import EMPTY_DOC, to_plain_text
@@ -187,6 +188,16 @@ class NoteService:
                 return c.role.value
         return "viewer"
 
+    async def get_owned(self, user: User, note_id: uuid.UUID) -> Note:
+        """The user's own note. A note merely shared with them is refused (403), anything
+        else is not found — so trash, restore, delete forever and sharing stay the owner's."""
+        note = await self.notes.get(note_id, user.id)
+        if note is not None:
+            return note
+        if await self.notes.get_shared(note_id, user.id) is not None:
+            raise Forbidden("Only the note's owner can do that.", code="NOTE_NOT_OWNER")
+        raise NotFound("Note not found.")
+
     async def get_editable(self, user: User, note_id: uuid.UUID) -> Note:
         note = await self.get_note(user, note_id)
         if self.access_of(user, note) == "viewer":
@@ -209,6 +220,14 @@ class NoteService:
         )
         if payload.tag_ids:
             await self.notes.set_tags(note, await self._resolve_tags(user, payload.tag_ids))
+        journal.record(
+            self.db,
+            kind="note.create",
+            resource_type="note",
+            resource_id=note.id,
+            label=f"Created note “{note.title or 'Untitled'}”",
+            after=journal.note_snapshot(note),
+        )
         if commit:
             await self.db.commit()
         else:
@@ -231,6 +250,7 @@ class NoteService:
         # updated_at, or merely opening a note would move it to the top of the list.
         content_changed = False
         before_title, before_body = note.title, note.content_json
+        before_state = journal.note_snapshot(note)
 
         if "title" in changes and changes["title"] is not None:
             new_title = changes["title"].strip()
@@ -248,12 +268,15 @@ class NoteService:
             note.reminder_at = None
         elif "reminder_at" in changes and changes["reminder_at"] is not None:
             note.reminder_at = changes["reminder_at"]
-        if changes.get("clear_folder"):
-            note.folder_id = None
-        elif "folder_id" in changes and changes["folder_id"] is not None:
-            if await self.folders.get(changes["folder_id"], user.id) is None:
-                raise NotFound("Folder not found.")
-            note.folder_id = changes["folder_id"]
+        if changes.get("clear_folder") or changes.get("folder_id") is not None:
+            # Folders are personal and a note has one folder: only its owner files it. (An
+            # editor filing it would put the owner's note into the editor's folder.)
+            if note.user_id != user.id:
+                raise Forbidden("Only the note's owner can move it to a folder.", code="NOT_OWNER")
+            if changes.get("clear_folder"):
+                note.folder_id = None
+            else:
+                note.folder_id = await self._own_folder_id(user, changes["folder_id"])
         if "tag_ids" in changes and changes["tag_ids"] is not None:
             await self.notes.set_tags(note, await self._resolve_tags(user, changes["tag_ids"]))
         if "is_favorite" in changes and changes["is_favorite"] is not None:
@@ -264,6 +287,18 @@ class NoteService:
         if content_changed:
             await self._snapshot_if_due(user, note, before_title, before_body)
             await self.notes.mark_updated(note)
+        await self.db.flush()
+        old, new = journal.diff(before_state, journal.note_snapshot(note))
+        if set(new) - {"version"}:
+            journal.record(
+                self.db,
+                kind="note.update",
+                resource_type="note",
+                resource_id=note.id,
+                label=f"Updated note “{note.title or 'Untitled'}”",
+                before=old,
+                after=new,
+            )
         if commit:
             await self.db.commit()
         else:
@@ -365,9 +400,9 @@ class NoteService:
         """Create (or re-send) an invitation and email the link. The row exists whether or not
         the email goes out — the delivery result tells the caller what really happened."""
         settings = get_settings()
-        note = await self.get_note(user, note_id)
-        if note.user_id != user.id:
-            raise Conflict("Only the owner can share this note.", code="NOTE_NOT_OWNER")
+        note = await self.get_owned(user, note_id)
+        if note.deleted_at is not None:
+            raise Conflict("Restore the note before sharing it.", code="NOTE_IN_TRASH")
         email = payload.email.lower()
         if email == user.email.lower():
             raise ValidationFailed("That is you.", details={"fields": {"email": ["That is you"]}})
@@ -395,7 +430,10 @@ class NoteService:
             )
             self.db.add(row)
         if match is not None:
+            # Like Google Keep: sharing with someone who has an account gives them access
+            # right away (the note shows in their Shared list); the email is a heads-up.
             row.user_id = match.id
+            row.accepted_at = row.accepted_at or utcnow()
         row.invite_token = secrets.token_urlsafe(32)
         row.invited_at = utcnow()
         row.invite_expires_at = utcnow() + timedelta(days=settings.invitation_ttl_days)
@@ -413,7 +451,42 @@ class NoteService:
         await self.db.commit()
         delivery = await self._send_invitation(user, note, row)
         await self.db.refresh(note)
+        await self.db.refresh(row, attribute_names=["user"])
         return row, delivery
+
+    async def share_suggestions(
+        self, user: User, q: str, limit: int = 8
+    ) -> list[dict[str, str | None]]:
+        """Distinct people from your existing shares: those you invited, and owners who shared
+        with you. Matched on email or display name; your own address is never suggested."""
+        term = q.strip().lower()
+        people: dict[str, str | None] = {}
+        invited = await self.db.execute(
+            select(NoteCollaborator.email, User.display_name)
+            .join(Note, Note.id == NoteCollaborator.note_id)
+            .outerjoin(User, User.id == NoteCollaborator.user_id)
+            .where(Note.user_id == user.id)
+            .order_by(NoteCollaborator.created_at.desc())
+            .limit(200)
+        )
+        for email, name in invited.all():
+            people.setdefault(email, name)
+        owners = await self.db.execute(
+            select(User.email, User.display_name)
+            .join(Note, Note.user_id == User.id)
+            .join(NoteCollaborator, NoteCollaborator.note_id == Note.id)
+            .where(NoteCollaborator.user_id == user.id)
+            .limit(200)
+        )
+        for email, name in owners.all():
+            people.setdefault(email, name)
+        people.pop(user.email.lower(), None)
+        out = [
+            {"email": email, "display_name": name}
+            for email, name in people.items()
+            if not term or term in email or (name and term in name.lower())
+        ]
+        return out[:limit]
 
     async def _send_invitation(
         self, inviter: User, note: Note, row: NoteCollaborator
@@ -481,9 +554,7 @@ class NoteService:
     async def update_collaborator(
         self, user: User, note_id: uuid.UUID, collaborator_id: uuid.UUID, role: CollaboratorRole
     ) -> NoteCollaborator:
-        note = await self.get_note(user, note_id)
-        if note.user_id != user.id:
-            raise Conflict("Only the owner can change access.", code="NOTE_NOT_OWNER")
+        note = await self.get_owned(user, note_id)
         row = next((c for c in note.collaborators if c.id == collaborator_id), None)
         if row is None:
             raise NotFound("Collaborator not found.")
@@ -512,11 +583,33 @@ class NoteService:
         return tags
 
     async def trash_note(self, user: User, note_id: uuid.UUID) -> Note:
-        note = await self.get_note(user, note_id)
+        note = await self.get_owned(user, note_id)
         if note.deleted_at is None:
             note.deleted_at = utcnow()
             await self.db.commit()
         return note
+
+    async def _own_folder_id(self, user: User, folder_id: uuid.UUID) -> uuid.UUID:
+        if await self.folders.get(folder_id, user.id) is None:
+            raise NotFound("That folder no longer exists.", code="FOLDER_NOT_FOUND")
+        return folder_id
+
+    async def move_many(
+        self, user: User, ids: list[uuid.UUID], folder_id: uuid.UUID | None
+    ) -> int:
+        """File several of the user's own notes in one folder (or none) in one commit, so a
+        bulk move is all-or-nothing. Foreign, trashed or unknown ids are skipped."""
+        target = await self._own_folder_id(user, folder_id) if folder_id else None
+        moved = 0
+        for nid in dict.fromkeys(ids):
+            note = await self.notes.get(nid, user.id)
+            if note is None or note.deleted_at is not None:
+                continue
+            if note.folder_id != target:
+                note.folder_id = target
+                moved += 1
+        await self.db.commit()
+        return moved
 
     async def trash_many(self, user: User, ids: list[uuid.UUID]) -> int:
         """Move several of the user's own notes to the trash in one commit. Ids that are not
@@ -573,13 +666,13 @@ class NoteService:
         return len(rows)
 
     async def restore_note(self, user: User, note_id: uuid.UUID) -> Note:
-        note = await self.get_note(user, note_id)
+        note = await self.get_owned(user, note_id)
         note.deleted_at = None
         await self.db.commit()
         return note
 
     async def purge_note(self, user: User, note_id: uuid.UUID) -> None:
-        note = await self.get_note(user, note_id)
+        note = await self.get_owned(user, note_id)
         if note.deleted_at is None:
             raise Conflict(
                 "Move the note to the trash before deleting it permanently.",
@@ -590,15 +683,17 @@ class NoteService:
 
     async def duplicate_note(self, user: User, note_id: uuid.UUID) -> Note:
         source = await self.get_note(user, note_id)
+        own = source.user_id == user.id
         copy_note = await self.notes.create(
             user,
             title=f"{source.title} (copy)" if source.title else "Untitled (copy)",
             content_json=copy.deepcopy(source.content_json),
             plain_text=source.plain_text,
-            folder_id=source.folder_id,
+            # A guest's copy is theirs: the owner's folder and tags don't carry over.
+            folder_id=source.folder_id if own else None,
             metadata_={"duplicated_from": str(source.id)},
         )
-        if source.tags:
+        if own and source.tags:
             await self.notes.set_tags(copy_note, list(source.tags))
         await self.db.commit()
         await self.db.refresh(copy_note)

@@ -3,6 +3,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { foldersApi, notesApi, searchApi, tagsApi } from "@/features/notes/api";
+import { ApiError } from "@/lib/api/client";
 import { playSfx } from "@/lib/sfx/player";
 import type { Note, NoteCreateInput, NoteListParams, NoteSummary, NoteUpdateInput } from "@/lib/api/types";
 
@@ -30,6 +31,9 @@ export function useNote(id: string | null) {
     queryFn: () => notesApi.get(id as string),
     enabled: Boolean(id),
     staleTime: 10_000,
+    // Someone else's note can be unshared at any moment: re-check access in the background.
+    refetchInterval: (query) => (query.state.data && query.state.data.access !== "owner" ? 30_000 : false),
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 1,
   });
 }
 

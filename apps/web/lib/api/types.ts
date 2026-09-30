@@ -201,6 +201,8 @@ export interface Note extends NoteSummary {
   summary: string | null;
   metadata: Record<string, unknown>;
   collaborators: Collaborator[];
+  /** The note's owner (shown to collaborators in the sharing dialog). */
+  owner?: { id: string; display_name: string; email: string } | null;
 }
 
 export type NoteView = "active" | "favorites" | "archived" | "trash" | "shared" | "all";

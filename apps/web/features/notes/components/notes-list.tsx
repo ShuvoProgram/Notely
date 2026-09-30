@@ -158,15 +158,16 @@ export function NotesList({ activeNoteId }: { activeNoteId?: string }) {
   const queryClient = useQueryClient();
   const move = useMutation({
     mutationFn: ({ ids, folderId }: { ids: string[]; folderId: string | null }) =>
-      Promise.all(ids.map((id) => notesApi.update(id, folderId ? { folder_id: folderId } : { clear_folder: true }))),
-    onSuccess: (moved, { folderId }) => {
+      notesApi.moveMany(ids, folderId),
+    onSuccess: ({ moved }, { folderId }) => {
       setMoving(false);
       selection.exit();
       const where = folderId ? folders.find((f) => f.id === folderId)?.name ?? "the folder" : "no folder";
-      toast.success(`Moved ${moved.length === 1 ? "1 note" : `${moved.length} notes`} to ${where}`);
+      toast.success(moved ? `Moved ${moved === 1 ? "1 note" : `${moved} notes`} to ${where}` : `Already in ${where}`);
     },
     onError: (e) => toast.error(messageFor(e)),
     onSettled: () => {
+      // Lists and every open note (its breadcrumb shows the folder) read fresh from the server.
       void queryClient.invalidateQueries({ queryKey: ["notes"] });
       void queryClient.invalidateQueries({ queryKey: noteKeys.folders });
     },

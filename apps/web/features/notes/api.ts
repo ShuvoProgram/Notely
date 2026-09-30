@@ -51,12 +51,16 @@ export const notesApi = {
     api.post<InviteResult>(`/notes/${id}/collaborators`, input),
   invitation: (token: string) => api.get<Invitation>(`/invitations/${encodeURIComponent(token)}`),
   acceptInvitation: (token: string) => api.post<Note>(`/invitations/${encodeURIComponent(token)}/accept`, {}),
+  /** File several of your notes in one folder (null = no folder), all-or-nothing. */
+  moveMany: (ids: string[], folderId: string | null) => api.post<{ moved: number }>("/notes/bulk/move", { ids, folder_id: folderId }),
   trashMany: (ids: string[]) => api.post<{ moved: number }>("/notes/bulk/trash", { ids }),
   restoreMany: (ids: string[]) => api.post<{ restored: number }>("/notes/bulk/restore", { ids }),
   /** Delete forever. The server only purges notes that are already in the trash. */
   purgeMany: (ids: string[]) => api.post<{ deleted: number }>("/notes/bulk/purge", { ids }),
   /** Drop your access to notes others shared with you. */
   leaveMany: (ids: string[]) => api.post<{ left: number }>("/notes/bulk/leave", { ids }),
+  shareSuggestions: (q: string) =>
+    api.get<{ email: string; display_name: string | null }[]>(`/notes/share-suggestions${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   updateCollaborator: (id: string, collaboratorId: string, role: CollaboratorRole) =>
     api.patch<Collaborator>(`/notes/${id}/collaborators/${collaboratorId}`, { role }),
   removeCollaborator: (id: string, collaboratorId: string) =>
