@@ -43,6 +43,7 @@ from app.schemas.ai import (
 )
 from app.services.ai_settings_service import AISettingsService
 from app.services.audit_service import AuditService
+from app.services.platform_settings import enforce_ai_daily_limit, require_feature
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 audit_router = APIRouter(prefix="/audit", tags=["audit"])
@@ -60,6 +61,8 @@ async def chat(
     The run executes in the background (app/ai/streams.py): closing this stream does not stop
     it. Another conversation's runs are never affected; a second send to a conversation that is
     still working fails with 409 RUN_IN_PROGRESS."""
+    await require_feature(db, "ai_enabled", "The AI assistant is turned off right now.")
+    await enforce_ai_daily_limit(db, ctx.user.id)
     prepared = await AIRunner(db, settings).prepare_chat(
         ctx.user,
         text=payload.message,

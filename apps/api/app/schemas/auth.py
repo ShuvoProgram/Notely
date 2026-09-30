@@ -89,6 +89,9 @@ class UserOut(BaseModel):
     has_password: bool
     two_factor_enabled: bool = False
     two_factor_required: bool = False
+    # Platform role, so the UI can offer the admin area. Authorization never trusts this:
+    # every admin endpoint re-reads the role from the database.
+    role: str = "user"
     created_at: datetime
     # In-app notification switches (per kind group); absent keys mean "on".
     notifications: dict[str, bool] = {}

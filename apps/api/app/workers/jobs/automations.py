@@ -34,6 +34,10 @@ async def run_due_automations(_: dict[str, Any]) -> int:
     factory = get_session_factory()
     async with factory() as db:
         await recover_stale_runs(db)
+        from app.services.platform_settings import PlatformSettings
+
+        if not await PlatformSettings(db).get("automations_enabled"):
+            return 0  # paused platform-wide by an admin; runs resume when it's switched back on
         due = list(
             (
                 await db.execute(

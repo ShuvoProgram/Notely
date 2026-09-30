@@ -1,4 +1,4 @@
-import { Activity, Bell, CheckSquare, Home, Plug, type IconComponent, NotebookPen, Palette, Settings, ShieldCheck, Sparkles, UserRound, Workflow } from "@/components/icons";
+import { Activity, Bell, CheckSquare, History, Home, LayoutGrid, Plug, type IconComponent, NotebookPen, Palette, Settings, Settings2, ShieldCheck, Sparkles, UserRound, Users, Workflow } from "@/components/icons";
 
 export interface NavItem {
   href: string;
@@ -46,5 +46,16 @@ export function isActive(pathname: string, item: NavItem, siblings: NavItem[] = 
   return !siblings.some((s) => s !== item && matches(s) && s.href.length > item.href.length);
 }
 
-export const navSets = { primary: primaryNav, phone: phoneNav, settings: settingsNav } as const;
+/** Admin console (/admin). Separate from the workspace nav; every page is authorized by the API. */
+export const adminNav: NavItem[] = [
+  { href: "/admin", label: "Overview", icon: LayoutGrid },
+  { href: "/admin/users", label: "Users", icon: Users, prefix: true },
+  { href: "/admin/automations", label: "Automations", icon: Workflow, prefix: true },
+  { href: "/admin/connectors", label: "Connectors", icon: Plug, prefix: true },
+  { href: "/admin/ai", label: "AI usage", icon: Sparkles },
+  { href: "/admin/audit", label: "Audit log", icon: History },
+  { href: "/admin/settings", label: "Settings", icon: Settings2 },
+];
+
+export const navSets = { primary: primaryNav, phone: phoneNav, settings: settingsNav, admin: adminNav } as const;
 export type NavSet = keyof typeof navSets;

@@ -29,7 +29,7 @@ export function useSignInProviders() {
 
 /** Where to go after sign-in: an in-app path from `?next=`, never an external URL. */
 export function safeNext(value: string | null | undefined): string {
-  if (value && /^\/(app|invite)(\/|$|\?)/.test(value) && !value.startsWith("//")) return value;
+  if (value && /^\/(app|invite|admin)(\/|$|\?)/.test(value) && !value.startsWith("//")) return value;
   return "/app";
 }
 

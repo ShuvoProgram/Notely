@@ -173,3 +173,46 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
             if origin == "null" or request.headers.get("sec-fetch-site") == "cross-site":
                 return error_response(403, "CSRF_ORIGIN_REJECTED", "Request origin not allowed.")
         return await call_next(request)
+
+
+class MaintenanceModeMiddleware(BaseHTTPMiddleware):
+    """While an admin has maintenance mode on, refuse changes with 503 + the admin's message.
+
+    Reads stay available, and sign-in, the admin area, OAuth callbacks and provider webhooks
+    are never blocked (an admin must always be able to switch it off again). The setting is
+    cached per process for a few seconds, so this costs no query on most requests.
+    """
+
+    def __init__(self, app: object, settings: Settings) -> None:
+        super().__init__(app)  # type: ignore[arg-type]
+        prefix = settings.api_prefix
+        self.prefix = prefix
+        self.exempt = tuple(
+            f"{prefix}{p}" for p in ("/auth/", "/admin", "/oauth/", "/webhooks/", "/system")
+        )
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        path = request.url.path
+        if (
+            request.method in UNSAFE_METHODS
+            and path.startswith(self.prefix)
+            and not path.startswith(self.exempt)
+        ):
+            from app.db.session import get_session_factory
+            from app.services.platform_settings import PlatformSettings
+
+            try:
+                async with get_session_factory()() as db:
+                    values = await PlatformSettings(db).values()
+            except Exception:  # noqa: BLE001 — never fail closed on a settings read
+                values = {}
+            if values.get("maintenance_mode"):
+                return error_response(
+                    503,
+                    "MAINTENANCE",
+                    str(values.get("maintenance_message") or "Notely is under maintenance."),
+                    headers={"Retry-After": "120"},
+                )
+        return await call_next(request)

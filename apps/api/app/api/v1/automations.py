@@ -26,6 +26,10 @@ from app.schemas.automations import (
     ValidateRequest,
 )
 from app.services.automation_service import AutomationService
+from app.services.platform_events import record_event
+from app.services.platform_settings import enforce_automation_limit, require_feature
+
+AUTOMATIONS_OFF = "Automations are turned off right now."
 
 router = APIRouter(prefix="/automations", tags=["automations"])
 
@@ -57,8 +61,23 @@ async def draft(
     payload: DraftRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> dict[str, Any]:
     """A reviewable workflow from plain language (or a change to an existing one)."""
+    await require_feature(db, "ai_enabled", "The AI assistant is turned off right now.")
     service = AutomationService(db, settings)
-    return ok(await draft_automation(service.context(ctx.user), payload))
+    try:
+        draft_out = await draft_automation(service.context(ctx.user), payload)
+    except Exception as exc:
+        await record_event(
+            "usage",
+            "ai_automation_draft_failed",
+            source="automations.draft",
+            message=type(exc).__name__,
+            user_id=ctx.user.id,
+        )
+        raise
+    await record_event(
+        "usage", "ai_automation_draft", source="automations.draft", user_id=ctx.user.id
+    )
+    return ok(draft_out)
 
 
 @router.post("/validate", response_model=Envelope[ValidateOut])
@@ -77,6 +96,8 @@ async def list_automations(ctx: CurrentAuth, db: DbDep, settings: SettingsDep) -
 async def create_automation(
     payload: AutomationIn, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> dict[str, Any]:
+    await require_feature(db, "automations_enabled", AUTOMATIONS_OFF)
+    await enforce_automation_limit(db, ctx.user.id)
     return ok(await AutomationService(db, settings).save(ctx.user, payload))
 
 
@@ -110,6 +131,8 @@ async def delete_automation(
 async def duplicate_automation(
     automation_id: uuid.UUID, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
 ) -> dict[str, Any]:
+    await require_feature(db, "automations_enabled", AUTOMATIONS_OFF)
+    await enforce_automation_limit(db, ctx.user.id)
     return ok(await AutomationService(db, settings).duplicate(ctx.user, automation_id))
 
 
@@ -150,6 +173,7 @@ async def run_now(
     settings: SettingsDep,
 ) -> dict[str, Any]:
     """Start a real run in the background; poll the run for progress."""
+    await require_feature(db, "automations_enabled", AUTOMATIONS_OFF)
     service = AutomationService(db, settings)
     return ok(await service.run(ctx.user, automation_id, payload.idempotency_key))
 
@@ -168,6 +192,7 @@ async def test_run(
     settings: SettingsDep,
 ) -> dict[str, Any]:
     """Reads and AI run for real; anything that would change data is only simulated."""
+    await require_feature(db, "automations_enabled", AUTOMATIONS_OFF)
     service = AutomationService(db, settings)
     return ok(await service.test(ctx.user, automation_id, payload.step_id))
 

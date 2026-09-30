@@ -11,7 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai.checkpoint import close_checkpointer, init_checkpointer
 from app.ai.streams import hub
 from app.api import health
-from app.api.v1 import ai, auth, automations, integrations, notes, notifications, tasks, users
+from app.api.v1 import (
+    admin,
+    ai,
+    auth,
+    automations,
+    integrations,
+    notes,
+    notifications,
+    system,
+    tasks,
+    users,
+)
 from app.core.config import Settings, get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.kv import close_redis
@@ -19,6 +30,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.middleware import (
     BodySizeLimitMiddleware,
     CSRFOriginMiddleware,
+    MaintenanceModeMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
@@ -71,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Middleware executes in reverse registration order; CORS must be outermost.
     app.add_middleware(SecurityHeadersMiddleware, settings=settings)
     app.add_middleware(BodySizeLimitMiddleware, settings=settings)
+    app.add_middleware(MaintenanceModeMiddleware, settings=settings)
     app.add_middleware(CSRFOriginMiddleware, settings=settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -100,6 +113,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(integrations.router)
     v1.include_router(integrations.oauth_router)
     v1.include_router(integrations.webhook_router)
+    v1.include_router(system.router)
+    v1.include_router(admin.router)
     if settings.ai_provider == "fake" and not settings.is_production:
         from app.api.v1 import ai_dev
 

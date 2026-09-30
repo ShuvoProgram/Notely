@@ -130,6 +130,32 @@ endpoint (Ollama, LM Studio, OpenRouter, Groq…), type a model name, paste an A
 and reports categorised failures (rejected key, unknown model, unreachable endpoint). Untick "Use
 this model" to fall back to the workspace LiteLLM gateway without losing the key.
 
+## Admin console
+
+`/admin` is a separate, staff-only console: overview metrics, user management (search, suspend,
+reactivate, sign out everywhere, roles), automation and connector monitoring, AI usage, the admin
+audit log and platform settings (maintenance mode, sign-ups, AI/automations switches, per-person
+limits, connector availability). Every number comes from the database.
+
+Roles live on `users.role` and are re-read from the database on every admin request:
+
+| Role      | Can                                                        |
+| --------- | ---------------------------------------------------------- |
+| `viewer`  | Read every admin page (read-only admin)                    |
+| `support` | + suspend / reactivate accounts, sign people out           |
+| `admin`   | + change roles, platform settings, connector availability  |
+
+Grant the first admin from the server (never from the UI or an env var anyone could race):
+
+```bash
+cd apps/api && uv run python -m app.manage set-role you@company.com admin
+uv run python -m app.manage list-staff
+```
+
+Admin access requires a sign-in younger than `ADMIN_SESSION_MAX_AGE_HOURS` (default 12) and, with
+`ADMIN_REQUIRE_2FA=true`, two-factor authentication. Non-staff get a 404 page and 403 from the API
+(the attempt is audited). See [docs/admin.md](docs/admin.md) for the data model and metric sources.
+
 ## Integrations
 
 Settings → Connections lists providers from the backend registry (`apps/api/app/integrations/registry.py`).

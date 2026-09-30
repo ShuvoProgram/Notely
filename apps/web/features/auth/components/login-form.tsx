@@ -11,7 +11,7 @@ import { AuthField, PasswordField } from "@/features/auth/components/auth-fields
 import { AuthFormError } from "@/features/auth/components/auth-form-error";
 import { AuthHeading, AuthSubmit } from "@/features/auth/components/auth-ui";
 import { SignInProviderButtons } from "@/features/auth/components/sign-in-provider-buttons";
-import { useLogin } from "@/features/auth/hooks";
+import { useLogin, safeNext } from "@/features/auth/hooks";
 import { authApi } from "@/features/auth/api";
 import { ApiError } from "@/lib/api/client";
 import { loginSchema, type LoginValues } from "@/features/auth/schemas";
@@ -74,7 +74,7 @@ function TwoFactorStep({ next }: { next: string | null }) {
     try {
       await authApi.verifyTwoFactor(code);
       setDone(true);
-      router.push(next?.startsWith("/app") ? next : "/app");
+      router.push(safeNext(next));
       router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "That verification code is not valid.");

@@ -15,6 +15,7 @@ from app.workers.jobs import automations, cleanup, integrations
 
 cleanup_expired_sessions = instrumented(cleanup.cleanup_expired_sessions)
 purge_trashed_notes = instrumented(cleanup.purge_trashed_notes)
+purge_platform_events = instrumented(cleanup.purge_platform_events)
 check_connections = instrumented(integrations.check_connections)
 process_webhook = instrumented(integrations.process_webhook)
 refresh_oauth_tokens = instrumented(integrations.refresh_oauth_tokens)
@@ -36,6 +37,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(cleanup_expired_sessions, hour=None, minute=17, run_at_startup=True),  # type: ignore[arg-type]
         cron(purge_trashed_notes, hour=3, minute=30),  # type: ignore[arg-type]
+        cron(purge_platform_events, hour=3, minute=45),  # type: ignore[arg-type]
         cron(check_connections, hour=None, minute={5, 35}),  # type: ignore[arg-type]
         cron(refresh_oauth_tokens, hour=None, minute=set(range(0, 60, 5))),  # type: ignore[arg-type]
         cron(run_due_automations, hour=None, minute=set(range(0, 60))),  # type: ignore[arg-type]

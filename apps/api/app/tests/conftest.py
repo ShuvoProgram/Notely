@@ -73,6 +73,9 @@ async def _database() -> AsyncIterator[None]:
     configure_database(engine)
     kv.reset()
     kv.force_memory()
+    from app.services.platform_settings import invalidate_cache
+
+    invalidate_cache()
     from app.workers import queue
 
     queue.reset()
