@@ -16,6 +16,7 @@ from app.api.v1 import (
     ai,
     auth,
     automations,
+    history,
     integrations,
     notes,
     notifications,
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     v1.include_router(integrations.oauth_router)
     v1.include_router(integrations.webhook_router)
     v1.include_router(system.router)
+    v1.include_router(history.router)
     v1.include_router(admin.router)
     if settings.ai_provider == "fake" and not settings.is_production:
         from app.api.v1 import ai_dev

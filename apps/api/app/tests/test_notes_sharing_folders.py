@@ -63,10 +63,14 @@ async def test_move_between_folders_and_back(client: AsyncClient) -> None:
     await client.patch(f"/api/v1/notes/{n['id']}", json={"folder_id": home}, headers=ORIGIN)
     assert await in_folder(client, work) == []
     assert await in_folder(client, home) == ["Plan"]
-    counts = {f["name"]: f["note_count"] for f in (await client.get("/api/v1/folders")).json()["data"]}
+    counts = {
+        f["name"]: f["note_count"] for f in (await client.get("/api/v1/folders")).json()["data"]
+    }
     assert counts == {"Home": 1, "Work": 0}
 
-    out = await client.patch(f"/api/v1/notes/{n['id']}", json={"clear_folder": True}, headers=ORIGIN)
+    out = await client.patch(
+        f"/api/v1/notes/{n['id']}", json={"clear_folder": True}, headers=ORIGIN
+    )
     assert out.json()["data"]["folder_id"] is None
     assert (await client.get(f"/api/v1/notes/{n['id']}")).json()["data"]["folder_id"] is None
 

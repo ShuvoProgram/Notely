@@ -195,6 +195,11 @@ class NotionProvider(RestOAuthProvider):
                 return Verification.failed(f"Page title is “{title}”, not what was requested")
             return Verification.verified("Page exists in Notion")
 
+        async def archive_page(ctx: ProviderContext, ref: dict[str, Any]) -> None:
+            # Notion's "delete" is archiving: the page moves to Notion's trash (restorable there).
+            async with self.http(ctx) as http:
+                await http.patch(f"/pages/{ref['page_id']}", json={"archived": True})
+
         return [
             ProviderTool(
                 "search_pages",
@@ -222,5 +227,7 @@ class NotionProvider(RestOAuthProvider):
                 create_page,
                 lambda a: f"Create Notion page “{a.title}”",
                 verify=verify_create_page,
+                revert_ref=lambda a, r: {"page_id": r["page_id"]},
+                revert=archive_page,
             ),
         ]

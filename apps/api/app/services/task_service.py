@@ -13,6 +13,7 @@ from app.models.note import Note
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.schemas.tasks import TaskCreate, TaskUpdate
+from app.services import action_journal as journal
 
 
 class TaskService:
@@ -57,6 +58,14 @@ class TaskService:
         )
         self.db.add(task)
         await self.db.flush()
+        journal.record(
+            self.db,
+            kind="task.create",
+            resource_type="task",
+            resource_id=task.id,
+            label=f"Created task “{task.title}”",
+            after=journal.task_snapshot(task),
+        )
         if commit:
             await self.db.commit()
         return task
@@ -68,6 +77,7 @@ class TaskService:
 
     async def update(self, user: User, task_id: uuid.UUID, payload: TaskUpdate) -> Task:
         task = await self.get(user, task_id)
+        before = journal.task_snapshot(task)
         changes = payload.model_dump(exclude_unset=True)
         if changes.pop("clear_due_date", False):
             task.due_date = None
@@ -83,10 +93,39 @@ class TaskService:
             setattr(task, key, value)
         if "status" in changes and changes["status"] is not None:
             task.completed_at = utcnow() if changes["status"] == TaskStatus.done else None
+        old, new = journal.diff(before, journal.task_snapshot(task))
+        if new:
+            journal.record(
+                self.db,
+                kind="task.update",
+                resource_type="task",
+                resource_id=task.id,
+                label=_update_label(task.title, old, new),
+                before=old,
+                after=new,
+            )
         await self.db.commit()
         return task
 
     async def delete(self, user: User, task_id: uuid.UUID) -> None:
         task = await self.get(user, task_id)
+        journal.record(
+            self.db,
+            kind="task.delete",
+            resource_type="task",
+            resource_id=task.id,
+            label=f"Deleted task “{task.title}”",
+            before=journal.task_snapshot(task),
+        )
         await self.db.delete(task)
         await self.db.commit()
+
+
+def _update_label(title: str, before: dict[str, object], after: dict[str, object]) -> str:
+    fields = set(after)
+    if fields <= {"due_date", "due_time"}:
+        when = after.get("due_date") or "no date"
+        return f"Changed the date of “{title}” to {when}"
+    if fields == {"status"}:
+        return f"Marked “{title}” {'done' if after['status'] == 'done' else 'open'}"
+    return f"Updated task “{title}”"

@@ -35,6 +35,7 @@ from app.schemas.notes import (
     TagCreate,
     TagUpdate,
 )
+from app.services import action_journal as journal
 from app.services.email_templates import invitation_html
 from app.services.notification_service import NotificationService
 from app.services.rich_text import EMPTY_DOC, to_plain_text
@@ -219,6 +220,14 @@ class NoteService:
         )
         if payload.tag_ids:
             await self.notes.set_tags(note, await self._resolve_tags(user, payload.tag_ids))
+        journal.record(
+            self.db,
+            kind="note.create",
+            resource_type="note",
+            resource_id=note.id,
+            label=f"Created note “{note.title or 'Untitled'}”",
+            after=journal.note_snapshot(note),
+        )
         if commit:
             await self.db.commit()
         else:
@@ -241,6 +250,7 @@ class NoteService:
         # updated_at, or merely opening a note would move it to the top of the list.
         content_changed = False
         before_title, before_body = note.title, note.content_json
+        before_state = journal.note_snapshot(note)
 
         if "title" in changes and changes["title"] is not None:
             new_title = changes["title"].strip()
@@ -277,6 +287,18 @@ class NoteService:
         if content_changed:
             await self._snapshot_if_due(user, note, before_title, before_body)
             await self.notes.mark_updated(note)
+        await self.db.flush()
+        old, new = journal.diff(before_state, journal.note_snapshot(note))
+        if set(new) - {"version"}:
+            journal.record(
+                self.db,
+                kind="note.update",
+                resource_type="note",
+                resource_id=note.id,
+                label=f"Updated note “{note.title or 'Untitled'}”",
+                before=old,
+                after=new,
+            )
         if commit:
             await self.db.commit()
         else:

@@ -68,6 +68,10 @@ class Verification:
 
 # (context, parsed args, handler result) -> Verification. Runs after a successful write.
 ToolVerifier = Callable[[ToolContext, Any, dict[str, Any]], Awaitable[Verification]]
+# Undo for a write: `revert_ref(args, result)` extracts the ids (never content) the reverse
+# call needs; `revert(ctx, ref)` performs it and raises if it couldn't.
+ToolRevertRef = Callable[[Any, dict[str, Any]], dict[str, Any]]
+ToolReverter = Callable[[ToolContext, dict[str, Any]], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,10 @@ class ToolSpec:
     verify: ToolVerifier | None = None
     # What the tool returns, for automations. Empty means "discover from a test run".
     outputs: tuple[OutputField, ...] = ()
+    # Change-journal hooks (app.services.action_journal): how to undo this write, or why not.
+    revert: ToolReverter | None = None
+    revert_ref: ToolRevertRef | None = None
+    irreversible: str | None = None
 
     def __post_init__(self) -> None:
         if (self.args_schema is None) == (self.json_schema is None):

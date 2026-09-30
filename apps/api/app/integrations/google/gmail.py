@@ -230,6 +230,10 @@ class GmailProvider(GoogleProvider):
                 return Verification.failed("The draft was not found in Gmail")
             return Verification.verified("Draft is in your Gmail drafts")
 
+        async def delete_draft(ctx: ProviderContext, ref: dict[str, Any]) -> None:
+            async with self.http(ctx) as http:
+                await http.delete(f"/drafts/{ref['draft_id']}")
+
         async def send_mail(ctx: ProviderContext, a: SendMailArgs) -> dict[str, Any]:
             async with self.http(ctx) as http:
                 sent = (
@@ -293,6 +297,8 @@ class GmailProvider(GoogleProvider):
                 draft_mail,
                 lambda a: f"Draft email “{a.subject}” to {', '.join(a.to)}",
                 verify=verify_draft,
+                revert_ref=lambda a, r: {"draft_id": r["draft_id"]},
+                revert=delete_draft,
             ),
             ProviderTool(
                 "send_mail",
@@ -302,5 +308,6 @@ class GmailProvider(GoogleProvider):
                 send_mail,
                 lambda a: f"Send email “{a.subject}” to {', '.join(a.to)}",
                 verify=verify_send,
+                irreversible="An email that was sent can't be recalled.",
             ),
         ]

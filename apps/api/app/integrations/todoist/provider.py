@@ -288,6 +288,10 @@ class TodoistProvider(RestOAuthProvider):
                 "content": a.content,
             }
 
+        async def delete_task(ctx: ProviderContext, ref: dict[str, Any]) -> None:
+            async with self.http(ctx) as http:
+                await http.delete(f"/tasks/{ref['task_id']}")
+
         async def update_task(ctx: ProviderContext, a: UpdateTaskArgs) -> dict[str, Any]:
             payload: dict[str, Any] = {
                 key: getattr(a, key)
@@ -408,6 +412,8 @@ class TodoistProvider(RestOAuthProvider):
                 lambda a: f"Create Todoist task “{a.content}”",
                 verify=verify_create_task,
                 outputs=(F("task_id", "Task ID"), F("url", "Link", "url"), F("content", "Task")),
+                revert_ref=lambda a, r: {"task_id": r["task_id"]},
+                revert=delete_task,
             ),
             ProviderTool(
                 "update_task",

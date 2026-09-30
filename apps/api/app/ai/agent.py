@@ -51,6 +51,7 @@ from app.db.base import utcnow
 from app.integrations.base.errors import ProviderError, ProviderErrorKind
 from app.models.ai import RiskLevel
 from app.models.user import User
+from app.services import action_journal
 from app.services.audit_service import AuditService
 
 log = get_logger(__name__)
@@ -294,7 +295,10 @@ async def _execute(ctx: AgentContext, call: ValidatedCall, writer: Any) -> dict[
                 )
             await connections.refresh_if_needed(ctx.user, connection)
             tool_ctx.credential = connections.vault.load(connection).access_token
-        result = await spec.handler(tool_ctx, call.args)
+        # Everything this tool changes is journaled against the run (reversible from Activity).
+        with action_journal.batch("ai_run", ctx.run_id, ctx.user, source_ref=call.call_id):
+            result = await spec.handler(tool_ctx, call.args)
+            action_journal.record_tool_call(ctx.db, spec, call.args, result)
         status = "completed"
         if "plan" in spec.tags and isinstance(result.get("plan"), dict):
             writer({"type": "plan", "call_id": call.call_id, **result["plan"]})
