@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.ai.actions import NoteActionRequest, NoteActionService
 from app.ai.byo import model_as_dict
+from app.ai.inline_edit import InlineEditRequest, InlineEditService
 from app.ai.llm import provider_name
 from app.ai.runner import AIRunner, AIThreadService, launch_run
 from app.ai.streams import hub
@@ -168,6 +169,26 @@ async def note_action(
 ) -> StreamingResponse:
     """Run a note action (summarize, improve, key points, extract tasks, custom). Streams SSE."""
     return sse_response(NoteActionService(db, settings).run(ctx.user, payload))
+
+
+@router.post("/edit", dependencies=[Depends(ai_limit), Depends(tenant_ai_limit)])
+async def inline_edit(
+    payload: InlineEditRequest, ctx: CurrentAuth, db: DbDep, settings: SettingsDep
+) -> StreamingResponse:
+    """Suggest an edit for a selection in a note (streamed). Never writes: the editor shows a
+    diff and the person accepts or rejects it."""
+    await require_feature(db, "ai_enabled", "The AI assistant is turned off right now.")
+    await enforce_ai_daily_limit(db, ctx.user.id)
+    service = InlineEditService(db, settings)
+    stream = service.run(ctx.user, payload)
+    first = await anext(stream)  # permission errors surface as a normal HTTP error
+
+    async def events() -> AsyncIterator[dict[str, Any]]:
+        yield first
+        async for event in stream:
+            yield event
+
+    return sse_response(events())
 
 
 @router.get("/threads", response_model=Envelope[list[ThreadOut]])

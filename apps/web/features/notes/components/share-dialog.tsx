@@ -62,6 +62,12 @@ export function ShareDialog({ note, open, onOpenChange }: { note: Note; open: bo
     void queryClient.invalidateQueries({ queryKey: ["notes", "list"] });
   };
 
+  // Who has access changes from elsewhere too (an invitee signs up, someone leaves): show the
+  // current list whenever the dialog opens rather than what was cached when the note loaded.
+  React.useEffect(() => {
+    if (open) void queryClient.invalidateQueries({ queryKey: noteKeys.detail(note.id) });
+  }, [open, note.id, queryClient]);
+
   const typed = email.trim().toLowerCase();
   const suggestions = useQuery({
     queryKey: ["notes", "share-suggestions", typed],

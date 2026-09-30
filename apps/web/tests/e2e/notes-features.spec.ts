@@ -155,21 +155,22 @@ test("share a note by email: the guest sees it under Shared and cannot edit as a
 
   await page.getByRole("button", { name: /^Share( \d+)?$/ }).click();
   const share = page.getByRole("dialog", { name: /Share/ });
-  await share.getByLabel("Email address").fill(guestEmail);
-  await share.getByRole("button", { name: "Invite" }).click();
+  await share.getByLabel("Add people by email").fill(guestEmail);
+  await share.getByRole("button", { name: "Share", exact: true }).click();
   await expect(share.getByText(guestEmail)).toBeVisible();
-  // No SMTP in the test environment: the app says so, with the exact fix, instead of "sent".
-  await expect(page.getByText("Unable to send invitation")).toBeVisible();
-  await expect(share.getByText(/SMTP_HOST/)).toBeVisible();
-  await expect(share.getByText("Invited — waiting for them to open the email")).toBeVisible();
-  await expect(page.getByText("Unable to send invitation")).toBeHidden({ timeout: 15_000 }); // toast gone (it can cover the form on phones)
-  // A second click for the same address is refused rather than sending twice.
-  await share.getByLabel("Email address").fill(guestEmail);
-  await share.getByRole("button", { name: "Invite" }).click();
-  await expect(page.getByText("Invitation already sent")).toBeVisible();
-  await share.getByLabel("Email address").fill("not an email");
-  await share.getByRole("button", { name: "Invite" }).click();
-  await expect(share.getByText("Enter a valid email address.")).toBeVisible();
+  // No SMTP in the test environment: the app says the email didn't go out (in plain words,
+  // not server settings) and that the invitation still works when they sign up.
+  await expect(page.getByText("Invitation saved, but the email wasn't sent")).toBeVisible();
+  await expect(share.getByText(/Email isn't set up on this Notely server/)).toBeVisible();
+  await expect(share.getByText(/Invitation pending/)).toBeVisible();
+  await expect(page.getByText("Invitation saved, but the email wasn't sent")).toBeHidden({ timeout: 15_000 }); // toast gone (it can cover the form on phones)
+  // Someone already on the note isn't invited twice.
+  await share.getByLabel("Add people by email").fill(guestEmail);
+  await share.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(share.getByText("They're already on this note. Change their permission below.")).toBeVisible();
+  await share.getByLabel("Add people by email").fill("not an email");
+  await share.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(share.getByText(/Enter an email address/)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: /Shared with 1/ })).toBeVisible();
 
@@ -192,9 +193,10 @@ test("share a note by email: the guest sees it under Shared and cannot edit as a
 
   // Owner promotes them to editor; the guest can now type.
   await page.getByRole("button", { name: /^Share( \d+)?$/ }).click();
-  await share.getByLabel(`Role for ${guestEmail}`).click();
+  // Signed up with the invited address: they're a member now, listed by name.
+  await share.getByLabel("Permission for Guest").click();
   await page.getByRole("option", { name: "Can edit" }).click();
-  await expect(share.getByText("Has access")).toBeVisible();
+  await expect(page.getByText("Guest can edit")).toBeVisible();
   await page.keyboard.press("Escape");
   await guest.reload();
   await expect(guest.getByLabel("Note title")).not.toHaveAttribute("readonly", "");

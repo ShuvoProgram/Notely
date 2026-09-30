@@ -940,3 +940,24 @@ html[data-glass="off"] :is(.glass, .glass-2, .glass-3, .liquid-selected) {
   from { transform: translateY(-100%); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
+
+/* Contextual AI edits: the text a suggestion is being written for stays marked until it's
+   accepted or rejected (features/notes/extensions/ai-edit-target.ts). */
+.notely-editor .ai-edit-target {
+  border-radius: 3px;
+  background-color: var(--ai-soft);
+  box-shadow: 0 1px 0 0 color-mix(in oklch, var(--ai) 60%, transparent);
+}
+.notely-editor .ai-edit-working {
+  animation: notely-ai-pulse 1.4s ease-in-out infinite;
+}
+@keyframes notely-ai-pulse {
+  50% {
+    background-color: color-mix(in oklch, var(--ai-soft) 40%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notely-editor .ai-edit-working {
+    animation: none;
+  }
+}

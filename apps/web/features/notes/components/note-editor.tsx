@@ -394,6 +394,8 @@ function LoadedNoteEditor({ note }: { note: Note }) {
           editable={!readOnly}
           onChange={onBodyChange}
           onAskAI={readOnly ? undefined : (action) => setAiAction(action)}
+          aiNoteId={inTrash ? undefined : note.id}
+          aiCanEdit={!readOnly}
           onReady={(editor) => {
             editorRef.current = editor;
             setEditorInstance(editor);
