@@ -27,6 +27,7 @@ from app.ai.catalog import (
     provider_spec,
     spec_for,
 )
+from app.ai.errors import own_key_message
 
 __all__ = [
     "CATALOG",
@@ -175,26 +176,7 @@ async def _probe_tools(model: BaseChatModel) -> bool:
 
 
 def classify_error(exc: Exception) -> str:
-    status = getattr(exc, "status_code", None) or getattr(
-        getattr(exc, "response", None), "status_code", None
-    )
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    if status == 401 or "authentication" in name or "api key" in text or "unauthorized" in text:
-        return "The API key was rejected. Check the key and the provider."
-    if status == 402 or "insufficient credits" in text or "payment" in text:
-        return "The provider says this key has no credit for that model."
-    if status == 403 or "permission" in name:
-        return "The API key does not have access to this model."
-    if status == 404 or "notfound" in name or "does not exist" in text or "not found" in text:
-        return "That model name was not found at the provider."
-    if status == 429 or "ratelimit" in name or "quota" in text:
-        return "The provider is rate-limiting or out of quota for this key."
-    if "timeout" in name or "timed out" in text:
-        return "The provider did not answer in time."
-    if "connect" in name or "connection" in text or "resolve" in text or status in (502, 503):
-        return "Could not reach the provider. Check the base URL and your network."
-    return "The provider returned an error. Check the model name and try again."
+    return own_key_message(exc)
 
 
 # Model ids that are not chat models and would only confuse the picker.

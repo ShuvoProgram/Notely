@@ -33,6 +33,7 @@ from app.ai.agent import AgentContext, build_graph
 from app.ai.byo import BYOModel
 from app.ai.cancel import CANCEL_TTL, cancel_key
 from app.ai.checkpoint import get_checkpointer
+from app.ai.errors import classify, own_key_message, workspace_message
 from app.ai.llm import get_chat_model, provider_name, resolve_model_alias
 from app.ai.pacing import is_transient, slot_key
 from app.ai.policy import ToolPolicyEngine
@@ -598,7 +599,20 @@ class AIRunner:
                 await self._finish(run, RunStatus.cancelled)
                 yield {"type": "done", "run_id": str(run_id), "status": "cancelled", "usage": usage}
                 return
-            log.exception("ai_run_failed", extra={"run_id": str(run_id)})
+            error = classify(exc)
+            # The category and HTTP status say who has to fix it (admin key/billing, gateway
+            # down, the conversation itself); the traceback carries the provider's own text.
+            log.exception(
+                "ai_run_failed",
+                extra={
+                    "run_id": str(run_id),
+                    "error_kind": error.kind.value,
+                    "error_status": error.status,
+                    "error_type": error.exc_type,
+                    "model": model_label,
+                    "own_key": byo is not None,
+                },
+            )
             _observe_drive(model_label, "failed", drive_timer, usage)
             failure = failure_message(exc, byo)
             # The readable reason is kept on the run so a reloaded page can still show it.
@@ -778,19 +792,16 @@ STOP_GRACE_SECONDS = 5.0
 def failure_message(exc: BaseException, byo: BYOModel | None) -> str:
     """Why a run failed, for the user: categorised, never raw vendor text or the key."""
     if byo is not None:
-        from app.ai.byo import classify_error
-
-        reason = classify_error(exc) if isinstance(exc, Exception) else ""
         if is_transient(exc):
             return (
                 f"Your own model ({byo.model}) is rate-limiting or overloaded and kept refusing "
                 "after several retries. Wait a minute and retry, or use a key with a higher "
                 "quota (Settings → AI)."
             )
-        return f"Your own model ({byo.model}) failed: {reason} Check Settings → AI."
+        return f"Your own model ({byo.model}) failed: {own_key_message(exc)} Check Settings → AI."
     if is_transient(exc):
         return "The AI provider is busy right now. Wait a minute and retry."
-    return "The assistant ran into a problem. Please try again."
+    return workspace_message(exc)
 
 
 def _busy() -> Conflict:
